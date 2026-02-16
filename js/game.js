@@ -146,6 +146,13 @@ const Game = (() => {
             state.maxStorage += def.provides.storage;
         }
 
+        // Start the day timer when the castle is placed
+        if (type === 'castle' && !state.started) {
+            state.started = true;
+            state.paused = false;
+            if (callbacks.onNotification) callbacks.onNotification('The days begin! Manage your resources wisely.', 'info');
+        }
+
         if (callbacks.onResourceChange) callbacks.onResourceChange();
         if (callbacks.onNotification) callbacks.onNotification(`${def.name} built!`, 'success');
 

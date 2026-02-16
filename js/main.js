@@ -31,7 +31,7 @@
     // Welcome screen
     UI.getStartBtn().addEventListener('click', () => {
         UI.hideWelcome();
-        Game.start();
+        // Don't start the day timer yet — it begins when the castle is placed
         UI.updateResources();
         UI.showNotification('Place your Castle to begin!', 'info');
     });
@@ -44,7 +44,7 @@
         UI.getGameOverEl().classList.add('hidden');
         UI.updateResources();
         UI.updateBuildingButtons();
-        Game.start();
+        // Don't start the day timer yet — it begins when the castle is placed
         UI.showNotification('New game! Place your Castle.', 'info');
         // Re-center camera
         Renderer.setCamera(
