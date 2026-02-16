@@ -8,8 +8,8 @@ const MAP_HEIGHT = 60;  // tiles
 const MAP_PIXEL_W = MAP_WIDTH * TILE_SIZE;
 const MAP_PIXEL_H = MAP_HEIGHT * TILE_SIZE;
 
-// Time: 1 real second = 1 game day at 1x speed
-const BASE_DAY_DURATION = 1000; // ms per day at 1x
+// Time: 1 real minute = 1 game day at 1x speed
+const BASE_DAY_DURATION = 60000; // ms per day at 1x
 
 // Terrain types
 const TERRAIN = {
