@@ -13,7 +13,7 @@ const Game = (() => {
             wood: 50,
             stone: 30,
             iron: 0,
-            food: 20,
+            food: 40,
         },
         maxStorage: 100,  // Base storage, increases with warehouse
         populationCap: 0,
@@ -40,7 +40,7 @@ const Game = (() => {
                 wood: 50,
                 stone: 30,
                 iron: 0,
-                food: 20,
+                food: 40,
             },
             maxStorage: 100,
             populationCap: 0,
