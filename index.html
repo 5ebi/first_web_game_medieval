@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lords of the Keep - Medieval Castle Builder</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+
+        <!-- Resource Bar -->
+        <div id="resource-bar">
+            <div class="resource" title="Wood">
+                <span class="resource-icon" id="icon-wood"></span>
+                <span id="res-wood">50</span>
+            </div>
+            <div class="resource" title="Stone">
+                <span class="resource-icon" id="icon-stone"></span>
+                <span id="res-stone">30</span>
+            </div>
+            <div class="resource" title="Iron">
+                <span class="resource-icon" id="icon-iron"></span>
+                <span id="res-iron">0</span>
+            </div>
+            <div class="resource" title="Food">
+                <span class="resource-icon" id="icon-food"></span>
+                <span id="res-food">20</span>
+            </div>
+            <div class="resource" title="Population">
+                <span class="resource-icon" id="icon-pop"></span>
+                <span id="res-pop">0 / 10</span>
+            </div>
+            <div class="resource" title="Day">
+                <span class="resource-icon" id="icon-day"></span>
+                <span id="res-day">Day 1</span>
+            </div>
+            <div id="game-speed">
+                <button id="speed-pause" class="speed-btn" title="Pause">&#9646;&#9646;</button>
+                <button id="speed-1x" class="speed-btn active" title="Normal speed">1x</button>
+                <button id="speed-2x" class="speed-btn" title="Fast">2x</button>
+                <button id="speed-3x" class="speed-btn" title="Very fast">3x</button>
+            </div>
+        </div>
+
+        <!-- Building Menu -->
+        <div id="building-menu">
+            <h3>Buildings</h3>
+            <div id="building-list"></div>
+        </div>
+
+        <!-- Info Panel (shows when clicking a placed building) -->
+        <div id="info-panel" class="hidden">
+            <button id="info-close">&times;</button>
+            <h3 id="info-title">Building</h3>
+            <div id="info-content"></div>
+        </div>
+
+        <!-- Tooltip -->
+        <div id="tooltip" class="hidden"></div>
+
+        <!-- Notification area -->
+        <div id="notifications"></div>
+
+        <!-- Game Over overlay -->
+        <div id="game-over" class="hidden">
+            <div class="overlay-box">
+                <h2>Your People Have Starved!</h2>
+                <p>Your village ran out of food and your people have abandoned the settlement.</p>
+                <button id="restart-btn">Try Again</button>
+            </div>
+        </div>
+
+        <!-- Welcome overlay -->
+        <div id="welcome-screen">
+            <div class="overlay-box">
+                <h1>Lords of the Keep</h1>
+                <p class="subtitle">A Medieval Castle Builder</p>
+                <div class="instructions">
+                    <p>You are the lord of a new settlement. Build your castle, gather resources, and grow your village.</p>
+                    <ul>
+                        <li>Click a building in the menu, then click the map to place it</li>
+                        <li>Drag the map to scroll around</li>
+                        <li>Gather wood, stone, and iron to build more</li>
+                        <li>Keep your villagers fed or they will leave!</li>
+                    </ul>
+                </div>
+                <button id="start-btn">Begin Your Reign</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/constants.js"></script>
+    <script src="js/sprites.js"></script>
+    <script src="js/map.js"></script>
+    <script src="js/buildings.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/renderer.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
