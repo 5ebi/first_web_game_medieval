@@ -93,14 +93,16 @@ const GameMap = (() => {
         }
 
         // Ensure a clearing in the center for castle placement
+        // (everything unbuildable becomes grass, sand included)
         const cx = Math.floor(MAP_WIDTH / 2);
         const cy = Math.floor(MAP_HEIGHT / 2);
+        const unbuildable = [TERRAIN.WATER, TERRAIN.SAND, TERRAIN.FOREST, TERRAIN.STONE_DEPOSIT];
         for (let dy = -6; dy <= 6; dy++) {
             for (let dx = -6; dx <= 6; dx++) {
                 const tx = cx + dx;
                 const ty = cy + dy;
                 if (tx >= 0 && tx < MAP_WIDTH && ty >= 0 && ty < MAP_HEIGHT) {
-                    if (terrain[ty][tx] === TERRAIN.WATER || terrain[ty][tx] === TERRAIN.FOREST || terrain[ty][tx] === TERRAIN.STONE_DEPOSIT) {
+                    if (unbuildable.includes(terrain[ty][tx])) {
                         terrain[ty][tx] = TERRAIN.GRASS;
                     }
                 }
