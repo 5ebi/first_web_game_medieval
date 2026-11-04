@@ -3,6 +3,11 @@
 Vanilla JS + HTML5 canvas game, no build step, mobile-first. Scripts are classic
 `<script>` files sharing globals (see the order in `index.html`).
 
+The owner writes in (Swiss) German: reply in German. Code, UI text, commits and
+docs are English.
+
+Status, decisions, open TODOs and gotchas: @ROADMAP.md
+
 ## Run
 
 ```sh
@@ -11,7 +16,18 @@ python3 -m http.server 8123   # http://127.0.0.1:8123/index.html
 
 Prefer http over `file://`: Chrome blocks the bundled font on `file://`.
 
-## Test with the MCP servers in `.mcp.json`
+## Regression tests
+
+```sh
+sh tests/run-all.sh   # starts a server if needed; logs and screenshots in tests/out/
+```
+
+Plain Playwright scripts (pre-installed in cloud sessions), one per area: `save`,
+`touch`, `mouse`, `placement`, `feedback`, `e2e-phone`, `perf`, `screenshots`.
+Shared helpers in `tests/helpers.js` (`URL` from `GAME_URL`, `assert`, `out()`,
+`seedRandom` for a fixed map). Add checks there when you change behaviour.
+
+## Explore with the MCP servers in `.mcp.json`
 
 | Server | Browser | Use it for |
 |---|---|---|
@@ -34,6 +50,7 @@ overlays. For the game world, read state with `browser_evaluate` /
 
 ## Before pushing UI changes
 
+- `sh tests/run-all.sh` passes.
 - Phone portrait, phone landscape and desktop: no console errors, nothing cut off.
 - Touch: tap a card → ghost on a free spot → **Build**; drag the map; swipe the building bar.
 - Reload → **Continue** restores buildings, day and speed.

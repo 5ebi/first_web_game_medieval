@@ -79,7 +79,10 @@ offers after you approve them once:
 
 Both run headless and use Google Chrome locally (or `CHROME_PATH` if set). To
 watch the browser, set `PLAYWRIGHT_MCP_HEADLESS=false`; for another phone, set
-`PLAYWRIGHT_MCP_DEVICE` (e.g. `"Pixel 7"`). Notes for the agent are in `CLAUDE.md`.
+`PLAYWRIGHT_MCP_DEVICE` (e.g. `"Pixel 7"`). Notes for the agent are in `CLAUDE.md`,
+the plan and open TODOs in `ROADMAP.md`.
+
+Regression tests (Playwright, phone + desktop): `sh tests/run-all.sh`.
 
 ## Deploy
 

@@ -1,2 +1,4 @@
 # Screenshots and snapshots written by the Playwright MCP server
 .playwright-mcp/
+# Output of tests/run-all.sh (screenshots, logs)
+tests/out/
