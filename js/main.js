@@ -6,6 +6,7 @@
     const canvas = document.getElementById('game-canvas');
 
     // Initialize systems
+    Lang.applyDom();
     Renderer.init(canvas);
     UI.init();
 
@@ -44,7 +45,7 @@
         UI.updateResources();
         UI.updateZoomLabel();
         UI.selectBuilding('castle');
-        UI.showNotification('Place your Castle to begin! The calendar starts once it stands.', 'info');
+        UI.showNotification(t('g.start'), 'info');
     }
 
     function continueGame() {
@@ -63,7 +64,7 @@
         UI.getGameOverEl().classList.add('hidden');
         UI.updateResources();
         UI.updateZoomLabel();
-        UI.showNotification('Welcome back, my Lord.', 'success');
+        UI.showNotification(t('g.welcomeback'), 'success');
     }
 
     // Welcome screen

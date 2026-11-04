@@ -44,7 +44,14 @@ const UI = (() => {
             canvas: $('game-canvas'),
             pauseBanner: $('pause-banner'),
             muteBtn: $('mute-btn'),
-            musicBtn: $('music-btn'),
+            settingsBtn: $('settings-btn'),
+            settingsScreen: $('settings-screen'),
+            settingsClose: $('settings-close'),
+            settingsHelp: $('settings-help'),
+            settingsNew: $('settings-new'),
+            langBtns: Array.from(document.querySelectorAll('.lang-btn')),
+            toggleMusic: $('toggle-music'),
+            toggleSfx: $('toggle-sfx'),
             menuBtn: $('menu-btn'),
             helpBtn: $('help-btn'),
             helpScreen: $('help-screen'),
@@ -62,6 +69,7 @@ const UI = (() => {
         buildBuildingMenu();
         setupSpeedButtons();
         setupTopbarButtons();
+        setupSettings();
         setupEventListeners();
         setupMinimap();
         updateInsets();
@@ -69,6 +77,9 @@ const UI = (() => {
 
         els.infoClose.addEventListener('click', () => hideInfo());
         els.helpClose.addEventListener('click', () => { els.helpScreen.classList.add('hidden'); AudioSys.play('click'); });
+
+        Lang.onChange(onLanguageChanged);
+        syncSettingsUI();
     }
 
     // ---------- layout ----------
@@ -85,6 +96,18 @@ const UI = (() => {
         }
     }
 
+    // ---------- language ----------
+    function onLanguageChanged() {
+        Lang.applyDom();
+        buildBuildingMenu();
+        updateResources();
+        updateMuteButton();
+        if (selectedPlaced) showBuildingInfo(selectedPlaced);
+        if (!els.welcome.classList.contains('hidden')) showWelcome();
+        syncSettingsUI();
+        hideTooltip();
+    }
+
     // ---------- resource bar ----------
     function buildResourceIcons() {
         const map = { 'icon-wood': 'wood', 'icon-stone': 'stone', 'icon-iron': 'iron', 'icon-food': 'food', 'icon-pop': 'pop', 'icon-day': 'day', 'icon-storage': 'storage' };
@@ -94,11 +117,14 @@ const UI = (() => {
             el.innerHTML = '';
             el.appendChild(Sprites.drawIcon(name));
         });
+        updateMuteButton();
+    }
+
+    function updateMuteButton() {
+        const muted = AudioSys.isMuted();
         els.muteBtn.innerHTML = '';
-        els.muteBtn.appendChild(Sprites.drawIcon(AudioSys.isMuted() ? 'mute' : 'sound'));
-        els.musicBtn.innerHTML = '';
-        els.musicBtn.appendChild(Sprites.drawIcon('music'));
-        els.musicBtn.classList.toggle('off', !AudioSys.isMusicOn());
+        els.muteBtn.appendChild(Sprites.drawIcon(muted ? 'mute' : 'sound'));
+        els.muteBtn.title = muted ? t('btn.unmute') : t('btn.mute');
     }
 
     // ---------- building menu ----------
@@ -116,7 +142,7 @@ const UI = (() => {
             const text = document.createElement('div');
             text.className = 'b-text';
             text.innerHTML = `
-                <span class="b-name">${def.name}<span class="b-key">${def.hotkey}</span></span>
+                <span class="b-name">${bName(def)}<span class="b-key">${def.hotkey}</span></span>
                 <span class="b-cost">${costHtml(def)}</span>
                 <span class="b-info">${infoString(def)}</span>
             `;
@@ -127,7 +153,7 @@ const UI = (() => {
             btn.addEventListener('click', () => {
                 if (btn.classList.contains('disabled')) {
                     const reason = Game.getUnavailableReason(type);
-                    showNotification(reason || 'Not available', 'warning');
+                    showNotification(reason || t('g.notavailable'), 'warning');
                     AudioSys.play('error');
                     return;
                 }
@@ -137,25 +163,26 @@ const UI = (() => {
             btn.addEventListener('mouseleave', hideTooltip);
             els.buildingList.appendChild(btn);
         });
+        updateBuildingButtons();
     }
 
     function costHtml(def) {
         const parts = [];
-        if (def.cost.wood > 0) parts.push(`<span class="c-wood">${def.cost.wood} wood</span>`);
-        if (def.cost.stone > 0) parts.push(`<span class="c-stone">${def.cost.stone} stone</span>`);
-        if (def.cost.iron > 0) parts.push(`<span class="c-iron">${def.cost.iron} iron</span>`);
-        return parts.length ? parts.join(' · ') : '<span class="c-free">Free</span>';
+        if (def.cost.wood > 0) parts.push(`<span class="c-wood">${def.cost.wood} ${resName('wood')}</span>`);
+        if (def.cost.stone > 0) parts.push(`<span class="c-stone">${def.cost.stone} ${resName('stone')}</span>`);
+        if (def.cost.iron > 0) parts.push(`<span class="c-iron">${def.cost.iron} ${resName('iron')}</span>`);
+        return parts.length ? parts.join(' · ') : `<span class="c-free">${t('free')}</span>`;
     }
 
     function infoString(def) {
         const parts = [];
-        if (def.workers > 0) parts.push(`${def.workers} worker${def.workers > 1 ? 's' : ''}`);
-        if (def.provides.populationCap) parts.push(`+${def.provides.populationCap} villagers`);
-        if (def.provides.storage) parts.push(`+${def.provides.storage} storage`);
-        if (def.provides.productionBonus) parts.push(`+${Math.round(def.provides.productionBonus * 100)}% production`);
+        if (def.workers > 0) parts.push(t(def.workers > 1 ? 'menu.workers' : 'menu.worker', { n: def.workers }));
+        if (def.provides.populationCap) parts.push(t('menu.villagers', { n: def.provides.populationCap }));
+        if (def.provides.storage) parts.push(t('menu.storage', { n: def.provides.storage }));
+        if (def.provides.productionBonus) parts.push(t('menu.bonus', { n: Math.round(def.provides.productionBonus * 100) }));
         if (def.production) {
-            parts.push(`+${def.production.amount} ${def.production.resource}/day`);
-            if (def.production.growthDays) parts.push(`after ${def.production.growthDays}d`);
+            parts.push(t('menu.prod', { n: def.production.amount, res: resName(def.production.resource) }));
+            if (def.production.growthDays) parts.push(t('menu.after', { n: def.production.growthDays }));
         }
         return parts.join(' · ');
     }
@@ -164,13 +191,13 @@ const UI = (() => {
         if (isCompact()) return;
         const def = BUILDINGS[type];
         const reason = Game.getUnavailableReason(type);
-        let html = `<div class="tt-title">${def.name}</div><div class="tt-desc">${def.description}</div>`;
-        html += `<div class="tt-row"><span>Size</span><span>${def.width}×${def.height} tiles</span></div>`;
-        html += `<div class="tt-row"><span>Cost</span><span>${costHtml(def)}</span></div>`;
-        if (def.workers) html += `<div class="tt-row"><span>Workers</span><span>${def.workers} (each eats 1 food/day)</span></div>`;
-        if (def.production?.requires) html += `<div class="tt-row"><span>Needs</span><span>${def.production.requires === 'FOREST' ? 'forest nearby' : 'stone deposit nearby'}</span></div>`;
+        let html = `<div class="tt-title">${bName(def)}</div><div class="tt-desc">${bDesc(def)}</div>`;
+        html += `<div class="tt-row"><span>${t('tt.size')}</span><span>${t('tt.tiles', { w: def.width, h: def.height })}</span></div>`;
+        html += `<div class="tt-row"><span>${t('tt.cost')}</span><span>${costHtml(def)}</span></div>`;
+        if (def.workers) html += `<div class="tt-row"><span>${t('tt.workers')}</span><span>${t('tt.eats', { n: def.workers })}</span></div>`;
+        if (def.production?.requires) html += `<div class="tt-row"><span>${t('tt.needs')}</span><span>${def.production.requires === 'FOREST' ? t('tt.forest') : t('tt.stone')}</span></div>`;
         if (reason) html += `<div class="tt-reason">${reason}</div>`;
-        html += `<div class="tt-hint">Hotkey: ${def.hotkey}</div>`;
+        html += `<div class="tt-hint">${t('tt.hotkey', { k: def.hotkey })}</div>`;
         els.tooltip.innerHTML = html;
         els.tooltip.classList.remove('hidden');
         const r = btn.getBoundingClientRect();
@@ -216,7 +243,6 @@ const UI = (() => {
             btn.classList.toggle('disabled', !available);
             btn.classList.toggle('selected', type === selectedBuilding);
         });
-        // Highlight castle at the very beginning
         const castleBtn = els.buildingList.querySelector('.building-btn[data-type="castle"]');
         if (castleBtn) castleBtn.classList.toggle('pulse', !Game.hasCastle() && selectedBuilding !== 'castle');
     }
@@ -248,29 +274,40 @@ const UI = (() => {
         els.muteBtn.addEventListener('click', () => {
             AudioSys.init();
             const muted = AudioSys.toggleMute();
-            els.muteBtn.innerHTML = '';
-            els.muteBtn.appendChild(Sprites.drawIcon(muted ? 'mute' : 'sound'));
-            els.muteBtn.title = muted ? 'Unmute (M)' : 'Mute (M)';
+            updateMuteButton();
             if (!muted) AudioSys.play('click');
         });
-        els.musicBtn.addEventListener('click', () => {
-            AudioSys.init();
-            const on = AudioSys.toggleMusic();
-            els.musicBtn.classList.toggle('off', !on);
+        els.helpBtn.addEventListener('click', () => {
+            toggleHelp();
             AudioSys.play('click');
         });
-        els.helpBtn.addEventListener('click', () => {
-            els.helpScreen.classList.toggle('hidden');
+        els.settingsBtn.addEventListener('click', () => {
+            toggleSettings();
             AudioSys.play('click');
         });
         els.menuBtn.addEventListener('click', () => {
             AudioSys.play('click');
-            if (confirm('Start a new game? Your current village will be lost.')) {
-                if (onNewGame) onNewGame();
-            }
+            confirmNewGame();
         });
         els.zoomIn.addEventListener('click', () => { Renderer.zoomStep(1); AudioSys.play('click'); updateZoomLabel(); });
         els.zoomOut.addEventListener('click', () => { Renderer.zoomStep(-1); AudioSys.play('click'); updateZoomLabel(); });
+    }
+
+    function confirmNewGame() {
+        if (confirm(t('g.confirmnew'))) {
+            if (onNewGame) onNewGame();
+        }
+    }
+
+    function toggleHelp() {
+        els.settingsScreen.classList.add('hidden');
+        els.helpScreen.classList.toggle('hidden');
+    }
+
+    function toggleSettings() {
+        els.helpScreen.classList.add('hidden');
+        els.settingsScreen.classList.toggle('hidden');
+        if (!els.settingsScreen.classList.contains('hidden')) syncSettingsUI();
     }
 
     function updateZoomLabel() {
@@ -279,6 +316,54 @@ const UI = (() => {
 
     let onNewGame = null;
     function setNewGameHandler(fn) { onNewGame = fn; }
+
+    // ---------- settings dialog ----------
+    function setupSettings() {
+        els.settingsClose.addEventListener('click', () => { els.settingsScreen.classList.add('hidden'); AudioSys.play('click'); });
+        els.settingsScreen.addEventListener('click', (e) => {
+            if (e.target === els.settingsScreen) els.settingsScreen.classList.add('hidden');
+        });
+        els.langBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                AudioSys.play('click');
+                Lang.set(btn.dataset.lang);
+            });
+        });
+        els.toggleMusic.addEventListener('click', () => {
+            AudioSys.init();
+            AudioSys.toggleMusic();
+            AudioSys.play('click');
+            syncSettingsUI();
+        });
+        els.toggleSfx.addEventListener('click', () => {
+            AudioSys.init();
+            AudioSys.toggleSfx();
+            AudioSys.play('click');
+            syncSettingsUI();
+        });
+        els.settingsHelp.addEventListener('click', () => {
+            AudioSys.play('click');
+            toggleHelp();
+        });
+        els.settingsNew.addEventListener('click', () => {
+            AudioSys.play('click');
+            els.settingsScreen.classList.add('hidden');
+            confirmNewGame();
+        });
+    }
+
+    function syncSettingsUI() {
+        els.langBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.lang === Lang.get()));
+        setToggle(els.toggleMusic, AudioSys.isMusicOn());
+        setToggle(els.toggleSfx, AudioSys.isSfxOn());
+    }
+
+    function setToggle(btn, on) {
+        btn.classList.toggle('on', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const label = btn.querySelector('.toggle-label');
+        if (label) label.textContent = on ? t('s.on') : t('s.off');
+    }
 
     // ---------- canvas input ----------
     function getPointerPos(e) {
@@ -291,7 +376,6 @@ const UI = (() => {
         if (!selectedBuilding || !pointerOverCanvas) { placementPreview = null; return; }
         const tile = Renderer.screenToTile(lastPointer.x, lastPointer.y);
         const def = BUILDINGS[selectedBuilding];
-        // center the footprint under the cursor
         const tx = tile.x - Math.floor((def.width - 1) / 2);
         const ty = tile.y - Math.floor((def.height - 1) / 2);
         const check = Game.canPlace(selectedBuilding, tx, ty);
@@ -304,6 +388,10 @@ const UI = (() => {
             screenX: lastPointer.x,
             screenY: lastPointer.y,
         };
+    }
+
+    function anyOverlayOpen() {
+        return !els.welcome.classList.contains('hidden') || !els.gameOver.classList.contains('hidden');
     }
 
     function setupEventListeners() {
@@ -390,7 +478,6 @@ const UI = (() => {
                         AudioSys.play('place');
                         Effects.dust(result.pixelX, result.pixelY, result.width, result.height);
                         const def = BUILDINGS[selectedBuilding];
-                        // Keep selected for rapid placement, unless limited or no longer available
                         if ((def.limit !== null && BuildingManager.countByType(selectedBuilding) >= def.limit) ||
                             !Game.isBuildingAvailable(selectedBuilding)) {
                             deselectBuilding(true);
@@ -423,7 +510,6 @@ const UI = (() => {
         window.addEventListener('touchend', onPointerUp);
         window.addEventListener('touchcancel', onPointerUp);
 
-        // Mouse wheel zoom
         els.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const p = getPointerPos(e);
@@ -432,24 +518,23 @@ const UI = (() => {
             refreshPreview();
         }, { passive: false });
 
-        // Right click to cancel
         els.canvas.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             if (selectedBuilding) deselectBuilding();
             else hideInfo();
         });
 
-        // Keyboard
         document.addEventListener('keydown', (e) => {
             if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-            const overlayOpen = !els.welcome.classList.contains('hidden') || !els.gameOver.classList.contains('hidden');
-            if (!els.helpScreen.classList.contains('hidden') && e.key === 'Escape') {
-                els.helpScreen.classList.add('hidden');
-                return;
-            }
-            if (overlayOpen) return;
-
             const k = e.key;
+
+            // Dialogs that can be closed with Escape
+            if (k === 'Escape') {
+                if (!els.helpScreen.classList.contains('hidden')) { els.helpScreen.classList.add('hidden'); return; }
+                if (!els.settingsScreen.classList.contains('hidden')) { els.settingsScreen.classList.add('hidden'); return; }
+            }
+            if (anyOverlayOpen()) return;
+
             keys.add(k.toLowerCase());
 
             if (k === 'Escape') {
@@ -468,16 +553,17 @@ const UI = (() => {
                 Renderer.zoomStep(-1); updateZoomLabel();
             } else if (k.toLowerCase() === 'm') {
                 els.muteBtn.click();
+            } else if (k.toLowerCase() === 'o') {
+                toggleSettings();
             } else if (k === 'h' || k === 'H' || k === '?') {
-                els.helpScreen.classList.toggle('hidden');
+                toggleHelp();
             } else if (k === 'Delete' || k === 'Backspace') {
                 if (selectedPlaced) tryDemolish(selectedPlaced.id);
             } else if (k === 'c' || k === 'C') {
                 const castle = BuildingManager.getAll().find(b => b.type === 'castle');
                 if (castle) Renderer.centerOn(castle.pixelX + castle.width / 2, castle.pixelY + castle.height / 2);
             } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-                // Building hotkeys
-                const type = BUILD_ORDER.find(t => BUILDINGS[t].hotkey.toLowerCase() === k.toLowerCase());
+                const type = BUILD_ORDER.find(bt => BUILDINGS[bt].hotkey.toLowerCase() === k.toLowerCase());
                 if (type) {
                     if (Game.isBuildingAvailable(type)) selectBuilding(type);
                     else { showNotification(Game.getUnavailableReason(type), 'warning'); AudioSys.play('error'); }
@@ -488,7 +574,7 @@ const UI = (() => {
         window.addEventListener('blur', () => keys.clear());
     }
 
-    // Called every frame: keyboard panning
+    // Called every frame: keyboard panning, minimap, day bar
     function tick(dtSec) {
         let dx = 0, dy = 0;
         if (keys.has('arrowleft')) dx -= 1;
@@ -504,7 +590,6 @@ const UI = (() => {
             minimapFrame = (minimapFrame + 1) % 3;
             if (minimapFrame === 0) Renderer.renderMinimap(minimapCtx, els.minimap.width, els.minimap.height);
         }
-        // Day progress bar
         const gs = Game.getState();
         if (els.dayProgress) els.dayProgress.style.width = (gs.dayProgress * 100).toFixed(1) + '%';
     }
@@ -533,43 +618,44 @@ const UI = (() => {
     // ---------- info panel ----------
     function showBuildingInfo(building) {
         selectedPlaced = building;
-        els.infoTitle.textContent = building.def.name;
-        let html = `<p class="info-desc">${building.def.description}</p>`;
+        els.infoTitle.textContent = bName(building.def);
+        let html = `<p class="info-desc">${bDesc(building.def)}</p>`;
 
         if (building.maxWorkers > 0) {
-            html += `<div class="stat"><span class="stat-label">Workers</span><span>${building.workers} / ${building.maxWorkers}</span></div>`;
+            html += `<div class="stat"><span class="stat-label">${t('info.workers')}</span><span>${building.workers} / ${building.maxWorkers}</span></div>`;
         }
         if (building.def.production) {
             const prod = building.def.production;
             const out = Game.getBuildingOutput(building);
-            const status = building.grown ? (building.active ? '<span class="ok">Active</span>' : '<span class="bad">No workers</span>') : `Growing (${building.growthProgress}/${prod.growthDays} days)`;
-            const bonus = out > prod.amount ? ` <span class="ok">(+${(out - prod.amount).toFixed(1)} bonus)</span>` : '';
-            html += `<div class="stat"><span class="stat-label">Production</span><span>+${prod.amount} ${prod.resource}/day${bonus}</span></div>`;
-            html += `<div class="stat"><span class="stat-label">Status</span><span>${status}</span></div>`;
+            const status = building.grown
+                ? (building.active ? `<span class="ok">${t('info.active')}</span>` : `<span class="bad">${t('info.noworkers')}</span>`)
+                : t('info.growing', { a: building.growthProgress, b: prod.growthDays });
+            const bonus = out > prod.amount ? ` <span class="ok">${t('info.bonus.inline', { n: (out - prod.amount).toFixed(1) })}</span>` : '';
+            html += `<div class="stat"><span class="stat-label">${t('info.production')}</span><span>${t('menu.prod', { n: prod.amount, res: resName(prod.resource) })}${bonus}</span></div>`;
+            html += `<div class="stat"><span class="stat-label">${t('info.status')}</span><span>${status}</span></div>`;
         }
         if (building.def.provides.populationCap) {
-            html += `<div class="stat"><span class="stat-label">Housing</span><span>+${building.def.provides.populationCap} villagers</span></div>`;
+            html += `<div class="stat"><span class="stat-label">${t('info.housing')}</span><span>${t('menu.villagers', { n: building.def.provides.populationCap })}</span></div>`;
         }
         if (building.def.provides.storage) {
-            html += `<div class="stat"><span class="stat-label">Storage</span><span>+${building.def.provides.storage}</span></div>`;
+            html += `<div class="stat"><span class="stat-label">${t('info.storage')}</span><span>+${building.def.provides.storage}</span></div>`;
         }
         if (building.def.provides.productionBonus) {
-            html += `<div class="stat"><span class="stat-label">Bonus</span><span>+${Math.round(building.def.provides.productionBonus * 100)}% wood, stone, iron</span></div>`;
+            html += `<div class="stat"><span class="stat-label">${t('info.bonus')}</span><span>${t('info.bonus.value', { n: Math.round(building.def.provides.productionBonus * 100) })}</span></div>`;
         }
-        html += `<div class="stat"><span class="stat-label">Built on</span><span>Day ${building.dayPlaced}</span></div>`;
+        html += `<div class="stat"><span class="stat-label">${t('info.built')}</span><span>${t('info.day', { n: building.dayPlaced })}</span></div>`;
         els.infoContent.innerHTML = html;
 
-        // Actions
         els.infoActions.innerHTML = '';
         if (building.type !== 'castle') {
             const refund = ['wood', 'stone', 'iron']
                 .map(r => [r, Math.floor(building.def.cost[r] * DEMOLISH_REFUND)])
                 .filter(([, a]) => a > 0)
-                .map(([r, a]) => `+${a} ${r}`).join(', ');
+                .map(([r, a]) => `+${a} ${resName(r)}`).join(', ');
             const btn = document.createElement('button');
             btn.className = 'danger-btn';
-            btn.textContent = refund ? `Demolish (${refund})` : 'Demolish';
-            btn.title = 'Delete key';
+            btn.textContent = refund ? t('info.demolish.refund', { r: refund }) : t('info.demolish');
+            btn.title = t('info.demolish.title');
             btn.addEventListener('click', () => tryDemolish(building.id));
             els.infoActions.appendChild(btn);
         }
@@ -614,22 +700,20 @@ const UI = (() => {
         els.resIron.innerHTML = fmt(gs.resources.iron, rates.iron);
         els.resFood.innerHTML = fmt(gs.resources.food, foodNet);
         els.resPop.textContent = `${gs.populationUsed} / ${gs.populationCap}`;
-        els.resDay.textContent = `Day ${gs.day}`;
+        els.resDay.textContent = t('res.day', { n: gs.day });
         if (els.storageLabel) els.storageLabel.textContent = `${gs.maxStorage}`;
 
-        // Storage full highlighting
         ['wood', 'stone', 'iron', 'food'].forEach(r => {
             const el = els['res' + r[0].toUpperCase() + r.slice(1)];
             el.parentElement.classList.toggle('full', gs.resources[r] >= gs.maxStorage - 0.01);
-            el.parentElement.title = `${r[0].toUpperCase() + r.slice(1)}: ${Math.floor(gs.resources[r])} / ${gs.maxStorage} storage`;
+            el.parentElement.title = t('res.storage.value', { name: t('res.' + r[0].toUpperCase() + r.slice(1)), v: Math.floor(gs.resources[r]), max: gs.maxStorage });
         });
         els.resFood.parentElement.classList.toggle('danger', gs.starvationDays > 0 || (foodNet < 0 && gs.resources.food < -foodNet * 3));
-        els.resPop.parentElement.title = `${gs.populationUsed} villagers working of ${gs.populationCap} housed. Free: ${Game.getFreeWorkers()}. Workers eat 1 food/day.`;
+        els.resPop.parentElement.title = t('res.pop.title', { used: gs.populationUsed, cap: gs.populationCap, free: Game.getFreeWorkers() });
 
-        // Goal
         const next = Game.getNextMilestone();
         if (els.goalText) {
-            els.goalText.textContent = next ? next.text : 'All goals achieved. Long live the Lord!';
+            els.goalText.textContent = next ? t('ms.' + next.id) : t('menu.goal.done');
             els.goalCount.textContent = `${gs.milestones.length}/${MILESTONES.length}`;
         }
 
@@ -640,11 +724,8 @@ const UI = (() => {
     // ---------- notifications ----------
     const notifSounds = { warning: 'warning', danger: 'warning', success: null, grown: 'grown', info: null };
     function showNotification(message, type = 'info') {
-        // avoid duplicates stacking up
         const existing = Array.from(els.notifications.children).find(n => n.dataset.msg === message);
-        if (existing) {
-            existing.remove();
-        }
+        if (existing) existing.remove();
         const div = document.createElement('div');
         div.className = `notification ${type}`;
         div.dataset.msg = message;
@@ -662,7 +743,7 @@ const UI = (() => {
     function showMilestone(m) {
         const div = document.createElement('div');
         div.className = 'notification milestone';
-        div.innerHTML = `<span class="m-label">Milestone</span> ${m.text}`;
+        div.innerHTML = `<span class="m-label">${t('g.milestone')}</span> ${t('ms.' + m.id)}`;
         els.notifications.appendChild(div);
         div.style.animationDelay = `0s, 4.5s`;
         setTimeout(() => div.remove(), 5000);
@@ -674,10 +755,10 @@ const UI = (() => {
     function showGameOver() {
         const gs = Game.getState();
         els.gameOverStats.innerHTML = `
-            <div class="stat"><span class="stat-label">Days ruled</span><span>${gs.day}</span></div>
-            <div class="stat"><span class="stat-label">Buildings raised</span><span>${gs.stats.built}</span></div>
-            <div class="stat"><span class="stat-label">Most villagers at work</span><span>${gs.stats.maxPop}</span></div>
-            <div class="stat"><span class="stat-label">Milestones</span><span>${gs.milestones.length} / ${MILESTONES.length}</span></div>
+            <div class="stat"><span class="stat-label">${t('go.days')}</span><span>${gs.day}</span></div>
+            <div class="stat"><span class="stat-label">${t('go.built')}</span><span>${gs.stats.built}</span></div>
+            <div class="stat"><span class="stat-label">${t('go.pop')}</span><span>${gs.stats.maxPop}</span></div>
+            <div class="stat"><span class="stat-label">${t('go.ms')}</span><span>${gs.milestones.length} / ${MILESTONES.length}</span></div>
         `;
         els.gameOver.classList.remove('hidden');
         deselectBuilding(true);
@@ -693,7 +774,7 @@ const UI = (() => {
         const info = Game.getSaveInfo();
         if (info) {
             els.continueBtn.classList.remove('hidden');
-            els.continueBtn.textContent = `Continue (Day ${info.day}, ${info.buildings} buildings)`;
+            els.continueBtn.textContent = t('w.continue', { day: info.day, n: info.buildings });
         } else {
             els.continueBtn.classList.add('hidden');
         }

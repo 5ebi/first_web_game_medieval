@@ -16,6 +16,7 @@ Turn your sound on: music, ambience and effects are all synthesized in the brows
 - Every building has a **hotkey** (shown in the menu)
 - Click a placed building for details or to **demolish** it (50% refund, **Del** key)
 - Progress is **saved automatically**; use *Continue* on the title screen
+- **Settings** (gear icon or **O**): language (English / Deutsch), music on/off, sound effects on/off. The language follows your browser the first time and is remembered afterwards.
 
 ### Buildings
 
@@ -50,6 +51,8 @@ Modules in `js/`:
 | File | Purpose |
 |---|---|
 | `constants.js` | Balance, building definitions, milestones, palettes |
+| `settings.js` | Persisted preferences (language, audio) |
+| `i18n.js` | English and German strings, `t()` helper |
 | `audio.js` | Procedural sound effects, ambient wind/birds, music loop |
 | `sprites.js` | Pixel-art tiles, buildings, villagers, icons |
 | `map.js` | Seeded terrain generation |
@@ -63,4 +66,4 @@ Modules in `js/`:
 
 ## Deploy
 
-Push to `main` and enable GitHub Pages (Settings → Pages → Source: GitHub Actions). The included workflow auto-deploys.
+Push to `main`; the included workflow deploys to GitHub Pages and switches the Pages source to "GitHub Actions" on its first run (if the token lacks permission, set it once by hand under Settings → Pages → Source).

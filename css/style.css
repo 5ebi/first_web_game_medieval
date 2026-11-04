@@ -645,7 +645,7 @@ button {
     display: none !important;
 }
 
-#welcome-screen, #game-over, #help-screen {
+#welcome-screen, #game-over, #help-screen, #settings-screen {
     position: absolute;
     inset: 0;
     background: rgba(0, 0, 0, 0.78);
@@ -977,4 +977,168 @@ kbd {
 
     .overlay-box h1 { font-size: 28px; }
     .help-cols { grid-template-columns: 1fr; gap: 14px; }
+}
+
+/* ---------- Settings dialog ---------- */
+.settings-box {
+    max-width: 420px;
+    text-align: left;
+    padding: 28px 32px 24px;
+}
+
+.settings-box h2 {
+    color: var(--gold-bright);
+    text-align: center;
+    margin-bottom: 18px;
+}
+
+.setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    font-size: 14px;
+}
+
+.setting-row:last-of-type {
+    border-bottom: none;
+}
+
+.setting-label {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.seg {
+    display: inline-flex;
+    border: 1px solid var(--gold);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.overlay-box button.seg-btn,
+.lang-corner button.seg-btn {
+    background: rgba(255,255,255,0.06);
+    border: none;
+    color: var(--text-dim);
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    border-radius: 0;
+    text-shadow: none;
+    transition: background 0.15s, color 0.15s;
+}
+
+.overlay-box button.seg-btn:hover,
+.lang-corner button.seg-btn:hover {
+    background: rgba(255,255,255,0.14);
+    color: var(--text);
+    transform: none;
+}
+
+.overlay-box button.seg-btn.active,
+.lang-corner button.seg-btn.active {
+    background: var(--gold);
+    color: #fff;
+}
+
+.overlay-box button.toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-shadow: none;
+    min-width: 84px;
+    justify-content: flex-end;
+}
+
+.overlay-box button.toggle:hover {
+    background: none;
+    transform: none;
+}
+
+.toggle-knob {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: rgba(0,0,0,0.45);
+    border: 1px solid #6B4F10;
+    transition: background 0.2s, border-color 0.2s;
+    flex: 0 0 40px;
+}
+
+.toggle-knob::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #9a8a68;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.toggle.on .toggle-knob {
+    background: var(--gold);
+    border-color: var(--gold-light);
+}
+
+.toggle.on .toggle-knob::after {
+    transform: translateX(18px);
+    background: #fff;
+}
+
+.toggle.on .toggle-label {
+    color: var(--text);
+}
+
+.settings-actions {
+    margin-top: 18px;
+}
+
+.overlay-box .settings-actions button {
+    font-size: 14px;
+    padding: 9px 18px;
+}
+
+.lang-corner {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: inline-flex;
+    border: 1px solid var(--gold);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.lang-corner .seg-btn {
+    padding: 4px 9px;
+    font-size: 11px;
+}
+
+#pause-banner .pause-title {
+    display: inline;
+    font-size: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    font-weight: inherit;
+    margin-top: 0;
+}
+
+@media (max-width: 760px) {
+    #settings-btn { display: inline-flex; }
+    .settings-box { padding: 22px 18px; }
 }

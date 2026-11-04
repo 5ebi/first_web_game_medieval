@@ -22,6 +22,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Use GitHub Actions as the Pages source
+        # One-time switch away from the legacy "deploy from branch" build so only this workflow deploys.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PUT "repos/${{ github.repository }}/pages" -f build_type=workflow \
+            && echo "Pages source is now GitHub Actions" \
+            || echo "Could not update the Pages source (needs admin). Set it manually: Settings -> Pages -> Source: GitHub Actions"
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

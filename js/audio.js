@@ -8,6 +8,7 @@ const AudioSys = (() => {
     let master, sfxGain, musicGain, ambientGain;
     let muted = false;
     let musicOn = true;
+    let sfxOn = true;
     let started = false;
 
     // Music scheduler state
@@ -33,17 +34,15 @@ const AudioSys = (() => {
     const BASS = [0, 0, 4, 4, 2, 2, 0, 0]; // one per bar, index into SCALE (low)
 
     function loadSettings() {
-        try {
-            const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-            muted = !!s.muted;
-            musicOn = s.musicOn !== false;
-        } catch (e) { /* ignore */ }
+        muted = !!Settings.get('muted');
+        musicOn = Settings.get('musicOn') !== false;
+        sfxOn = Settings.get('sfxOn') !== false;
     }
 
     function saveSettings() {
-        try {
-            localStorage.setItem(SETTINGS_KEY, JSON.stringify({ muted, musicOn }));
-        } catch (e) { /* ignore */ }
+        Settings.set('muted', muted);
+        Settings.set('musicOn', musicOn);
+        Settings.set('sfxOn', sfxOn);
     }
 
     // Must be called from a user gesture (autoplay policy)
@@ -61,7 +60,7 @@ const AudioSys = (() => {
         master.connect(ctx.destination);
 
         sfxGain = ctx.createGain();
-        sfxGain.gain.value = 0.5;
+        sfxGain.gain.value = sfxOn ? 0.5 : 0;
         sfxGain.connect(master);
 
         musicGain = ctx.createGain();
@@ -200,7 +199,7 @@ const AudioSys = (() => {
     };
 
     function play(name) {
-        if (!ctx || muted) return;
+        if (!ctx || muted || !sfxOn) return;
         if (ctx.state === 'suspended') ctx.resume();
         const fn = sfx[name];
         if (fn) fn();
@@ -365,8 +364,20 @@ const AudioSys = (() => {
         return musicOn;
     }
 
+    function setSfx(on) {
+        sfxOn = on;
+        if (sfxGain) sfxGain.gain.setTargetAtTime(on ? 0.5 : 0, now(), 0.02);
+        saveSettings();
+    }
+
+    function toggleSfx() {
+        setSfx(!sfxOn);
+        return sfxOn;
+    }
+
     function isMuted() { return muted; }
     function isMusicOn() { return musicOn; }
+    function isSfxOn() { return sfxOn; }
 
     // Pause ambient/music when tab hidden (saves CPU, avoids surprise noise)
     document.addEventListener('visibilitychange', () => {
@@ -387,5 +398,8 @@ const AudioSys = (() => {
         toggleMusic,
         setMusic,
         isMusicOn,
+        toggleSfx,
+        setSfx,
+        isSfxOn,
     };
 })();

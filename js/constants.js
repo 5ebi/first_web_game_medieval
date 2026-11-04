@@ -196,6 +196,9 @@ const BUILDINGS = {
     },
 };
 
+// Give every definition its own key so translations can be looked up from a def
+Object.keys(BUILDINGS).forEach(k => { BUILDINGS[k].key = k; });
+
 // Build order (for menu display)
 const BUILD_ORDER = [
     'castle', 'warehouse', 'house', 'tavern',

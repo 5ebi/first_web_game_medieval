@@ -355,7 +355,7 @@ const Renderer = (() => {
             drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, placementPreview.reason, '#ffb0a0');
         } else if (placementPreview && placementPreview.valid && placementPreview.screenX !== undefined) {
             const def = BUILDINGS[placementPreview.type];
-            drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, `Click to build ${def.name}`, '#c8ffc0');
+            drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, t('cv.click', { name: bName(def) }), '#c8ffc0');
         }
     }
 
@@ -401,7 +401,7 @@ const Renderer = (() => {
             ctx.fillRect(b.pixelX + 2, b.pixelY + b.height - 12, 44, 10);
             ctx.fillStyle = '#ff9a8a';
             ctx.font = '8px monospace';
-            ctx.fillText('No workers', b.pixelX + 4, b.pixelY + b.height - 4);
+            ctx.fillText(t('cv.noworkers'), b.pixelX + 4, b.pixelY + b.height - 4);
         }
 
         // Growth progress for orchards / farms
@@ -417,7 +417,7 @@ const Renderer = (() => {
             ctx.fillRect(bx + 1, by + 1, (bw - 2) * pct, 5);
             ctx.fillStyle = '#fff';
             ctx.font = '7px monospace';
-            ctx.fillText('growing', bx + 2, by - 2);
+            ctx.fillText(t('cv.growing'), bx + 2, by - 2);
         }
     }
 

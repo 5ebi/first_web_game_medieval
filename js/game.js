@@ -125,24 +125,24 @@ const Game = (() => {
     // Human readable reason why a building can't be built right now (null = ok)
     function getUnavailableReason(type) {
         const def = BUILDINGS[type];
-        if (!def) return 'Unknown building';
+        if (!def) return t('g.unknown');
         if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) {
-            return def.limit === 1 ? 'Already built' : `Limit of ${def.limit} reached`;
+            return def.limit === 1 ? t('g.alreadybuilt') : t('g.limit', { n: def.limit });
         }
-        if (type !== 'castle' && !hasCastle()) return 'Place your Castle first';
+        if (type !== 'castle' && !hasCastle()) return t('g.castlefirst');
         const missing = [];
         ['wood', 'stone', 'iron'].forEach(r => {
-            if (def.cost[r] > state.resources[r]) missing.push(`${def.cost[r] - Math.floor(state.resources[r])} ${r}`);
+            if (def.cost[r] > state.resources[r]) missing.push(`${def.cost[r] - Math.floor(state.resources[r])} ${resName(r)}`);
         });
-        if (missing.length) return `Need ${missing.join(', ')} more`;
+        if (missing.length) return t('g.needmore', { list: missing.join(', ') });
         const free = getFreeWorkers();
-        if (def.workers > free) return `Needs ${def.workers} free villagers (have ${free}). Build a House.`;
+        if (def.workers > free) return t('g.needworkers', { n: def.workers, have: free });
         return null;
     }
 
     function canPlace(type, tileX, tileY) {
         const def = BUILDINGS[type];
-        if (!def) return { ok: false, reason: 'Unknown building type' };
+        if (!def) return { ok: false, reason: t('g.unknown') };
 
         const reason = getUnavailableReason(type);
         if (reason) return { ok: false, reason };
@@ -156,12 +156,12 @@ const Game = (() => {
                     if (t === TERRAIN.WATER || t === TERRAIN.SAND) { water = true; break; }
                 }
             }
-            return { ok: false, reason: water ? 'Cannot build on water or sand' : 'Space is occupied' };
+            return { ok: false, reason: water ? t('g.water') : t('g.occupied') };
         }
 
         if (def.production?.requires) {
             if (!GameMap.hasNearbyResource(tileX, tileY, def.width, def.height, def.production.requires)) {
-                return { ok: false, reason: `Must be near ${def.production.requires === 'FOREST' ? 'a forest' : 'stone deposits'}` };
+                return { ok: false, reason: def.production.requires === 'FOREST' ? t('g.nearforest') : t('g.nearstone') };
             }
         }
 
@@ -198,7 +198,7 @@ const Game = (() => {
 
         if (callbacks.onResourceChange) callbacks.onResourceChange();
         if (callbacks.onBuildingsChanged) callbacks.onBuildingsChanged();
-        notify(`${def.name} built!`, 'success');
+        notify(t('g.built', { name: bName(def) }), 'success');
         checkMilestones();
         save();
 
@@ -206,13 +206,13 @@ const Game = (() => {
     }
 
     function canDemolish(building) {
-        if (!building) return { ok: false, reason: 'Nothing selected' };
-        if (building.type === 'castle') return { ok: false, reason: 'The Castle cannot be demolished' };
+        if (!building) return { ok: false, reason: t('g.notavailable') };
+        if (building.type === 'castle') return { ok: false, reason: t('g.castlenodemolish') };
         if (building.def.provides.populationCap) {
             // Removing housing must not strand working villagers
             const capAfter = state.populationCap - building.def.provides.populationCap;
             if (capAfter < state.populationUsed) {
-                return { ok: false, reason: `Villagers still live here. Free ${state.populationUsed - capAfter} workers first.` };
+                return { ok: false, reason: t('g.stillliving', { n: state.populationUsed - capAfter }) };
             }
         }
         return { ok: true };
@@ -246,8 +246,8 @@ const Game = (() => {
         BuildingManager.remove(id);
         state.stats.demolished++;
 
-        const refundStr = Object.entries(refund).map(([r, a]) => `+${a} ${r}`).join(', ');
-        notify(`${def.name} demolished${refundStr ? ' (' + refundStr + ')' : ''}`, 'info');
+        const refundStr = Object.entries(refund).map(([r, a]) => `+${a} ${resName(r)}`).join(', ');
+        notify(refundStr ? t('g.demolished.refund', { name: bName(def), r: refundStr }) : t('g.demolished', { name: bName(def) }), 'info');
         if (callbacks.onResourceChange) callbacks.onResourceChange();
         if (callbacks.onBuildingsChanged) callbacks.onBuildingsChanged();
         save();
@@ -286,7 +286,7 @@ const Game = (() => {
             if (callbacks.onProduce) callbacks.onProduce(b, res, gained);
             if (gained < amount - 0.001 && !state.storageWarned[res]) {
                 state.storageWarned[res] = true;
-                notify(`Storage full: ${res} is going to waste. Build a Warehouse!`, 'warning');
+                notify(t('g.storagefull', { res: resName(res) }), 'warning');
             }
             if (gained >= amount - 0.001 && state.resources[res] < state.maxStorage * 0.9) {
                 state.storageWarned[res] = false;
@@ -299,7 +299,7 @@ const Game = (() => {
                 b.growthProgress++;
                 if (b.growthProgress >= b.def.production.growthDays) {
                     b.grown = true;
-                    notify(`${b.def.name} is now producing!`, 'grown');
+                    notify(t('g.producing', { name: bName(b.def) }), 'grown');
                 }
             }
         });
@@ -309,7 +309,7 @@ const Game = (() => {
         if (foodNeeded > 0) {
             if (state.resources.food >= foodNeeded) {
                 state.resources.food -= foodNeeded;
-                if (state.starvationDays > 0) notify('Your people are fed again.', 'success');
+                if (state.starvationDays > 0) notify(t('g.fedagain'), 'success');
                 state.starvationDays = 0;
             } else {
                 state.resources.food = 0;
@@ -319,7 +319,7 @@ const Game = (() => {
                     clearSave();
                     if (callbacks.onGameOver) callbacks.onGameOver();
                 } else {
-                    notify(`Your people are starving! (${state.starvationDays}/${STARVATION_LIMIT} days)`, 'danger');
+                    notify(t('g.starving', { a: state.starvationDays, b: STARVATION_LIMIT }), 'danger');
                 }
             }
         }
@@ -329,7 +329,7 @@ const Game = (() => {
         const net = rates.food - foodNeeded;
         if (net < 0 && state.resources.food > 0 && state.resources.food <= -net * 4 && state.day % 3 === 0) {
             const daysLeft = Math.ceil(state.resources.food / -net);
-            notify(`Food runs out in ~${daysLeft} day${daysLeft === 1 ? '' : 's'}! Build food production.`, 'warning');
+            notify(t('g.foodout', { n: daysLeft, unit: daysLeft === 1 ? t('day') : t('days') }), 'warning');
         }
 
         checkMilestones();
