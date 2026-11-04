@@ -5,18 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="theme-color" content="#21160b">
     <title>Lords of the Keep - Medieval Castle Builder</title>
+    <link rel="icon" type="image/svg+xml" href="icon.svg">
     <link rel="preload" href="fonts/Jersey10-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div id="game-container">
-        <canvas id="game-canvas"></canvas>
+        <canvas id="game-canvas" aria-label="Game map"></canvas>
 
         <!-- Top HUD: resources + time controls -->
         <header id="hud">
             <div id="resource-bar">
                 <button type="button" class="resource" data-res="wood" title="Wood">
                     <span class="resource-icon" data-icon="wood"></span>
+                    <span class="sr-only">Wood</span>
                     <span class="res-text">
                         <span class="res-value" id="res-wood">50</span>
                         <span class="res-rate" id="rate-wood"></span>
@@ -25,6 +27,7 @@
                 </button>
                 <button type="button" class="resource" data-res="stone" title="Stone">
                     <span class="resource-icon" data-icon="stone"></span>
+                    <span class="sr-only">Stone</span>
                     <span class="res-text">
                         <span class="res-value" id="res-stone">30</span>
                         <span class="res-rate" id="rate-stone"></span>
@@ -33,6 +36,7 @@
                 </button>
                 <button type="button" class="resource" data-res="iron" title="Iron">
                     <span class="resource-icon" data-icon="iron"></span>
+                    <span class="sr-only">Iron</span>
                     <span class="res-text">
                         <span class="res-value" id="res-iron">0</span>
                         <span class="res-rate" id="rate-iron"></span>
@@ -41,6 +45,7 @@
                 </button>
                 <button type="button" class="resource" data-res="food" title="Food">
                     <span class="resource-icon" data-icon="food"></span>
+                    <span class="sr-only">Food</span>
                     <span class="res-text">
                         <span class="res-value" id="res-food">40</span>
                         <span class="res-rate" id="rate-food"></span>
@@ -49,6 +54,7 @@
                 </button>
                 <button type="button" class="resource" data-res="pop" title="Villagers (working / total)">
                     <span class="resource-icon" data-icon="pop"></span>
+                    <span class="sr-only">Villagers</span>
                     <span class="res-text">
                         <span class="res-value" id="res-pop">0/0</span>
                         <span class="res-rate" id="rate-pop"></span>

@@ -134,11 +134,11 @@ const UI = (() => {
         const parts = [];
         ['wood', 'stone', 'iron'].forEach(res => {
             if (def.cost[res] > 0) {
-                parts.push(`<span class="cost" data-res="${res}"><i class="mini-icon" data-icon="${res}"></i>${def.cost[res]}</span>`);
+                parts.push(`<span class="cost" data-res="${res}"><i class="mini-icon" data-icon="${res}" role="img" aria-label="${res}"></i>${def.cost[res]}</span>`);
             }
         });
         if (def.workers > 0) {
-            parts.push(`<span class="cost" data-res="workers"><i class="mini-icon" data-icon="pop"></i>${def.workers}</span>`);
+            parts.push(`<span class="cost" data-res="workers"><i class="mini-icon" data-icon="pop" role="img" aria-label="villagers"></i>${def.workers}</span>`);
         }
         if (parts.length === 0) parts.push('<span class="cost free">Free</span>');
         return parts.join('');

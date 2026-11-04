@@ -67,6 +67,20 @@ The only asset is the [Jersey 10](https://fonts.google.com/specimen/Jersey+10) p
 - Time does not pass while the tab or app is in the background.
 - The canvas renders at the device pixel ratio, so the pixel art stays sharp on phones.
 
+## Testing with AI agents (MCP)
+
+`.mcp.json` sets up two MCP servers that Claude Code (local or on claude.ai/code)
+offers after you approve them once:
+
+- **Playwright MCP**: drives the game in an emulated iPhone 15 (touch, high DPI):
+  tap through menus, place buildings, take screenshots.
+- **Chrome DevTools MCP**: desktop Chrome for performance traces (with CPU
+  throttling to mimic a slower phone), console errors and Lighthouse.
+
+Both run headless and use Google Chrome locally (or `CHROME_PATH` if set). To
+watch the browser, set `PLAYWRIGHT_MCP_HEADLESS=false`; for another phone, set
+`PLAYWRIGHT_MCP_DEVICE` (e.g. `"Pixel 7"`). Notes for the agent are in `CLAUDE.md`.
+
 ## Deploy
 
 Push to `main` and enable GitHub Pages (Settings → Pages → Source: GitHub Actions). The included workflow auto-deploys.
