@@ -15,6 +15,9 @@ const BASE_DAY_DURATION = 60000; // ms per day at 1x
 // catch-up jumps after the tab was in the background or the phone was locked.
 const MAX_FRAME_MS = 250;
 
+// Production buildings must be within this many tiles of their resource
+const RESOURCE_RADIUS = 5;
+
 // Storage cap for each resource before a warehouse is built
 const BASE_STORAGE = 100;
 

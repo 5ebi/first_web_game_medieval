@@ -78,6 +78,16 @@
             <div id="info-content"></div>
         </div>
 
+        <!-- Placement bar (while a building is selected) -->
+        <div id="placement-bar" class="hidden">
+            <button type="button" id="pb-cancel" aria-label="Cancel building">&times;</button>
+            <div class="pb-text">
+                <span id="pb-name">House</span>
+                <span id="pb-hint" class="pb-hint"></span>
+            </div>
+            <button type="button" id="pb-confirm">Build</button>
+        </div>
+
         <!-- Tooltip -->
         <div id="tooltip" class="hidden"></div>
 
@@ -101,7 +111,7 @@
                 <div class="instructions">
                     <p>You are the lord of a new settlement. Build your castle, gather resources, and grow your village.</p>
                     <ul>
-                        <li class="touch-only">Tap a building in the bar below, then tap the map to place it</li>
+                        <li class="touch-only">Tap a building below, move it with a tap or drag, then press Build</li>
                         <li class="mouse-only">Click a building in the menu, then click the map to place it</li>
                         <li><span class="touch-only">Drag the map with one finger to look around</span><span class="mouse-only">Drag the map (or scroll) to look around</span></li>
                         <li>Gather wood, stone, and iron to build more</li>

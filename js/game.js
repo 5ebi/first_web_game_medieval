@@ -75,36 +75,51 @@ const Game = (() => {
                def.cost.iron <= state.resources.iron;
     }
 
+    const RESOURCE_LABELS = { FOREST: 'trees', STONE_DEPOSIT: 'stone deposits' };
+
+    function getMissingCost(type) {
+        const def = BUILDINGS[type];
+        return ['wood', 'stone', 'iron']
+            .filter(res => def.cost[res] > state.resources[res])
+            .map(res => ({ res, amount: Math.ceil(def.cost[res] - state.resources[res]) }));
+    }
+
+    // Why this building type can't be built anywhere right now, or null
+    function getBuildBlocker(type) {
+        const def = BUILDINGS[type];
+        if (!def) return 'Unknown building type';
+        if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) {
+            return def.limit === 1 ? `You already have a ${def.name}` : `Only ${def.limit} ${def.name} allowed`;
+        }
+        if (type !== 'castle' && BuildingManager.countByType('castle') === 0) {
+            return 'Build your Castle first';
+        }
+        const missing = getMissingCost(type);
+        if (missing.length > 0) {
+            return 'Need ' + missing.map(m => `${m.amount} more ${m.res}`).join(', ');
+        }
+        const freeWorkers = getFreeWorkers();
+        if (def.workers > freeWorkers) {
+            return `Needs ${def.workers} free villagers (${freeWorkers} free). Build a House.`;
+        }
+        return null;
+    }
+
     function canPlace(type, tileX, tileY) {
         const def = BUILDINGS[type];
         if (!def) return { ok: false, reason: 'Unknown building type' };
 
-        // Check limit
-        if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) {
-            return { ok: false, reason: `You can only build ${def.limit} ${def.name}` };
-        }
+        const blocker = getBuildBlocker(type);
+        if (blocker) return { ok: false, reason: blocker };
 
-        // Check affordability
-        if (!canAfford(type)) {
-            return { ok: false, reason: 'Not enough resources' };
-        }
+        // Terrain, map edge and other buildings
+        const areaProblem = GameMap.checkArea(tileX, tileY, def.width, def.height, BuildingManager.getAll());
+        if (areaProblem) return { ok: false, reason: areaProblem };
 
-        // Check available workers
-        const freeWorkers = state.populationCap - state.populationUsed;
-        if (def.workers > freeWorkers) {
-            return { ok: false, reason: `Need ${def.workers} free villagers (have ${freeWorkers})` };
-        }
-
-        // Check terrain
-        if (!GameMap.isBuildable(tileX, tileY, def.width, def.height, BuildingManager.getAll())) {
-            return { ok: false, reason: 'Cannot build here' };
-        }
-
-        // Check resource proximity for production buildings
-        if (def.production?.requires) {
-            if (!GameMap.hasNearbyResource(tileX, tileY, def.width, def.height, def.production.requires)) {
-                return { ok: false, reason: `Must be near ${def.production.requires === 'FOREST' ? 'trees' : 'stone deposits'}` };
-            }
+        // Resource proximity for production buildings
+        const req = def.production?.requires;
+        if (req && !GameMap.hasNearbyResource(tileX, tileY, def.width, def.height, req)) {
+            return { ok: false, reason: `Must be within ${RESOURCE_RADIUS} tiles of ${RESOURCE_LABELS[req] || req}` };
         }
 
         return { ok: true };
@@ -138,14 +153,16 @@ const Game = (() => {
         recalcDerived();
 
         // Start the day timer when the castle is placed
-        if (type === 'castle' && !state.started) {
+        const firstCastle = type === 'castle' && !state.started;
+        if (firstCastle) {
             state.started = true;
             state.paused = false;
-            if (callbacks.onNotification) callbacks.onNotification('The days begin! Manage your resources wisely.', 'info');
         }
 
         if (callbacks.onResourceChange) callbacks.onResourceChange();
-        if (callbacks.onNotification) callbacks.onNotification(`${def.name} built!`, 'success');
+        if (callbacks.onNotification) {
+            callbacks.onNotification(firstCastle ? 'Castle built! The days begin.' : `${def.name} built!`, 'success');
+        }
         if (callbacks.onBuildingPlaced) callbacks.onBuildingPlaced(building);
 
         return building;
@@ -289,19 +306,7 @@ const Game = (() => {
 
     // Check if a building type's button should be enabled
     function isBuildingAvailable(type) {
-        const def = BUILDINGS[type];
-        if (!def) return false;
-
-        // Check limit
-        if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) return false;
-
-        // Castle must be first building
-        if (type !== 'castle' && BuildingManager.countByType('castle') === 0) return false;
-
-        // Need castle first for everything else
-        if (type === 'warehouse' && BuildingManager.countByType('castle') === 0) return false;
-
-        return canAfford(type);
+        return getBuildBlocker(type) === null;
     }
 
     function getFreeWorkers() {
@@ -320,6 +325,8 @@ const Game = (() => {
         placeBuilding,
         update,
         isBuildingAvailable,
+        getBuildBlocker,
+        getMissingCost,
         getFreeWorkers,
         serialize,
         load,

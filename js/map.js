@@ -166,23 +166,31 @@ const GameMap = (() => {
     function getStones() { return stoneMap; }
     function getDecorations() { return decorations; }
 
-    // Check if area is buildable (not water, not on existing buildings)
-    function isBuildable(tileX, tileY, width, height, placedBuildings) {
-        for (let dy = 0; dy < height; dy++) {
-            for (let dx = 0; dx < width; dx++) {
-                const tx = tileX + dx;
-                const ty = tileY + dy;
-                const t = getTerrain(tx, ty);
-                if (t === TERRAIN.WATER || t === TERRAIN.SAND) return false;
-            }
+    // Why an area can't be built on, or null if it can. The most useful reason wins.
+    function checkArea(tileX, tileY, width, height, placedBuildings) {
+        if (tileX < 0 || tileY < 0 || tileX + width > MAP_WIDTH || tileY + height > MAP_HEIGHT) {
+            return 'Outside the map';
         }
-        // Check overlap with existing buildings
         for (const b of placedBuildings) {
             if (rectsOverlap(tileX, tileY, width, height, b.tileX, b.tileY, b.def.width, b.def.height)) {
-                return false;
+                return 'Another building is in the way';
             }
         }
-        return true;
+        const found = new Set();
+        for (let dy = 0; dy < height; dy++) {
+            for (let dx = 0; dx < width; dx++) {
+                found.add(terrain[tileY + dy][tileX + dx]);
+            }
+        }
+        if (found.has(TERRAIN.WATER)) return "Can't build on water";
+        if (found.has(TERRAIN.SAND)) return "Can't build on the shore";
+        if (found.has(TERRAIN.FOREST)) return 'Trees are in the way';
+        if (found.has(TERRAIN.STONE_DEPOSIT)) return 'Rocks are in the way';
+        return null;
+    }
+
+    function isBuildable(tileX, tileY, width, height, placedBuildings) {
+        return checkArea(tileX, tileY, width, height, placedBuildings) === null;
     }
 
     function rectsOverlap(x1, y1, w1, h1, x2, y2, w2, h2) {
@@ -190,7 +198,7 @@ const GameMap = (() => {
     }
 
     // Check if there's a required resource nearby (within N tiles)
-    function hasNearbyResource(tileX, tileY, width, height, terrainType, radius = 5) {
+    function hasNearbyResource(tileX, tileY, width, height, terrainType, radius = RESOURCE_RADIUS) {
         for (let dy = -radius; dy < height + radius; dy++) {
             for (let dx = -radius; dx < width + radius; dx++) {
                 const tx = tileX + dx;
@@ -209,6 +217,7 @@ const GameMap = (() => {
         getTrees,
         getStones,
         getDecorations,
+        checkArea,
         isBuildable,
         hasNearbyResource,
     };

@@ -331,6 +331,109 @@ button {
     line-height: 1.3;
 }
 
+.cost.short {
+    color: var(--bad);
+}
+
+.b-status {
+    display: none;
+    font-family: var(--font-pixel);
+    font-size: 16px;
+    line-height: 1;
+    color: var(--good);
+}
+
+.building-btn.built .b-cost {
+    display: none;
+}
+
+.building-btn.built .b-status {
+    display: block;
+}
+
+.building-btn.nope {
+    animation: nope 0.32s ease;
+}
+
+@keyframes nope {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    50% { transform: translateX(4px); }
+    75% { transform: translateX(-2px); }
+}
+
+/* ---------- Placement bar ---------- */
+#placement-bar {
+    position: absolute;
+    left: calc((100% - var(--inset-right)) / 2);
+    bottom: calc(max(var(--inset-bottom), var(--safe-bottom)) + 10px);
+    transform: translateX(-50%);
+    width: min(440px, calc(100% - var(--inset-right) - 16px));
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    background: var(--panel);
+    border: 2px solid var(--line);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    z-index: 13;
+}
+
+#placement-bar button {
+    flex: none;
+    min-width: 44px;
+    height: 44px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: var(--font-pixel);
+}
+
+#pb-cancel {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--line-dim);
+    font-size: 26px;
+    line-height: 1;
+}
+
+#pb-confirm {
+    padding: 0 18px;
+    background: linear-gradient(180deg, #4f8a2e, #3a6a20);
+    border: 2px solid #7fc04a;
+    color: #fff;
+    font-size: 21px;
+}
+
+#pb-confirm:disabled {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--line-dim);
+    color: var(--text-faint);
+    cursor: not-allowed;
+}
+
+.pb-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#pb-name {
+    font-family: var(--font-pixel);
+    font-size: 19px;
+    line-height: 1;
+}
+
+.pb-hint {
+    font-size: 12px;
+    line-height: 1.25;
+    color: var(--text-dim);
+}
+
+.pb-hint.bad { color: var(--bad); }
+.pb-hint.good { color: var(--good); }
+
 /* ---------- Info Panel ---------- */
 #info-panel {
     position: absolute;
@@ -395,6 +498,11 @@ button {
     z-index: 100;
     max-width: 250px;
     line-height: 1.4;
+}
+
+#tooltip.tone-bad {
+    border-color: #c44;
+    color: #ffb0a8;
 }
 
 /* ---------- Notifications ---------- */
@@ -722,8 +830,8 @@ button {
     }
 
     .notification {
-        font-size: 17px;
-        padding: 7px 12px;
+        font-size: 16px;
+        padding: 5px 12px;
     }
 
     .overlay-box {

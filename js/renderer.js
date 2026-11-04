@@ -352,9 +352,39 @@ const Renderer = (() => {
         }
     }
 
+    // Production buildings: show the area they draw from and the resource tiles in it
+    function drawResourceRange(pp, def) {
+        const req = def.production && def.production.requires;
+        if (!req) return;
+        const r = RESOURCE_RADIUS;
+        const x0 = pp.tileX - r, y0 = pp.tileY - r;
+        const x1 = pp.tileX + def.width + r, y1 = pp.tileY + def.height + r; // exclusive
+        const wanted = TERRAIN[req];
+
+        ctx.fillStyle = 'rgba(255, 214, 80, 0.32)';
+        let found = 0;
+        for (let ty = Math.max(0, y0); ty < Math.min(MAP_HEIGHT, y1); ty++) {
+            for (let tx = Math.max(0, x0); tx < Math.min(MAP_WIDTH, x1); tx++) {
+                if (GameMap.getTerrain(tx, ty) === wanted) {
+                    ctx.fillRect(tx * TILE_SIZE - camera.x, ty * TILE_SIZE - camera.y, TILE_SIZE, TILE_SIZE);
+                    found++;
+                }
+            }
+        }
+
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = found > 0 ? 'rgba(255, 214, 80, 0.95)' : 'rgba(255, 110, 90, 0.95)';
+        ctx.strokeRect(x0 * TILE_SIZE - camera.x + 1, y0 * TILE_SIZE - camera.y + 1,
+            (x1 - x0) * TILE_SIZE - 2, (y1 - y0) * TILE_SIZE - 2);
+        ctx.restore();
+    }
+
     function drawPlacementPreview(pp) {
         const def = BUILDINGS[pp.type];
         if (!def) return;
+        drawResourceRange(pp, def);
         const px = pp.tileX * TILE_SIZE - camera.x;
         const py = pp.tileY * TILE_SIZE - camera.y;
         const pw = def.width * TILE_SIZE;

@@ -6,6 +6,9 @@ const UI = (() => {
     let selectedBuilding = null; // building type to place
     let placementPreview = null;
 
+    // Last input device; touch/pen get the "position, then confirm" flow
+    let lastPointerType = window.matchMedia && window.matchMedia('(hover: none)').matches ? 'touch' : 'mouse';
+
     // Pointer movement (px) below which a press counts as a tap, not a drag
     const DRAG_THRESHOLD = 8;
 
@@ -42,6 +45,11 @@ const UI = (() => {
             continueBtn: document.getElementById('continue-btn'),
             restartBtn: document.getElementById('restart-btn'),
             canvas: document.getElementById('game-canvas'),
+            placementBar: document.getElementById('placement-bar'),
+            pbName: document.getElementById('pb-name'),
+            pbHint: document.getElementById('pb-hint'),
+            pbConfirm: document.getElementById('pb-confirm'),
+            pbCancel: document.getElementById('pb-cancel'),
         };
 
         installIcons();
@@ -51,6 +59,12 @@ const UI = (() => {
         setupKeyboard();
 
         els.infoClose.addEventListener('click', hideInfo);
+        els.pbConfirm.addEventListener('click', confirmPlacement);
+        els.pbCancel.addEventListener('click', deselectBuilding);
+
+        document.addEventListener('pointerdown', e => {
+            lastPointerType = e.pointerType || 'mouse';
+        }, true);
 
         // Mouse clicks must not leave buttons focused, otherwise Space would
         // press the focused button instead of toggling pause
@@ -143,13 +157,31 @@ const UI = (() => {
             body.innerHTML = `
                 <span class="b-name">${def.name}</span>
                 <span class="b-cost">${costHtml(def)}</span>
+                <span class="b-status">Built</span>
                 <span class="b-info">${infoText(def)}</span>
             `;
 
             btn.append(thumb, body);
-            btn.addEventListener('click', () => selectBuilding(type));
+            btn.addEventListener('click', () => onBuildingCardClick(btn, type));
             els.buildingList.appendChild(btn);
         });
+    }
+
+    // Disabled cards stay tappable: they explain what is missing instead of doing nothing
+    function onBuildingCardClick(btn, type) {
+        const blocker = Game.getBuildBlocker(type);
+        if (blocker && selectedBuilding !== type) {
+            btn.classList.remove('nope');
+            void btn.offsetWidth; // restart the shake animation
+            btn.classList.add('nope');
+            showTooltipFor(btn, blocker, { tone: 'bad', timeout: 2600 });
+            return;
+        }
+        selectBuilding(type);
+    }
+
+    function isTouchMode() {
+        return lastPointerType !== 'mouse';
     }
 
     function selectBuilding(type) {
@@ -159,26 +191,50 @@ const UI = (() => {
         }
         selectedBuilding = type;
         placementPreview = null;
+        hideTooltip();
         els.canvas.classList.add('placing');
-        updateBuildingButtons();
         hideInfo();
+
+        // Touch has no hover: put the ghost on the nearest free spot right away,
+        // so the player only has to adjust (tap / drag) and confirm
+        if (isTouchMode()) {
+            const vp = Renderer.getViewport();
+            const center = anchorTile(type, vp.x + vp.w / 2, vp.y + vp.h / 2);
+            const spot = findValidSpot(type, center.x, center.y) || center;
+            setPreviewTile(spot.x, spot.y);
+            ensurePreviewVisible();
+        }
+        updateBuildingButtons();
+        updatePlacementBar();
     }
 
     function deselectBuilding() {
         selectedBuilding = null;
         placementPreview = null;
         els.canvas.classList.remove('placing');
+        hideTooltip();
         updateBuildingButtons();
+        updatePlacementBar();
     }
 
     function updateBuildingButtons() {
+        const gs = Game.getState();
+        const free = Game.getFreeWorkers();
         const btns = els.buildingList.querySelectorAll('.building-btn');
         btns.forEach(btn => {
             const type = btn.dataset.type;
-            const available = Game.isBuildingAvailable(type);
-            const hasWorkers = BUILDINGS[type].workers <= Game.getFreeWorkers();
-            btn.classList.toggle('disabled', !available || !hasWorkers);
+            const def = BUILDINGS[type];
+            const blocker = Game.getBuildBlocker(type);
+            const built = def.limit !== null && BuildingManager.countByType(type) >= def.limit;
+            btn.classList.toggle('disabled', !!blocker);
+            btn.classList.toggle('built', built);
             btn.classList.toggle('selected', type === selectedBuilding);
+            btn.setAttribute('aria-disabled', blocker ? 'true' : 'false');
+            btn.querySelectorAll('.cost[data-res]').forEach(chip => {
+                const res = chip.dataset.res;
+                const short = res === 'workers' ? def.workers > free : def.cost[res] > gs.resources[res];
+                chip.classList.toggle('short', short);
+            });
         });
     }
 
@@ -195,7 +251,7 @@ const UI = (() => {
         syncSpeedButtons();
     }
 
-    // ---- Map input: one code path for mouse, touch and pen ----
+    // ---- Placement ----
 
     // Top-left tile so that the building is centered under the pointer
     function anchorTile(type, sx, sy) {
@@ -207,44 +263,159 @@ const UI = (() => {
         };
     }
 
+    function setPreviewTile(tileX, tileY) {
+        if (!selectedBuilding) {
+            placementPreview = null;
+            return;
+        }
+        const check = Game.canPlace(selectedBuilding, tileX, tileY);
+        placementPreview = {
+            type: selectedBuilding,
+            tileX,
+            tileY,
+            valid: check.ok,
+            reason: check.ok ? '' : check.reason,
+        };
+        updatePlacementBar();
+    }
+
     function setPreviewAt(sx, sy) {
         if (!selectedBuilding) {
             placementPreview = null;
             return;
         }
         const tile = anchorTile(selectedBuilding, sx, sy);
-        const check = Game.canPlace(selectedBuilding, tile.x, tile.y);
-        placementPreview = {
-            type: selectedBuilding,
-            tileX: tile.x,
-            tileY: tile.y,
-            valid: check.ok,
-            reason: check.ok ? '' : check.reason,
-        };
+        setPreviewTile(tile.x, tile.y);
+    }
+
+    // Nearest buildable spot, searching rings around (cx, cy)
+    function findValidSpot(type, cx, cy, maxRadius = 14) {
+        for (let r = 0; r <= maxRadius; r++) {
+            for (let dy = -r; dy <= r; dy++) {
+                for (let dx = -r; dx <= r; dx++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+                    if (Game.canPlace(type, cx + dx, cy + dy).ok) return { x: cx + dx, y: cy + dy };
+                }
+            }
+        }
+        return null;
+    }
+
+    // Scroll the map if the ghost ended up under the HUD or off screen. For
+    // production buildings, also bring the resource tiles in range into view,
+    // so the player can see *why* the spot works.
+    function ensurePreviewVisible() {
+        if (!placementPreview) return;
+        const pv = placementPreview;
+        const def = BUILDINGS[pv.type];
+        const cam = Renderer.getCamera();
+        const vp = Renderer.getViewport();
+        const margin = 24;
+        const onScreen = (wx0, wy0, wx1, wy1) =>
+            wx0 - cam.x >= vp.x + margin && wx1 - cam.x <= vp.x + vp.w - margin &&
+            wy0 - cam.y >= vp.y + margin && wy1 - cam.y <= vp.y + vp.h - margin;
+
+        const gx0 = pv.tileX * TILE_SIZE, gy0 = pv.tileY * TILE_SIZE;
+        const gx1 = gx0 + def.width * TILE_SIZE, gy1 = gy0 + def.height * TILE_SIZE;
+        let focusX = (gx0 + gx1) / 2;
+        let focusY = (gy0 + gy1) / 2;
+        let visible = onScreen(gx0, gy0, gx1, gy1);
+
+        const req = def.production && def.production.requires;
+        if (req) {
+            // centroid of the resource tiles in range
+            let sx = 0, sy = 0, n = 0;
+            for (let ty = pv.tileY - RESOURCE_RADIUS; ty < pv.tileY + def.height + RESOURCE_RADIUS; ty++) {
+                for (let tx = pv.tileX - RESOURCE_RADIUS; tx < pv.tileX + def.width + RESOURCE_RADIUS; tx++) {
+                    if (GameMap.getTerrain(tx, ty) === TERRAIN[req]) {
+                        sx += (tx + 0.5) * TILE_SIZE;
+                        sy += (ty + 0.5) * TILE_SIZE;
+                        n++;
+                    }
+                }
+            }
+            if (n > 0) {
+                const cx = sx / n, cy = sy / n;
+                visible = visible && onScreen(cx - 16, cy - 16, cx + 16, cy + 16);
+                focusX = (focusX + cx) / 2;
+                focusY = (focusY + cy) / 2;
+            }
+        }
+        if (!visible) Renderer.centerOn(focusX, focusY);
+    }
+
+    function pointInPreview(sx, sy) {
+        if (!placementPreview) return false;
+        const def = BUILDINGS[placementPreview.type];
+        const w = Renderer.screenToWorld(sx, sy);
+        const pad = 12; // fingers are not precise
+        const x0 = placementPreview.tileX * TILE_SIZE - pad;
+        const y0 = placementPreview.tileY * TILE_SIZE - pad;
+        return w.x >= x0 && w.x <= x0 + def.width * TILE_SIZE + pad * 2 &&
+               w.y >= y0 && w.y <= y0 + def.height * TILE_SIZE + pad * 2;
     }
 
     function tryPlace(type, tileX, tileY) {
         const result = Game.placeBuilding(type, tileX, tileY);
-        if (result) {
-            // Keep selected for rapid placement, unless limited or unaffordable now
-            const def = BUILDINGS[type];
-            const limitReached = def.limit !== null && BuildingManager.countByType(type) >= def.limit;
-            if (limitReached || !Game.isBuildingAvailable(type) || def.workers > Game.getFreeWorkers()) {
-                deselectBuilding();
-            } else if (placementPreview) {
-                // The spot under the ghost is occupied now
-                const check = Game.canPlace(type, placementPreview.tileX, placementPreview.tileY);
-                placementPreview = Object.assign({}, placementPreview, { valid: check.ok, reason: check.ok ? '' : check.reason });
-            }
-            updateBuildingButtons();
+        if (!result) return null;
+
+        // Keep selected for rapid placement, unless limited or unaffordable now
+        if (!Game.isBuildingAvailable(type)) {
+            deselectBuilding();
+        } else if (isTouchMode()) {
+            // Offer the next free spot next to the one just built
+            const spot = findValidSpot(type, tileX, tileY);
+            if (spot) setPreviewTile(spot.x, spot.y);
+            else setPreviewTile(tileX, tileY);
+        } else if (placementPreview) {
+            setPreviewTile(placementPreview.tileX, placementPreview.tileY);
         }
+        updateBuildingButtons();
+        updatePlacementBar();
         return result;
     }
 
-    function handleTap(sx, sy) {
+    function confirmPlacement() {
+        if (!selectedBuilding || !placementPreview || !placementPreview.valid) return;
+        tryPlace(selectedBuilding, placementPreview.tileX, placementPreview.tileY);
+    }
+
+    // Floating bar while placing: name, live reason, cancel (and Build on touch)
+    function updatePlacementBar() {
+        if (!selectedBuilding) {
+            els.placementBar.classList.add('hidden');
+            return;
+        }
+        const def = BUILDINGS[selectedBuilding];
+        const touch = isTouchMode();
+        els.pbName.textContent = def.name;
+        let hint;
+        let tone = '';
+        if (placementPreview && !placementPreview.valid) {
+            hint = placementPreview.reason;
+            tone = 'bad';
+        } else if (placementPreview) {
+            hint = touch ? 'Drag to move · tap Build' : 'Click to build · Esc to cancel';
+            tone = 'good';
+        } else {
+            hint = touch ? 'Tap the map to position' : 'Click the map to build · Esc to cancel';
+        }
+        els.pbHint.textContent = hint;
+        els.pbHint.className = tone ? `pb-hint ${tone}` : 'pb-hint';
+        els.pbConfirm.classList.toggle('hidden', !touch);
+        els.pbConfirm.disabled = !(placementPreview && placementPreview.valid);
+        els.placementBar.classList.remove('hidden');
+    }
+
+    function handleTap(sx, sy, pointerType) {
         if (selectedBuilding) {
-            const tile = anchorTile(selectedBuilding, sx, sy);
-            tryPlace(selectedBuilding, tile.x, tile.y);
+            if (pointerType === 'mouse') {
+                const tile = anchorTile(selectedBuilding, sx, sy);
+                tryPlace(selectedBuilding, tile.x, tile.y);
+            } else {
+                // touch / pen: a tap only moves the ghost, "Build" confirms
+                setPreviewAt(sx, sy);
+            }
             return;
         }
         // Tap on existing building - show info
@@ -254,9 +425,10 @@ const UI = (() => {
         else hideInfo();
     }
 
+    // ---- Map input: one code path for mouse, touch and pen ----
     function setupCanvasInput() {
         const canvas = els.canvas;
-        let drag = null; // { id, startX, startY, camX, camY, moved }
+        let drag = null; // { id, startX, startY, camX, camY, moved, mode, grab }
 
         function pos(e) {
             const rect = canvas.getBoundingClientRect();
@@ -267,7 +439,16 @@ const UI = (() => {
             if (!e.isPrimary || e.button > 0) return;
             const p = pos(e);
             const cam = Renderer.getCamera();
-            drag = { id: e.pointerId, startX: p.x, startY: p.y, camX: cam.x, camY: cam.y, moved: false };
+            drag = { id: e.pointerId, startX: p.x, startY: p.y, camX: cam.x, camY: cam.y, moved: false, mode: 'pan' };
+            // On touch, pressing on the ghost drags the ghost instead of the map
+            if (e.pointerType !== 'mouse' && selectedBuilding && pointInPreview(p.x, p.y)) {
+                const w = Renderer.screenToWorld(p.x, p.y);
+                drag.mode = 'ghost';
+                drag.grab = {
+                    x: w.x - placementPreview.tileX * TILE_SIZE,
+                    y: w.y - placementPreview.tileY * TILE_SIZE,
+                };
+            }
             try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
         });
 
@@ -279,12 +460,26 @@ const UI = (() => {
                 const dy = drag.startY - p.y;
                 if (!drag.moved && Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
                     drag.moved = true;
-                    canvas.classList.add('dragging');
+                    if (drag.mode === 'pan') canvas.classList.add('dragging');
                 }
-                if (drag.moved) Renderer.setCamera(drag.camX + dx, drag.camY + dy);
+                if (drag.moved && drag.mode === 'pan') Renderer.setCamera(drag.camX + dx, drag.camY + dy);
+                if (drag.moved && drag.mode === 'ghost') {
+                    const w = Renderer.screenToWorld(p.x, p.y);
+                    setPreviewTile(
+                        Math.round((w.x - drag.grab.x) / TILE_SIZE),
+                        Math.round((w.y - drag.grab.y) / TILE_SIZE)
+                    );
+                }
             }
-            // Mouse/pen hover: ghost follows the pointer
-            if (e.pointerType !== 'touch') setPreviewAt(p.x, p.y);
+            // Mouse hover: ghost follows the pointer, reason follows the cursor
+            if (e.pointerType === 'mouse') {
+                setPreviewAt(p.x, p.y);
+                if (placementPreview && !placementPreview.valid && !(drag && drag.moved)) {
+                    showTooltip(placementPreview.reason, e.clientX + 16, e.clientY + 18, { tone: 'bad' });
+                } else {
+                    hideTooltip();
+                }
+            }
         });
 
         function endDrag(e, cancelled) {
@@ -294,15 +489,18 @@ const UI = (() => {
             canvas.classList.remove('dragging');
             if (wasTap) {
                 const p = pos(e);
-                if (e.pointerType === 'touch') setPreviewAt(p.x, p.y);
-                handleTap(p.x, p.y);
+                handleTap(p.x, p.y, e.pointerType);
             }
         }
 
         canvas.addEventListener('pointerup', e => endDrag(e, false));
         canvas.addEventListener('pointercancel', e => endDrag(e, true));
         canvas.addEventListener('pointerleave', e => {
-            if (e.pointerType === 'mouse' && !drag) placementPreview = null;
+            if (e.pointerType === 'mouse' && !drag) {
+                placementPreview = null;
+                hideTooltip();
+                updatePlacementBar();
+            }
         });
 
         // Trackpad / wheel scrolls the map
@@ -336,6 +534,40 @@ const UI = (() => {
             if (e.key === '2') setSpeed(2);
             if (e.key === '3') setSpeed(3);
         });
+    }
+
+    // ---- Tooltip ----
+    let tooltipTimer = null;
+
+    function showTooltip(text, x, y, opts = {}) {
+        const t = els.tooltip;
+        t.textContent = text;
+        t.className = opts.tone ? `tone-${opts.tone}` : '';
+        // measure, then keep it on screen
+        const r = t.getBoundingClientRect();
+        const nx = Math.max(8, Math.min(window.innerWidth - r.width - 8, x));
+        const ny = Math.max(8, Math.min(window.innerHeight - r.height - 8, y));
+        t.style.transform = `translate(${Math.round(nx)}px, ${Math.round(ny)}px)`;
+        clearTimeout(tooltipTimer);
+        if (opts.timeout) tooltipTimer = setTimeout(hideTooltip, opts.timeout);
+    }
+
+    // Above the element (bottom bar) or to its left (sidebar)
+    function showTooltipFor(el, text, opts = {}) {
+        showTooltip(text, 0, 0, opts);
+        const r = el.getBoundingClientRect();
+        const t = els.tooltip.getBoundingClientRect();
+        const inSidebar = r.left > window.innerWidth / 2 && r.top > 60 && r.width < window.innerWidth / 2;
+        if (inSidebar) {
+            showTooltip(text, r.left - t.width - 8, r.top + r.height / 2 - t.height / 2, opts);
+        } else {
+            showTooltip(text, r.left + r.width / 2 - t.width / 2, r.top - t.height - 8, opts);
+        }
+    }
+
+    function hideTooltip() {
+        clearTimeout(tooltipTimer);
+        els.tooltip.classList.add('hidden');
     }
 
     function showBuildingInfo(building) {
@@ -413,8 +645,9 @@ const UI = (() => {
         div.className = `notification ${type}`;
         div.textContent = message;
         els.notifications.appendChild(div);
-        // Never stack more than three messages on small screens
-        while (els.notifications.children.length > 3) els.notifications.firstChild.remove();
+        // Don't bury the map under messages (phones: 2, desktop: 3)
+        const max = window.innerWidth <= 760 ? 2 : 3;
+        while (els.notifications.children.length > max) els.notifications.firstChild.remove();
         setTimeout(() => div.remove(), 3000);
     }
 
