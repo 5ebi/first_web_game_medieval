@@ -21,10 +21,7 @@
         Game.reset();
         GameMap.generate(randomSeed());
         Renderer.invalidateTerrainCache();
-        Renderer.setCamera(
-            MAP_PIXEL_W / 2 - window.innerWidth / 2,
-            MAP_PIXEL_H / 2 - window.innerHeight / 2
-        );
+        Renderer.centerCamera();
         UI.refreshAll();
     }
 

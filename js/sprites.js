@@ -569,6 +569,146 @@ const Sprites = (() => {
         };
     }
 
+    // ---- UI ICONS (10x10 pixel art, shown at 1x/2x with pixelated scaling) ----
+    const ICONS = {
+        wood: {
+            palette: { b: '#5a3418', B: '#8B5A2B', r: '#c8955a', y: '#e0b872', o: '#a0703a' },
+            rows: [
+                '..........',
+                '..........',
+                '..bbbbbbb.',
+                '.rrBBBBBBb',
+                'ryyrBBBBBb',
+                'ryoyrBBBBb',
+                'ryyrBBBBBb',
+                '.rrBBBBBBb',
+                '..bbbbbbb.',
+                '..........',
+            ],
+        },
+        stone: {
+            palette: { l: '#3e3e3e', L: '#b4b4b4', d: '#828282' },
+            rows: [
+                '..........',
+                '...lll....',
+                '..lLLLl...',
+                '.lLLLdLll.',
+                '.lLLddLLLl',
+                'lLLdddLLdl',
+                'lLdddddLdl',
+                'lddddddddl',
+                '.llllllll.',
+                '..........',
+            ],
+        },
+        iron: {
+            palette: { o: '#2e333d', H: '#eef2f8', M: '#a7afbf', D: '#6f7787' },
+            rows: [
+                '..........',
+                '..........',
+                '..........',
+                '...oooo...',
+                '..oHHHHo..',
+                '.oHMMMMHo.',
+                'oMMMMMMMMo',
+                'oDDDDDDDDo',
+                '.oooooooo.',
+                '..........',
+            ],
+        },
+        food: {
+            palette: { s: '#6b4226', l: '#4caf3a', r: '#7a1616', R: '#d63a32', W: '#ffd0c8' },
+            rows: [
+                '.....s....',
+                '....s.ll..',
+                '..rrsrl...',
+                '.rRRrRRr..',
+                'rRWRRRRRr.',
+                'rRRRRRRRr.',
+                'rRRRRRRRr.',
+                '.rRRRRRr..',
+                '..rr.rr...',
+                '..........',
+            ],
+        },
+        pop: {
+            palette: { o: '#1f2a1f', S: '#f0c090', B: '#4aa37f', D: '#2f7a5c' },
+            rows: [
+                '...oooo...',
+                '..oSSSSo..',
+                '..oSSSSo..',
+                '...oooo...',
+                '..oBBBBo..',
+                '.oBBBBBBo.',
+                '.oBDBBDBo.',
+                '.oBDBBDBo.',
+                '.oooooooo.',
+                '..........',
+            ],
+        },
+        day: {
+            palette: { y: '#e0a020', Y: '#f6c63a', W: '#fff2a8' },
+            rows: [
+                '....y.....',
+                '.y.....y..',
+                '...YYY....',
+                '..YYWYY...',
+                'y.YWYYY.y.',
+                '..YYYYY...',
+                '...YYY....',
+                '.y.....y..',
+                '....y.....',
+                '..........',
+            ],
+        },
+    };
+
+    function getIcon(name) {
+        const key = `icon_${name}`;
+        if (cache[key]) return cache[key];
+        const icon = ICONS[name];
+        if (!icon) return null;
+        const c = createCanvas(10, 10);
+        const ctx = c.getContext('2d');
+        icon.rows.forEach((row, y) => {
+            for (let x = 0; x < 10; x++) {
+                const color = icon.palette[row[x]];
+                if (color) px(ctx, x, y, color);
+            }
+        });
+        cache[key] = c;
+        return c;
+    }
+
+    function getIconURL(name) {
+        const key = `iconurl_${name}`;
+        if (!cache[key]) {
+            const c = getIcon(name);
+            cache[key] = c ? c.toDataURL() : '';
+        }
+        return cache[key];
+    }
+
+    // Building thumbnail for menus: a canvas matching device pixels so it stays sharp
+    function getBuildingThumbnail(type, cssSize) {
+        const sprite = getBuilding(type);
+        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+        const size = Math.round(cssSize * dpr);
+        const c = createCanvas(size, size);
+        c.style.width = `${cssSize}px`;
+        c.style.height = `${cssSize}px`;
+        if (!sprite) return c;
+        const ctx = c.getContext('2d');
+        const scale = Math.min(size / sprite.width, size / sprite.height);
+        // Smooth when shrinking (castle), hard pixels when enlarging (small huts)
+        ctx.imageSmoothingEnabled = scale < 1;
+        ctx.imageSmoothingQuality = 'high';
+        const w = Math.round(sprite.width * scale);
+        const h = Math.round(sprite.height * scale);
+        ctx.drawImage(sprite, Math.round((size - w) / 2), Math.round((size - h) / 2), w, h);
+        return c;
+    }
+
     // Get building sprite by type
     function getBuilding(type, extra) {
         switch (type) {
@@ -590,6 +730,9 @@ const Sprites = (() => {
         drawStonePile,
         drawFlowers,
         getBuilding,
+        getIcon,
+        getIconURL,
+        getBuildingThumbnail,
         mulberry32,
     };
 })();

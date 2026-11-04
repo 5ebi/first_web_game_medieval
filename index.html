@@ -2,57 +2,78 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#21160b">
     <title>Lords of the Keep - Medieval Castle Builder</title>
+    <link rel="preload" href="fonts/Jersey10-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div id="game-container">
         <canvas id="game-canvas"></canvas>
 
-        <!-- Resource Bar -->
-        <div id="resource-bar">
-            <div class="resource" title="Wood">
-                <span class="resource-icon" id="icon-wood"></span>
-                <span id="res-wood">50</span>
+        <!-- Top HUD: resources + time controls -->
+        <header id="hud">
+            <div id="resource-bar">
+                <div class="resource" data-res="wood" title="Wood">
+                    <span class="resource-icon" data-icon="wood"></span>
+                    <span class="res-text">
+                        <span class="res-value" id="res-wood">50</span>
+                        <span class="res-rate" id="rate-wood"></span>
+                    </span>
+                </div>
+                <div class="resource" data-res="stone" title="Stone">
+                    <span class="resource-icon" data-icon="stone"></span>
+                    <span class="res-text">
+                        <span class="res-value" id="res-stone">30</span>
+                        <span class="res-rate" id="rate-stone"></span>
+                    </span>
+                </div>
+                <div class="resource" data-res="iron" title="Iron">
+                    <span class="resource-icon" data-icon="iron"></span>
+                    <span class="res-text">
+                        <span class="res-value" id="res-iron">0</span>
+                        <span class="res-rate" id="rate-iron"></span>
+                    </span>
+                </div>
+                <div class="resource" data-res="food" title="Food">
+                    <span class="resource-icon" data-icon="food"></span>
+                    <span class="res-text">
+                        <span class="res-value" id="res-food">40</span>
+                        <span class="res-rate" id="rate-food"></span>
+                    </span>
+                </div>
+                <div class="resource" data-res="pop" title="Villagers (working / total)">
+                    <span class="resource-icon" data-icon="pop"></span>
+                    <span class="res-text">
+                        <span class="res-value" id="res-pop">0/0</span>
+                        <span class="res-rate" id="rate-pop"></span>
+                    </span>
+                </div>
             </div>
-            <div class="resource" title="Stone">
-                <span class="resource-icon" id="icon-stone"></span>
-                <span id="res-stone">30</span>
+            <div id="time-bar">
+                <div id="day-pill" title="Day">
+                    <span class="resource-icon" data-icon="day"></span>
+                    <span id="res-day">Day 1</span>
+                </div>
+                <div id="game-speed">
+                    <button type="button" id="speed-pause" class="speed-btn" title="Pause (Space)" aria-label="Pause">&#10074;&#10074;</button>
+                    <button type="button" id="speed-1x" class="speed-btn active" title="Normal speed (1)">1&times;</button>
+                    <button type="button" id="speed-2x" class="speed-btn" title="Fast (2)">2&times;</button>
+                    <button type="button" id="speed-3x" class="speed-btn" title="Very fast (3)">3&times;</button>
+                </div>
             </div>
-            <div class="resource" title="Iron">
-                <span class="resource-icon" id="icon-iron"></span>
-                <span id="res-iron">0</span>
-            </div>
-            <div class="resource" title="Food">
-                <span class="resource-icon" id="icon-food"></span>
-                <span id="res-food">20</span>
-            </div>
-            <div class="resource" title="Population">
-                <span class="resource-icon" id="icon-pop"></span>
-                <span id="res-pop">0 / 10</span>
-            </div>
-            <div class="resource" title="Day">
-                <span class="resource-icon" id="icon-day"></span>
-                <span id="res-day">Day 1</span>
-            </div>
-            <div id="game-speed">
-                <button id="speed-pause" class="speed-btn" title="Pause">&#9646;&#9646;</button>
-                <button id="speed-1x" class="speed-btn active" title="Normal speed">1x</button>
-                <button id="speed-2x" class="speed-btn" title="Fast">2x</button>
-                <button id="speed-3x" class="speed-btn" title="Very fast">3x</button>
-            </div>
-        </div>
+        </header>
 
-        <!-- Building Menu -->
-        <div id="building-menu">
+        <!-- Building Menu: right sidebar on desktop, bottom bar on phones -->
+        <nav id="building-menu" aria-label="Buildings">
             <h3>Buildings</h3>
             <div id="building-list"></div>
-        </div>
+        </nav>
 
         <!-- Info Panel (shows when clicking a placed building) -->
         <div id="info-panel" class="hidden">
-            <button id="info-close">&times;</button>
+            <button type="button" id="info-close" aria-label="Close">&times;</button>
             <h3 id="info-title">Building</h3>
             <div id="info-content"></div>
         </div>
@@ -61,34 +82,35 @@
         <div id="tooltip" class="hidden"></div>
 
         <!-- Notification area -->
-        <div id="notifications"></div>
+        <div id="notifications" aria-live="polite"></div>
 
         <!-- Game Over overlay -->
-        <div id="game-over" class="hidden">
+        <div id="game-over" class="overlay hidden">
             <div class="overlay-box">
                 <h2>Your People Have Starved!</h2>
                 <p>Your village ran out of food and your people have abandoned the settlement.</p>
-                <button id="restart-btn">Try Again</button>
+                <button type="button" id="restart-btn">Try Again</button>
             </div>
         </div>
 
         <!-- Welcome overlay -->
-        <div id="welcome-screen">
+        <div id="welcome-screen" class="overlay">
             <div class="overlay-box">
                 <h1>Lords of the Keep</h1>
                 <p class="subtitle">A Medieval Castle Builder</p>
                 <div class="instructions">
                     <p>You are the lord of a new settlement. Build your castle, gather resources, and grow your village.</p>
                     <ul>
-                        <li>Click a building in the menu, then click the map to place it</li>
-                        <li>Drag the map to scroll around</li>
+                        <li class="touch-only">Tap a building in the bar below, then tap the map to place it</li>
+                        <li class="mouse-only">Click a building in the menu, then click the map to place it</li>
+                        <li><span class="touch-only">Drag the map with one finger to look around</span><span class="mouse-only">Drag the map (or scroll) to look around</span></li>
                         <li>Gather wood, stone, and iron to build more</li>
                         <li>Keep your villagers fed or they will leave!</li>
                     </ul>
                 </div>
                 <div class="overlay-actions">
-                    <button id="continue-btn" class="hidden">Continue</button>
-                    <button id="start-btn">Begin Your Reign</button>
+                    <button type="button" id="continue-btn" class="hidden">Continue</button>
+                    <button type="button" id="start-btn">Begin Your Reign</button>
                 </div>
             </div>
         </div>

@@ -13,7 +13,11 @@
 const Renderer = (() => {
     let canvas, ctx;
     let camera = { x: 0, y: 0 };
-    let canvasWidth, canvasHeight;
+    let canvasWidth, canvasHeight; // CSS pixels
+    let dpr = 1;                   // device pixels per CSS pixel
+
+    // Screen area covered by HUD / menus (CSS px), set by the UI
+    let insets = { top: 0, right: 0, bottom: 0, left: 0 };
 
     // Static map layer
     let terrainCanvas = null;
@@ -33,32 +37,64 @@ const Renderer = (() => {
         ctx = canvas.getContext('2d');
         resize();
         window.addEventListener('resize', resize);
-
-        // Center camera on map center
-        camera.x = MAP_PIXEL_W / 2 - canvasWidth / 2;
-        camera.y = MAP_PIXEL_H / 2 - canvasHeight / 2;
+        centerCamera();
     }
 
+    // Backing store in device pixels so pixel art and text stay sharp on
+    // high-DPI phones; all drawing code keeps working in CSS pixels.
     function resize() {
         canvasWidth = window.innerWidth;
         canvasHeight = window.innerHeight;
-        canvas.width = canvasWidth;
-        canvas.height = canvasHeight;
+        dpr = Math.min(window.devicePixelRatio || 1, 3);
+        canvas.width = Math.round(canvasWidth * dpr);
+        canvas.height = Math.round(canvasHeight * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        setCamera(camera.x, camera.y); // re-clamp for the new size
         dirty = true;
+    }
+
+    function setInsets(next) {
+        insets = Object.assign({ top: 0, right: 0, bottom: 0, left: 0 }, next);
+        setCamera(camera.x, camera.y);
+        dirty = true;
+    }
+
+    // Visible (uncovered) part of the screen in CSS px
+    function getViewport() {
+        return {
+            x: insets.left,
+            y: insets.top,
+            w: Math.max(1, canvasWidth - insets.left - insets.right),
+            h: Math.max(1, canvasHeight - insets.top - insets.bottom),
+        };
     }
 
     function getCamera() { return { x: camera.x, y: camera.y }; }
 
     function setCamera(x, y) {
-        // Clamp camera
-        const menuWidth = 220;
-        const nx = Math.round(Math.max(0, Math.min(MAP_PIXEL_W - canvasWidth + menuWidth, x)));
-        const ny = Math.round(Math.max(-50, Math.min(MAP_PIXEL_H - canvasHeight + 50, y)));
+        // Clamp so every map edge can be scrolled into the uncovered area, but no further
+        const minX = -insets.left;
+        const maxX = Math.max(minX, MAP_PIXEL_W - canvasWidth + insets.right);
+        const minY = -insets.top;
+        const maxY = Math.max(minY, MAP_PIXEL_H - canvasHeight + insets.bottom);
+        const nx = Math.round(Math.max(minX, Math.min(maxX, x)));
+        const ny = Math.round(Math.max(minY, Math.min(maxY, y)));
         if (nx !== camera.x || ny !== camera.y) {
             camera.x = nx;
             camera.y = ny;
             dirty = true;
         }
+    }
+
+    // Put a world point in the middle of the uncovered area
+    function centerOn(worldX, worldY) {
+        const vp = getViewport();
+        setCamera(worldX - (vp.x + vp.w / 2), worldY - (vp.y + vp.h / 2));
+    }
+
+    function centerCamera() {
+        centerOn(MAP_PIXEL_W / 2, MAP_PIXEL_H / 2);
     }
 
     function moveCamera(dx, dy) {
@@ -222,6 +258,9 @@ const Renderer = (() => {
         lastDay = day;
         dirty = false;
 
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+
         // Background (for areas outside map)
         ctx.fillStyle = '#1a3a1a';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
@@ -278,26 +317,38 @@ const Renderer = (() => {
         return true;
     }
 
+    const LABEL_FONT = '13px "Jersey 10", monospace';
+
     function drawBuildingLabels(b, bx, by) {
-        // Worker indicator
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+
+        // Worker badge: [person icon] 2/2
         if (b.maxWorkers > 0) {
-            ctx.fillStyle = 'rgba(0,0,0,0.5)';
-            ctx.fillRect(bx + 2, by + b.height - 10, 36, 10);
-            ctx.fillStyle = b.active ? '#4a4' : '#a44';
-            ctx.font = '9px monospace';
-            ctx.fillText(`👤${b.workers}/${b.maxWorkers}`, bx + 4, by + b.height - 2);
+            ctx.font = LABEL_FONT;
+            const text = `${b.workers}/${b.maxWorkers}`;
+            const w = 18 + Math.ceil(ctx.measureText(text).width);
+            const x = bx + 2, y = by + b.height - 14;
+            ctx.fillStyle = 'rgba(20, 14, 6, 0.78)';
+            ctx.fillRect(x, y, w, 12);
+            ctx.fillStyle = b.active ? '#6c6' : '#d66';
+            ctx.fillRect(x, y + 11, w, 1);
+            ctx.drawImage(Sprites.getIcon('pop'), x + 2, y + 1);
+            ctx.fillStyle = '#f1e4c0';
+            ctx.fillText(text, x + 15, y + 6.5);
         }
 
-        // Growth progress for orchards
+        // Growth progress for orchards (inside the footprint, so it never covers neighbours)
         if (!b.grown && b.def.production?.growthDays) {
             const pct = b.growthProgress / b.def.production.growthDays;
-            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-            ctx.fillRect(bx + 2, by - 10, b.width - 4, 8);
-            ctx.fillStyle = '#4a4';
-            ctx.fillRect(bx + 3, by - 9, (b.width - 6) * pct, 6);
+            const x = bx + 2, y = by + 2, w = b.width - 4;
+            ctx.fillStyle = 'rgba(20, 14, 6, 0.8)';
+            ctx.fillRect(x, y, w, 12);
+            ctx.fillStyle = '#3f8f3a';
+            ctx.fillRect(x + 1, y + 1, Math.round((w - 2) * pct), 10);
+            ctx.font = LABEL_FONT;
             ctx.fillStyle = '#fff';
-            ctx.font = '8px monospace';
-            ctx.fillText('Growing...', bx + 4, by - 3);
+            ctx.fillText(`Growing ${b.growthProgress}/${b.def.production.growthDays}`, x + 4, y + 6.5);
         }
     }
 
@@ -334,6 +385,10 @@ const Renderer = (() => {
         screenToTile,
         render,
         markDirty,
+        setInsets,
+        getViewport,
+        centerOn,
+        centerCamera,
         invalidateTerrainCache: () => { terrainCanvas = null; dirty = true; },
     };
 })();

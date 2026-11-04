@@ -52,9 +52,18 @@ const Game = (() => {
         state.paused = false;
     }
 
+    // speed 0 = pause; pausing keeps the chosen speed so unpausing restores it
     function setSpeed(speed) {
+        if (speed === 0) {
+            state.paused = true;
+            return;
+        }
         state.speed = speed;
-        state.paused = speed === 0;
+        state.paused = false;
+    }
+
+    function togglePause() {
+        state.paused = !state.paused;
     }
 
     // ---- Building placement logic ----
@@ -199,8 +208,8 @@ const Game = (() => {
         });
         state.day = Math.max(1, Math.floor(num(data.day, 1)));
         state.dayProgress = Math.min(Math.max(num(data.dayProgress, 0), 0), 0.999);
-        state.speed = [0, 1, 2, 3].includes(data.speed) ? data.speed : 1;
-        state.paused = !!data.paused || state.speed === 0;
+        state.speed = [1, 2, 3].includes(data.speed) ? data.speed : 1;
+        state.paused = !!data.paused;
         state.starvationDays = Math.max(0, Math.floor(num(data.starvationDays, 0)));
         state.started = BuildingManager.countByType('castle') > 0;
     }
@@ -305,6 +314,7 @@ const Game = (() => {
         setCallbacks,
         start,
         setSpeed,
+        togglePause,
         canAfford,
         canPlace,
         placeBuilding,
