@@ -7,6 +7,7 @@ const GameMap = (() => {
     let treeMap = [];  // Positions of trees for rendering
     let stoneMap = []; // Positions of stone deposits
     let decorations = []; // Flowers, etc.
+    let currentSeed = 42;
 
     // Seeded random
     function seededRandom(seed) {
@@ -56,6 +57,7 @@ const GameMap = (() => {
     }
 
     function generate(seed = 42) {
+        currentSeed = seed;
         const rng = seededRandom(seed);
         terrain = [];
         treeMap = [];
@@ -159,6 +161,12 @@ const GameMap = (() => {
     }
 
     function getTerrainGrid() { return terrain; }
+    function getSeed() { return currentSeed; }
+
+    // Deterministic tile texture variant for a coordinate
+    function getVariant(x, y) {
+        return ((x * 7 + y * 13 + (x * y) % 5) % Sprites.TILE_VARIANTS + Sprites.TILE_VARIANTS) % Sprites.TILE_VARIANTS;
+    }
     function getTrees() { return treeMap; }
     function getStones() { return stoneMap; }
     function getDecorations() { return decorations; }
@@ -202,6 +210,8 @@ const GameMap = (() => {
         generate,
         getTerrain,
         getTerrainGrid,
+        getSeed,
+        getVariant,
         getTrees,
         getStones,
         getDecorations,

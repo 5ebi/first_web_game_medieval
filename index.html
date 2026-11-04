@@ -2,8 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Lords of the Keep - a medieval castle builder you can play in the browser.">
+    <meta name="theme-color" content="#2a1a08">
     <title>Lords of the Keep - Medieval Castle Builder</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%232a1a08'/%3E%3Crect x='2' y='6' width='12' height='8' fill='%238a8070'/%3E%3Crect x='2' y='4' width='2' height='2' fill='%238a8070'/%3E%3Crect x='6' y='4' width='2' height='2' fill='%238a8070'/%3E%3Crect x='10' y='4' width='2' height='2' fill='%238a8070'/%3E%3Crect x='7' y='10' width='2' height='4' fill='%233a2810'/%3E%3Crect x='7' y='1' width='1' height='4' fill='%236b4226'/%3E%3Crect x='8' y='1' width='4' height='2' fill='%23c22'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -14,47 +17,75 @@
         <div id="resource-bar">
             <div class="resource" title="Wood">
                 <span class="resource-icon" id="icon-wood"></span>
-                <span id="res-wood">50</span>
+                <span class="resource-value" id="res-wood">0</span>
             </div>
             <div class="resource" title="Stone">
                 <span class="resource-icon" id="icon-stone"></span>
-                <span id="res-stone">30</span>
+                <span class="resource-value" id="res-stone">0</span>
             </div>
             <div class="resource" title="Iron">
                 <span class="resource-icon" id="icon-iron"></span>
-                <span id="res-iron">0</span>
+                <span class="resource-value" id="res-iron">0</span>
             </div>
             <div class="resource" title="Food">
                 <span class="resource-icon" id="icon-food"></span>
-                <span id="res-food">20</span>
+                <span class="resource-value" id="res-food">0</span>
             </div>
-            <div class="resource" title="Population">
+            <div class="resource" id="storage-res" title="Storage capacity per resource. Build a Warehouse to increase it.">
+                <span class="resource-icon" id="icon-storage"></span>
+                <span class="resource-value muted" id="res-storage">0</span>
+            </div>
+            <div class="resource" title="Villagers working / housed">
                 <span class="resource-icon" id="icon-pop"></span>
-                <span id="res-pop">0 / 10</span>
+                <span class="resource-value" id="res-pop">0 / 0</span>
             </div>
-            <div class="resource" title="Day">
+            <div class="resource day" title="Current day">
                 <span class="resource-icon" id="icon-day"></span>
-                <span id="res-day">Day 1</span>
+                <span class="resource-value" id="res-day">Day 1</span>
+                <div class="day-bar"><div id="day-progress"></div></div>
             </div>
-            <div id="game-speed">
-                <button id="speed-pause" class="speed-btn" title="Pause">&#9646;&#9646;</button>
-                <button id="speed-1x" class="speed-btn active" title="Normal speed">1x</button>
-                <button id="speed-2x" class="speed-btn" title="Fast">2x</button>
-                <button id="speed-3x" class="speed-btn" title="Very fast">3x</button>
+
+            <div id="topbar-right">
+                <div id="game-speed">
+                    <button id="speed-pause" class="speed-btn" title="Pause (Space)">&#10073;&#10073;</button>
+                    <button id="speed-1x" class="speed-btn active" title="Normal speed (1)">1x</button>
+                    <button id="speed-2x" class="speed-btn" title="Fast (2)">2x</button>
+                    <button id="speed-3x" class="speed-btn" title="Very fast (3)">3x</button>
+                </div>
+                <div id="zoom-controls">
+                    <button id="zoom-out" class="icon-btn" title="Zoom out (-)">&minus;</button>
+                    <span id="zoom-label">100%</span>
+                    <button id="zoom-in" class="icon-btn" title="Zoom in (+)">+</button>
+                </div>
+                <button id="mute-btn" class="icon-btn" title="Mute (M)"></button>
+                <button id="music-btn" class="icon-btn" title="Toggle music"></button>
+                <button id="help-btn" class="icon-btn" title="Help (H)">?</button>
+                <button id="menu-btn" class="icon-btn text-btn" title="Start a new game">New</button>
             </div>
         </div>
+
+        <!-- Pause banner -->
+        <div id="pause-banner" class="hidden">PAUSED <span>press Space to continue</span></div>
 
         <!-- Building Menu -->
         <div id="building-menu">
             <h3>Buildings</h3>
             <div id="building-list"></div>
+            <div id="menu-bottom">
+                <div id="goal-box">
+                    <div class="goal-head"><span>Next goal</span><span id="goal-count">0/0</span></div>
+                    <div id="goal-text">Place your Castle</div>
+                </div>
+                <canvas id="minimap" width="216" height="162" title="Click to move the camera"></canvas>
+            </div>
         </div>
 
         <!-- Info Panel (shows when clicking a placed building) -->
         <div id="info-panel" class="hidden">
-            <button id="info-close">&times;</button>
+            <button id="info-close" title="Close (Esc)">&times;</button>
             <h3 id="info-title">Building</h3>
             <div id="info-content"></div>
+            <div id="info-actions"></div>
         </div>
 
         <!-- Tooltip -->
@@ -63,11 +94,49 @@
         <!-- Notification area -->
         <div id="notifications"></div>
 
+        <!-- Help overlay -->
+        <div id="help-screen" class="hidden">
+            <div class="overlay-box help-box">
+                <button id="help-close" class="close-x" title="Close">&times;</button>
+                <h2>How to Play</h2>
+                <div class="help-cols">
+                    <div>
+                        <h4>Basics</h4>
+                        <ul>
+                            <li>Pick a building on the right, then click the map to place it.</li>
+                            <li>Lumberjacks need a <b>forest</b>, quarries and mines need <b>stone deposits</b> within 5 tiles. The dashed box shows the search radius.</li>
+                            <li>Every <b>working</b> villager eats 1 food per day. Idle villagers feed themselves.</li>
+                            <li>Three days without food and your people leave. Game over.</li>
+                            <li>Resources are capped by storage. Build the <b>Warehouse</b> early.</li>
+                            <li>Click a placed building for details or to demolish it (50% refund).</li>
+                            <li>Your progress is saved automatically.</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4>Controls</h4>
+                        <ul class="keys">
+                            <li><kbd>Drag</kbd> move the map</li>
+                            <li><kbd>Wheel</kbd> <kbd>+</kbd> <kbd>-</kbd> zoom</li>
+                            <li><kbd>Arrows</kbd> scroll the map</li>
+                            <li><kbd>Space</kbd> pause / resume</li>
+                            <li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> game speed</li>
+                            <li><kbd>Esc</kbd> / <kbd>Right click</kbd> cancel</li>
+                            <li><kbd>Q</kbd>…<kbd>G</kbd> building hotkeys (shown in the menu)</li>
+                            <li><kbd>Del</kbd> demolish selected building</li>
+                            <li><kbd>C</kbd> center on the Castle</li>
+                            <li><kbd>M</kbd> mute &nbsp; <kbd>H</kbd> this help</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Game Over overlay -->
         <div id="game-over" class="hidden">
             <div class="overlay-box">
                 <h2>Your People Have Starved!</h2>
                 <p>Your village ran out of food and your people have abandoned the settlement.</p>
+                <div id="game-over-stats" class="stats-box"></div>
                 <button id="restart-btn">Try Again</button>
             </div>
         </div>
@@ -75,26 +144,34 @@
         <!-- Welcome overlay -->
         <div id="welcome-screen">
             <div class="overlay-box">
+                <div class="crest"></div>
                 <h1>Lords of the Keep</h1>
                 <p class="subtitle">A Medieval Castle Builder</p>
                 <div class="instructions">
                     <p>You are the lord of a new settlement. Build your castle, gather resources, and grow your village.</p>
                     <ul>
                         <li>Click a building in the menu, then click the map to place it</li>
-                        <li>Drag the map to scroll around</li>
-                        <li>Gather wood, stone, and iron to build more</li>
-                        <li>Keep your villagers fed or they will leave!</li>
+                        <li>Drag to scroll, mouse wheel to zoom</li>
+                        <li>Gather wood, stone and iron to build more</li>
+                        <li>Keep your workers fed or they will leave!</li>
                     </ul>
                 </div>
-                <button id="start-btn">Begin Your Reign</button>
+                <div class="btn-row">
+                    <button id="start-btn">Begin Your Reign</button>
+                    <button id="continue-btn" class="secondary hidden">Continue</button>
+                </div>
+                <p class="fine-print">Sound on for the full experience · press H in game for help</p>
             </div>
         </div>
     </div>
 
     <script src="js/constants.js"></script>
+    <script src="js/audio.js"></script>
     <script src="js/sprites.js"></script>
     <script src="js/map.js"></script>
     <script src="js/buildings.js"></script>
+    <script src="js/villagers.js"></script>
+    <script src="js/effects.js"></script>
     <script src="js/game.js"></script>
     <script src="js/renderer.js"></script>
     <script src="js/ui.js"></script>

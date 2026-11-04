@@ -1,5 +1,6 @@
 // ============================================
 // Pixel Art Sprite Rendering
+// All art is procedurally generated - no external assets.
 // ============================================
 
 const Sprites = (() => {
@@ -19,7 +20,144 @@ const Sprites = (() => {
         ctx.fillRect(x * scale, y * scale, scale, scale);
     }
 
-    // ---- TREES ----
+    // Simple seeded random for deterministic details
+    function mulberry32(a) {
+        return function() {
+            a |= 0; a = a + 0x6D2B79F5 | 0;
+            let t = Math.imul(a ^ a >>> 15, 1 | a);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+    }
+
+    // ============================================
+    // TERRAIN TILES (32x32, several variants per type)
+    // ============================================
+    const TILE_VARIANTS = 4;
+
+    function drawTile(type, variant) {
+        const key = `tile_${type}_${variant}`;
+        if (cache[key]) return cache[key];
+        const c = createCanvas(TILE_SIZE, TILE_SIZE);
+        const ctx = c.getContext('2d');
+        const rng = mulberry32(type * 1000 + variant * 7 + 13);
+
+        const speck = (n, colors, size = 2) => {
+            for (let i = 0; i < n; i++) {
+                const x = Math.floor(rng() * (TILE_SIZE - size));
+                const y = Math.floor(rng() * (TILE_SIZE - size));
+                ctx.fillStyle = colors[Math.floor(rng() * colors.length)];
+                ctx.fillRect(x, y, size, size);
+            }
+        };
+        const blades = (n, colors) => {
+            for (let i = 0; i < n; i++) {
+                const x = Math.floor(rng() * (TILE_SIZE - 2));
+                const y = Math.floor(rng() * (TILE_SIZE - 4));
+                ctx.fillStyle = colors[Math.floor(rng() * colors.length)];
+                ctx.fillRect(x, y, 1, 3);
+                ctx.fillRect(x + 1, y + 1, 1, 2);
+            }
+        };
+
+        switch (type) {
+            case TERRAIN.GRASS:
+            case TERRAIN.FLOWERS:
+                ctx.fillStyle = '#5a8f3c';
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                speck(10, ['#62973f', '#54873a', '#5e9440'], 3);
+                blades(7, ['#6aa548', '#4c7f32']);
+                break;
+            case TERRAIN.GRASS_DARK:
+                ctx.fillStyle = '#4e8330';
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                speck(10, ['#558a36', '#487a2c', '#4a7f2c'], 3);
+                blades(7, ['#5e9a3e', '#3f7026']);
+                break;
+            case TERRAIN.FOREST:
+                ctx.fillStyle = '#3f7127';
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                speck(12, ['#467a2c', '#386522', '#3a6a24'], 3);
+                blades(6, ['#4f8a34', '#2f5a1c']);
+                break;
+            case TERRAIN.WATER:
+                ctx.fillStyle = '#3a7ecf';
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                speck(6, ['#3576c4', '#3f86d6'], 4);
+                break;
+            case TERRAIN.SAND:
+                ctx.fillStyle = '#d8bd7c';
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                speck(10, ['#cfb270', '#e0c68a', '#c9ad6c'], 2);
+                break;
+            case TERRAIN.DIRT:
+                ctx.fillStyle = '#8a7050';
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                speck(10, ['#7f6648', '#947a58'], 2);
+                break;
+            case TERRAIN.STONE_DEPOSIT:
+                // rocky ground: muted green-grey earth with embedded pebbles
+                ctx.fillStyle = '#6f7a62';
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                speck(8, ['#66705a', '#78836a', '#5f6a54'], 3);
+                for (let i = 0; i < 4; i++) {
+                    const x = Math.floor(rng() * 26);
+                    const y = Math.floor(rng() * 26);
+                    const w = 3 + Math.floor(rng() * 4);
+                    const h = 2 + Math.floor(rng() * 3);
+                    ctx.fillStyle = '#8f8f85';
+                    ctx.fillRect(x, y, w, h);
+                    ctx.fillStyle = '#a8a8a0';
+                    ctx.fillRect(x, y, w, 1);
+                    ctx.fillStyle = '#5a5a52';
+                    ctx.fillRect(x, y + h - 1, w, 1);
+                }
+                break;
+            default:
+                ctx.fillStyle = '#5a8f3c';
+                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+        }
+
+        cache[key] = c;
+        return c;
+    }
+
+    // Foam / shoreline edge for water tiles next to land. dir: 'n','s','e','w'
+    function drawShore(dir) {
+        const key = `shore_${dir}`;
+        if (cache[key]) return cache[key];
+        const c = createCanvas(TILE_SIZE, TILE_SIZE);
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = 'rgba(220, 240, 255, 0.55)';
+        const rng = mulberry32(dir.charCodeAt(0));
+        for (let i = 0; i < TILE_SIZE; i += 2) {
+            const len = rng() > 0.6 ? 3 : 2;
+            if (dir === 'n') ctx.fillRect(i, 0, 2, len);
+            if (dir === 's') ctx.fillRect(i, TILE_SIZE - len, 2, len);
+            if (dir === 'w') ctx.fillRect(0, i, len, 2);
+            if (dir === 'e') ctx.fillRect(TILE_SIZE - len, i, len, 2);
+        }
+        cache[key] = c;
+        return c;
+    }
+
+    // Small wave highlight (animated by the renderer)
+    function drawWave(frame) {
+        const key = `wave_${frame}`;
+        if (cache[key]) return cache[key];
+        const c = createCanvas(16, 4);
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        if (frame === 0) { ctx.fillRect(2, 1, 6, 2); ctx.fillRect(9, 2, 4, 1); }
+        else if (frame === 1) { ctx.fillRect(1, 2, 5, 2); ctx.fillRect(8, 1, 6, 1); }
+        else { ctx.fillRect(3, 0, 4, 1); ctx.fillRect(6, 2, 7, 2); }
+        cache[key] = c;
+        return c;
+    }
+
+    // ============================================
+    // TREES / NATURE
+    // ============================================
     function drawTree(scale = 2) {
         const key = `tree_${scale}`;
         if (cache[key]) return cache[key];
@@ -40,40 +178,35 @@ const Sprites = (() => {
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist < 6.5) {
                     const ci = (x * 3 + y * 7) % leafColors.length;
-                    px(ctx, x, y, leafColors[ci], scale);
+                    // darker on the lower-right for a lit-from-top-left look
+                    const shade = (dx + dy > 5) ? '#1d5b0e' : leafColors[ci];
+                    px(ctx, x, y, shade, scale);
                 }
             }
         }
         // Highlights
         px(ctx, 5, 5, '#4a9538', scale);
         px(ctx, 6, 4, '#4a9538', scale);
+        px(ctx, 4, 6, '#4a9538', scale);
 
         cache[key] = c;
         return c;
     }
 
-    // ---- PINE TREE ----
     function drawPineTree(scale = 2) {
         const key = `pine_${scale}`;
         if (cache[key]) return cache[key];
         const c = createCanvas(16 * scale, 28 * scale);
         const ctx = c.getContext('2d');
 
-        // Trunk
         for (let y = 20; y < 28; y++) {
             for (let x = 7; x < 9; x++) {
                 px(ctx, x, y, y % 2 === 0 ? '#5a3418' : '#6b4226', scale);
             }
         }
-        // Layers of branches
         const layers = [
-            { y: 2, w: 2 },
-            { y: 5, w: 4 },
-            { y: 8, w: 5 },
-            { y: 11, w: 6 },
-            { y: 14, w: 7 },
-            { y: 17, w: 7 },
-            { y: 20, w: 5 },
+            { y: 2, w: 2 }, { y: 5, w: 4 }, { y: 8, w: 5 }, { y: 11, w: 6 },
+            { y: 14, w: 7 }, { y: 17, w: 7 }, { y: 20, w: 5 },
         ];
         const pineColors = ['#1d5b0e', '#2a6b18', '#1a5010', '#256b15'];
         layers.forEach(l => {
@@ -81,7 +214,8 @@ const Sprites = (() => {
                 const w = l.w - dy;
                 for (let dx = -w; dx <= w; dx++) {
                     const ci = (Math.abs(dx) + dy + l.y) % pineColors.length;
-                    px(ctx, 8 + dx, l.y + dy, pineColors[ci], scale);
+                    const col = dx > w - 2 ? '#174a0c' : pineColors[ci];
+                    px(ctx, 8 + dx, l.y + dy, col, scale);
                 }
             }
         });
@@ -90,7 +224,6 @@ const Sprites = (() => {
         return c;
     }
 
-    // ---- STONE PILE ----
     function drawStonePile(scale = 2) {
         const key = `stone_${scale}`;
         if (cache[key]) return cache[key];
@@ -107,10 +240,8 @@ const Sprites = (() => {
         stones.forEach(s => {
             ctx.fillStyle = s.color;
             ctx.fillRect(s.x * scale, s.y * scale, s.w * scale, s.h * scale);
-            // Highlight
             ctx.fillStyle = '#bbb';
             ctx.fillRect(s.x * scale, s.y * scale, s.w * scale, 1 * scale);
-            // Shadow
             ctx.fillStyle = '#666';
             ctx.fillRect(s.x * scale, (s.y + s.h - 1) * scale, s.w * scale, 1 * scale);
         });
@@ -119,43 +250,188 @@ const Sprites = (() => {
         return c;
     }
 
-    // ---- FLOWER PATCH ----
     function drawFlowers(scale = 2, seed = 0) {
         const key = `flowers_${scale}_${seed}`;
         if (cache[key]) return cache[key];
         const c = createCanvas(TILE_SIZE, TILE_SIZE);
         const ctx = c.getContext('2d');
 
-        const flowerColors = ['#d44', '#dd4', '#d4d', '#f84', '#48f'];
+        const flowerColors = ['#e04848', '#eedd44', '#d64fd6', '#ff8844', '#5a8cff', '#ffffff'];
         const rng = mulberry32(seed);
-        for (let i = 0; i < 5; i++) {
+        const n = 4 + Math.floor(rng() * 4);
+        for (let i = 0; i < n; i++) {
             const fx = Math.floor(rng() * 28) + 2;
-            const fy = Math.floor(rng() * 28) + 2;
+            const fy = Math.floor(rng() * 26) + 2;
             const fc = flowerColors[Math.floor(rng() * flowerColors.length)];
-            ctx.fillStyle = fc;
-            ctx.fillRect(fx, fy, 2, 2);
             ctx.fillStyle = '#2d6b1e';
-            ctx.fillRect(fx, fy + 2, 1, 2);
+            ctx.fillRect(fx + 1, fy + 2, 1, 3);
+            ctx.fillStyle = fc;
+            ctx.fillRect(fx, fy, 3, 2);
+            ctx.fillRect(fx + 1, fy - 1, 1, 1);
         }
 
         cache[key] = c;
         return c;
     }
 
-    // ---- BUILDINGS ----
+    // ============================================
+    // VILLAGERS (8x12 px, scale 2, 2 walk frames)
+    // ============================================
+    const TUNIC_COLORS = ['#b04040', '#3c6fb0', '#4f8a3c', '#b08a30', '#7a4fa0', '#8a6a4a'];
 
-    function drawCastle(scale = 2) {
-        const key = `castle_${scale}`;
+    function drawVillager(frame, palette, flip) {
+        const key = `villager_${frame}_${palette}_${flip ? 1 : 0}`;
+        if (cache[key]) return cache[key];
+        const s = 2;
+        const c = createCanvas(8 * s, 12 * s);
+        const ctx = c.getContext('2d');
+        const tunic = TUNIC_COLORS[palette % TUNIC_COLORS.length];
+        const skin = '#e8b890';
+        const hair = palette % 2 === 0 ? '#4a2a10' : '#2a1a08';
+
+        const P = (x, y, col) => px(ctx, flip ? 7 - x : x, y, col, s);
+
+        // hair / head
+        P(3, 0, hair); P(4, 0, hair);
+        P(2, 1, hair); P(3, 1, skin); P(4, 1, skin); P(5, 1, hair);
+        P(3, 2, skin); P(4, 2, skin);
+        // body
+        for (let y = 3; y < 8; y++) {
+            for (let x = 2; x < 6; x++) P(x, y, tunic);
+        }
+        // belt
+        P(2, 6, '#3a2810'); P(3, 6, '#3a2810'); P(4, 6, '#3a2810'); P(5, 6, '#3a2810');
+        // arms
+        P(1, 4, skin); P(6, 4, skin);
+        P(1, 5, skin); P(6, 5, skin);
+        // legs (walk animation)
+        if (frame === 0) {
+            P(2, 8, '#4a3828'); P(3, 8, '#4a3828'); P(4, 8, '#4a3828'); P(5, 8, '#4a3828');
+            P(2, 9, '#4a3828'); P(5, 9, '#4a3828');
+            P(2, 10, '#2a1a08'); P(5, 10, '#2a1a08');
+        } else {
+            P(2, 8, '#4a3828'); P(3, 8, '#4a3828'); P(4, 8, '#4a3828'); P(5, 8, '#4a3828');
+            P(3, 9, '#4a3828'); P(4, 9, '#4a3828');
+            P(1, 10, '#2a1a08'); P(3, 10, '#2a1a08'); P(5, 10, '#2a1a08'); P(6, 10, '#2a1a08');
+        }
+
+        cache[key] = c;
+        return c;
+    }
+
+    // ============================================
+    // RESOURCE ICONS (16x16, scale 2 -> 32x32 shown at 20px)
+    // ============================================
+    function drawIcon(name) {
+        const key = `icon_${name}`;
+        if (cache[key]) return cache[key];
+        const s = 2;
+        const c = createCanvas(16 * s, 16 * s);
+        const ctx = c.getContext('2d');
+        const P = (x, y, col) => px(ctx, x, y, col, s);
+        const R = (x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x * s, y * s, w * s, h * s); };
+
+        switch (name) {
+            case 'wood':
+                // a log seen from the side with rings on the end
+                R(3, 5, 10, 6, '#8a5a2a');
+                R(3, 5, 10, 1, '#a0703a');
+                R(3, 10, 10, 1, '#5a3418');
+                R(10, 4, 4, 8, '#c49a5c');
+                R(11, 6, 2, 4, '#8a5a2a');
+                P(12, 7, '#c49a5c');
+                R(2, 5, 1, 6, '#5a3418');
+                break;
+            case 'stone':
+                R(3, 7, 10, 6, '#8a8a8a');
+                R(5, 4, 7, 4, '#9c9c9c');
+                R(5, 4, 7, 1, '#bdbdbd');
+                R(3, 7, 2, 1, '#bdbdbd');
+                R(3, 12, 10, 1, '#5c5c5c');
+                P(11, 9, '#6c6c6c'); P(7, 10, '#6c6c6c');
+                break;
+            case 'iron':
+                // ingot
+                R(2, 8, 12, 5, '#8c96ad');
+                R(4, 5, 8, 4, '#aab3c8');
+                R(4, 5, 8, 1, '#d0d6e4');
+                R(2, 12, 12, 1, '#55607a');
+                R(13, 8, 1, 5, '#6a7490');
+                break;
+            case 'food':
+                // apple
+                R(5, 5, 7, 7, '#d8382c');
+                R(4, 6, 1, 5, '#d8382c'); R(12, 6, 1, 5, '#d8382c');
+                R(6, 12, 5, 1, '#a82418');
+                R(6, 6, 2, 2, '#ff8a7a');
+                R(8, 2, 1, 3, '#5a3418');
+                R(9, 3, 3, 1, '#4f8a3c'); P(10, 2, '#4f8a3c');
+                break;
+            case 'pop':
+                // villager bust
+                R(6, 2, 4, 4, '#e8b890');
+                R(6, 2, 4, 1, '#4a2a10');
+                R(4, 6, 8, 6, '#3c6fb0');
+                R(3, 7, 1, 3, '#e8b890'); R(12, 7, 1, 3, '#e8b890');
+                R(4, 12, 8, 1, '#2a4f80');
+                break;
+            case 'day':
+                // sun
+                R(5, 5, 6, 6, '#f6c431');
+                R(6, 4, 4, 1, '#f6c431'); R(6, 11, 4, 1, '#f6c431');
+                R(4, 6, 1, 4, '#f6c431'); R(11, 6, 1, 4, '#f6c431');
+                R(6, 6, 2, 2, '#ffe58a');
+                P(7, 1, '#f6c431'); P(8, 1, '#f6c431');
+                P(7, 14, '#f6c431'); P(8, 14, '#f6c431');
+                P(1, 7, '#f6c431'); P(1, 8, '#f6c431');
+                P(14, 7, '#f6c431'); P(14, 8, '#f6c431');
+                P(3, 3, '#f6c431'); P(12, 3, '#f6c431'); P(3, 12, '#f6c431'); P(12, 12, '#f6c431');
+                break;
+            case 'sound':
+                R(2, 6, 3, 4, '#e8d5a3');
+                R(5, 4, 2, 8, '#e8d5a3');
+                R(7, 3, 1, 1, '#e8d5a3'); R(7, 12, 1, 1, '#e8d5a3');
+                R(9, 5, 1, 6, '#e8d5a3');
+                R(11, 3, 1, 10, '#e8d5a3');
+                break;
+            case 'mute':
+                R(2, 6, 3, 4, '#9a8a68');
+                R(5, 4, 2, 8, '#9a8a68');
+                R(7, 3, 1, 1, '#9a8a68'); R(7, 12, 1, 1, '#9a8a68');
+                for (let i = 0; i < 5; i++) { P(9 + i, 5 + i, '#d44'); P(13 - i, 5 + i, '#d44'); }
+                break;
+            case 'music':
+                R(5, 3, 1, 9, '#e8d5a3');
+                R(5, 3, 6, 1, '#e8d5a3');
+                R(10, 3, 1, 7, '#e8d5a3');
+                R(3, 11, 3, 2, '#e8d5a3');
+                R(8, 9, 3, 2, '#e8d5a3');
+                break;
+            case 'storage':
+                R(3, 6, 10, 7, '#a07840');
+                R(3, 6, 10, 1, '#c49a5c');
+                R(3, 9, 10, 1, '#6b4f10');
+                R(7, 7, 2, 5, '#6b4f10');
+                break;
+        }
+
+        cache[key] = c;
+        return c;
+    }
+
+    // ============================================
+    // BUILDINGS
+    // ============================================
+    function drawCastle() {
+        const key = 'castle';
         if (cache[key]) return cache[key];
         const w = 4 * TILE_SIZE, h = 4 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
-        const s = 2; // pixel size
 
         // Base walls
         ctx.fillStyle = '#8a8070';
         ctx.fillRect(8, 24, w - 16, h - 32);
-
         // Wall texture
         for (let y = 24; y < h - 8; y += 8) {
             for (let x = 8; x < w - 8; x += 12) {
@@ -166,44 +442,55 @@ const Sprites = (() => {
                 ctx.fillRect(x + offset + 1, y, 11, 1);
             }
         }
+        // Wall top walkway battlements
+        for (let bx = 24; bx < w - 24; bx += 8) {
+            ctx.fillStyle = '#9a9080';
+            ctx.fillRect(bx, 20, 5, 6);
+            ctx.fillStyle = '#5a5040';
+            ctx.fillRect(bx + 5, 22, 3, 4);
+        }
 
-        // Towers (4 corners)
+        // Towers (2 front corners)
         const towerW = 24, towerH = h - 8;
         const towers = [[0, 8], [w - towerW, 8]];
         towers.forEach(([tx, ty]) => {
             ctx.fillStyle = '#7a7060';
             ctx.fillRect(tx, ty, towerW, towerH);
-            // Battlements
+            // right side shading
+            ctx.fillStyle = '#6a6050';
+            ctx.fillRect(tx + towerW - 5, ty, 5, towerH);
             for (let bx = tx; bx < tx + towerW; bx += 8) {
                 ctx.fillStyle = '#8a8070';
                 ctx.fillRect(bx, ty, 5, 6);
                 ctx.fillStyle = '#5a5040';
                 ctx.fillRect(bx + 5, ty, 3, 10);
             }
-            // Tower texture
             for (let y2 = ty + 10; y2 < ty + towerH; y2 += 8) {
                 ctx.fillStyle = '#605848';
                 ctx.fillRect(tx, y2, towerW, 1);
             }
+            // arrow slit
+            ctx.fillStyle = '#2a2418';
+            ctx.fillRect(tx + 10, ty + 30, 3, 10);
+            ctx.fillRect(tx + 10, ty + 60, 3, 10);
         });
 
-        // Main keep (center tower)
+        // Main keep
         const keepW = 40, keepH = 60;
         const kx = (w - keepW) / 2, ky = 4;
         ctx.fillStyle = '#8a7c68';
         ctx.fillRect(kx, ky, keepW, keepH);
-        // Keep battlements
+        ctx.fillStyle = '#786a58';
+        ctx.fillRect(kx + keepW - 6, ky, 6, keepH);
         for (let bx = kx; bx < kx + keepW; bx += 8) {
             ctx.fillStyle = '#9a8c78';
             ctx.fillRect(bx, ky, 5, 5);
             ctx.fillStyle = '#5a5040';
             ctx.fillRect(bx + 5, ky, 3, 8);
         }
-        // Keep windows
         ctx.fillStyle = '#3a3020';
         ctx.fillRect(kx + 10, ky + 16, 6, 10);
         ctx.fillRect(kx + keepW - 16, ky + 16, 6, 10);
-        // Keep door
         ctx.fillStyle = '#4a3820';
         ctx.fillRect(kx + 14, ky + 34, 12, 20);
         ctx.fillStyle = '#3a2810';
@@ -211,14 +498,14 @@ const Sprites = (() => {
 
         // Gate
         ctx.fillStyle = '#4a3820';
-        ctx.fillRect(w / 2 - 12, h - 12, 24, 12);
-        ctx.fillStyle = '#3a2810';
-        ctx.fillRect(w / 2 - 8, h - 10, 16, 10);
-        // Portcullis lines
-        ctx.fillStyle = '#2a1808';
+        ctx.fillRect(w / 2 - 12, h - 14, 24, 14);
+        ctx.fillStyle = '#2a1c0c';
+        ctx.fillRect(w / 2 - 8, h - 12, 16, 12);
+        ctx.fillStyle = '#5a4830';
         for (let gx = w / 2 - 6; gx < w / 2 + 8; gx += 4) {
-            ctx.fillRect(gx, h - 10, 1, 10);
+            ctx.fillRect(gx, h - 12, 1, 12);
         }
+        ctx.fillRect(w / 2 - 8, h - 8, 16, 1);
 
         // Flag on keep
         ctx.fillStyle = '#6b4226';
@@ -227,25 +514,38 @@ const Sprites = (() => {
         ctx.fillRect(w / 2 + 1, ky - 12, 10, 7);
         ctx.fillStyle = '#a11';
         ctx.fillRect(w / 2 + 1, ky - 9, 10, 1);
+        ctx.fillStyle = '#ffd700';
+        ctx.fillRect(w / 2 + 4, ky - 10, 3, 3);
 
         cache[key] = c;
         return c;
     }
 
-    function drawHouse(scale = 2) {
-        const key = `house_${scale}`;
+    function drawHouse() {
+        const key = 'house';
         if (cache[key]) return cache[key];
         const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
 
-        // Walls
-        ctx.fillStyle = '#c4a060';
+        // Walls (timber frame)
+        ctx.fillStyle = '#d8c090';
         ctx.fillRect(8, 20, w - 16, h - 24);
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(8, 20, w - 16, 2);
+        ctx.fillRect(8, 20, 2, h - 24);
+        ctx.fillRect(w - 10, 20, 2, h - 24);
+        ctx.fillRect(8, 38, w - 16, 2);
+        ctx.fillRect(w / 2 + 8, 22, 2, 16);
+        // side shading
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.fillRect(w - 16, 22, 6, h - 26);
 
-        // Wall detail
-        ctx.fillStyle = '#b89050';
-        ctx.fillRect(8, 35, w - 16, 2);
+        // Chimney
+        ctx.fillStyle = '#7a7060';
+        ctx.fillRect(44, 8, 6, 14);
+        ctx.fillStyle = '#5a5040';
+        ctx.fillRect(43, 7, 8, 2);
 
         // Roof
         ctx.fillStyle = '#8B4513';
@@ -255,7 +555,6 @@ const Sprites = (() => {
         ctx.lineTo(w - 4, 22);
         ctx.closePath();
         ctx.fill();
-        // Roof highlight
         ctx.fillStyle = '#9B5523';
         ctx.beginPath();
         ctx.moveTo(6, 21);
@@ -263,12 +562,20 @@ const Sprites = (() => {
         ctx.lineTo(w / 2, 21);
         ctx.closePath();
         ctx.fill();
+        // roof shingle lines
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        for (let y = 10; y < 22; y += 4) ctx.fillRect(4 + (22 - y) * 0 + (y - 4), y, w - 8 - 2 * (y - 4), 1);
+        // roof edge
+        ctx.fillStyle = '#5a2e0c';
+        ctx.fillRect(4, 21, w - 8, 2);
 
         // Door
         ctx.fillStyle = '#5a3a18';
         ctx.fillRect(w / 2 - 5, h - 18, 10, 14);
         ctx.fillStyle = '#4a2a08';
         ctx.fillRect(w / 2 - 3, h - 16, 6, 12);
+        ctx.fillStyle = '#d0a020';
+        ctx.fillRect(w / 2 + 1, h - 10, 1, 1);
 
         // Window
         ctx.fillStyle = '#8bc4e8';
@@ -281,62 +588,140 @@ const Sprites = (() => {
         return c;
     }
 
-    function drawWarehouse(scale = 2) {
-        const key = `warehouse_${scale}`;
+    function drawTavern() {
+        const key = 'tavern';
+        if (cache[key]) return cache[key];
+        const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+
+        // Two-storey timber building
+        ctx.fillStyle = '#c9b07e';
+        ctx.fillRect(4, 16, w - 8, h - 20);
+        ctx.fillStyle = '#5a3a18';
+        ctx.fillRect(4, 16, w - 8, 2);
+        ctx.fillRect(4, 34, w - 8, 2);
+        ctx.fillRect(4, 16, 2, h - 20);
+        ctx.fillRect(w - 6, 16, 2, h - 20);
+        ctx.fillRect(w / 2 - 1, 18, 2, 16);
+        // diagonal braces
+        for (let i = 0; i < 8; i++) {
+            ctx.fillRect(8 + i, 26 + i, 2, 2);
+            ctx.fillRect(w - 10 - i, 26 + i, 2, 2);
+        }
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.fillRect(w - 12, 18, 6, h - 22);
+
+        // Chimney
+        ctx.fillStyle = '#7a7060';
+        ctx.fillRect(12, 6, 6, 12);
+        ctx.fillStyle = '#5a5040';
+        ctx.fillRect(11, 5, 8, 2);
+
+        // Roof (flat-ish thatch)
+        ctx.fillStyle = '#a8842a';
+        ctx.fillRect(2, 10, w - 4, 8);
+        ctx.fillStyle = '#c49a3a';
+        ctx.fillRect(4, 8, w - 8, 3);
+        ctx.fillStyle = '#7a5a10';
+        for (let x = 4; x < w - 4; x += 6) ctx.fillRect(x, 12, 1, 5);
+
+        // Windows (lit)
+        ctx.fillStyle = '#f0c040';
+        ctx.fillRect(26, 28, 8, 8);
+        ctx.fillRect(42, 28, 8, 8);
+        ctx.fillStyle = '#5a3a18';
+        ctx.fillRect(29, 28, 2, 8); ctx.fillRect(45, 28, 2, 8);
+        ctx.fillRect(26, 31, 8, 2); ctx.fillRect(42, 31, 8, 2);
+
+        // Door
+        ctx.fillStyle = '#4a2a08';
+        ctx.fillRect(10, h - 18, 10, 14);
+        // Hanging sign (mug)
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(w - 14, 20, 10, 1);
+        ctx.fillStyle = '#e8d5a3';
+        ctx.fillRect(w - 12, 21, 6, 7);
+        ctx.fillStyle = '#c49a1c';
+        ctx.fillRect(w - 11, 22, 4, 5);
+
+        // Barrels outside
+        ctx.fillStyle = '#8a5a2a';
+        ctx.fillRect(w - 14, h - 12, 7, 9);
+        ctx.fillStyle = '#5a3418';
+        ctx.fillRect(w - 14, h - 9, 7, 1);
+        ctx.fillRect(w - 14, h - 5, 7, 1);
+
+        cache[key] = c;
+        return c;
+    }
+
+    function drawWarehouse() {
+        const key = 'warehouse';
         if (cache[key]) return cache[key];
         const w = 3 * TILE_SIZE, h = 2 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
 
-        // Main structure
         ctx.fillStyle = '#9a8060';
         ctx.fillRect(6, 16, w - 12, h - 20);
+        // plank texture
+        ctx.fillStyle = 'rgba(0,0,0,0.1)';
+        for (let y = 20; y < h - 4; y += 6) ctx.fillRect(6, y, w - 12, 1);
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.fillRect(w - 14, 18, 8, h - 22);
 
         // Roof
         ctx.fillStyle = '#6a5030';
         ctx.fillRect(2, 12, w - 4, 8);
         ctx.fillStyle = '#7a6040';
         ctx.fillRect(4, 8, w - 8, 6);
+        ctx.fillStyle = '#8a7050';
+        ctx.fillRect(6, 6, w - 12, 3);
 
         // Door (large)
         ctx.fillStyle = '#5a3a18';
         ctx.fillRect(w / 2 - 12, h - 26, 24, 22);
         ctx.fillStyle = '#4a2a08';
         ctx.fillRect(w / 2 - 10, h - 24, 20, 20);
-
-        // Crates inside
+        // Crates
         ctx.fillStyle = '#8B6914';
         ctx.fillRect(w / 2 - 8, h - 16, 7, 7);
         ctx.fillRect(w / 2 + 1, h - 14, 7, 7);
         ctx.fillStyle = '#6B4F10';
         ctx.fillRect(w / 2 - 4, h - 20, 7, 7);
-
-        // Cross beams on door
         ctx.fillStyle = '#3a1a08';
         ctx.fillRect(w / 2 - 10, h - 14, 20, 2);
+
+        // Sacks outside
+        ctx.fillStyle = '#c4a060';
+        ctx.fillRect(8, h - 12, 8, 8);
+        ctx.fillRect(18, h - 10, 7, 6);
+        ctx.fillStyle = '#8a6a30';
+        ctx.fillRect(10, h - 13, 4, 2);
 
         cache[key] = c;
         return c;
     }
 
-    function drawLumberjack(scale = 2) {
-        const key = `lumberjack_${scale}`;
+    function drawLumberjack() {
+        const key = 'lumberjack';
         if (cache[key]) return cache[key];
         const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
 
-        // Small cabin
         ctx.fillStyle = '#8B6914';
         ctx.fillRect(6, 22, w - 12, h - 26);
-
-        // Log texture
         for (let y = 24; y < h - 6; y += 5) {
             ctx.fillStyle = '#7a5a10';
             ctx.fillRect(6, y, w - 12, 1);
+            ctx.fillStyle = '#9c7a1c';
+            ctx.fillRect(6, y + 1, w - 12, 1);
         }
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.fillRect(w - 12, 24, 6, h - 28);
 
-        // Roof
         ctx.fillStyle = '#5a3a18';
         ctx.beginPath();
         ctx.moveTo(2, 24);
@@ -344,214 +729,308 @@ const Sprites = (() => {
         ctx.lineTo(w - 2, 24);
         ctx.closePath();
         ctx.fill();
+        ctx.fillStyle = '#6a4a28';
+        ctx.beginPath();
+        ctx.moveTo(4, 23);
+        ctx.lineTo(w / 2, 10);
+        ctx.lineTo(w / 2, 23);
+        ctx.closePath();
+        ctx.fill();
 
-        // Door
         ctx.fillStyle = '#4a2a08';
         ctx.fillRect(w / 2 - 5, h - 16, 10, 12);
 
-        // Axe on side
+        // Axe in a stump
         ctx.fillStyle = '#6b4226';
-        ctx.fillRect(w - 14, 28, 2, 20);
-        ctx.fillStyle = '#aaa';
-        ctx.fillRect(w - 18, 26, 8, 5);
+        ctx.fillRect(w - 16, h - 12, 10, 8);
+        ctx.fillStyle = '#8a5a2a';
+        ctx.fillRect(w - 16, h - 12, 10, 2);
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(w - 10, h - 24, 2, 12);
+        ctx.fillStyle = '#c0c0c0';
+        ctx.fillRect(w - 14, h - 26, 8, 5);
+        ctx.fillStyle = '#e8e8e8';
+        ctx.fillRect(w - 14, h - 26, 8, 1);
 
         // Log pile
         ctx.fillStyle = '#8B6914';
         ctx.fillRect(4, h - 10, 10, 4);
         ctx.fillRect(6, h - 14, 8, 4);
-        ctx.fillStyle = '#6B4F10';
-        ctx.fillRect(5, h - 10, 2, 4);
-        ctx.fillRect(9, h - 10, 2, 4);
+        ctx.fillStyle = '#c49a5c';
+        ctx.fillRect(4, h - 10, 2, 4);
+        ctx.fillRect(10, h - 10, 2, 4);
+        ctx.fillRect(6, h - 14, 2, 4);
 
         cache[key] = c;
         return c;
     }
 
-    function drawQuarry(scale = 2) {
-        const key = `quarry_${scale}`;
+    function drawQuarry() {
+        const key = 'quarry';
         if (cache[key]) return cache[key];
         const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
 
-        // Tent/shelter
-        ctx.fillStyle = '#8a7a6a';
-        ctx.fillRect(4, 20, w - 8, h - 24);
-
-        // Stone texture
+        // Dug-out pit
+        ctx.fillStyle = '#6a6a5a';
+        ctx.fillRect(4, 22, w - 8, h - 26);
+        ctx.fillStyle = '#4a4a3a';
+        ctx.fillRect(8, 26, w - 16, h - 34);
         for (let y = 22; y < h - 6; y += 6) {
             for (let x = 4; x < w - 8; x += 8) {
-                ctx.fillStyle = (x + y) % 12 < 6 ? '#7a6a5a' : '#9a8a7a';
-                ctx.fillRect(x, y, 7, 5);
+                ctx.fillStyle = (x + y) % 12 < 6 ? '#7a7a6a' : '#8a8a7a';
+                ctx.fillRect(x, y, 7, 2);
             }
         }
 
-        // Small roof
-        ctx.fillStyle = '#6a5a4a';
-        ctx.fillRect(2, 16, w - 4, 6);
+        // Wooden crane / frame
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(10, 6, 3, 22);
+        ctx.fillRect(10, 6, 20, 3);
+        ctx.fillRect(28, 9, 1, 10);
+        ctx.fillStyle = '#8a8a8a';
+        ctx.fillRect(25, 19, 7, 6);
 
         // Pickaxe
         ctx.fillStyle = '#6b4226';
-        ctx.fillRect(12, 10, 2, 14);
-        ctx.fillStyle = '#aaa';
-        ctx.fillRect(8, 8, 10, 4);
+        ctx.fillRect(44, 12, 2, 14);
+        ctx.fillStyle = '#c0c0c0';
+        ctx.fillRect(40, 10, 10, 3);
 
         // Stone blocks
-        ctx.fillStyle = '#999';
-        ctx.fillRect(w - 16, h - 12, 10, 6);
-        ctx.fillStyle = '#aaa';
-        ctx.fillRect(w - 14, h - 16, 8, 5);
+        ctx.fillStyle = '#a0a0a0';
+        ctx.fillRect(w - 18, h - 12, 12, 7);
+        ctx.fillStyle = '#b4b4b4';
+        ctx.fillRect(w - 16, h - 18, 10, 6);
+        ctx.fillStyle = '#707070';
+        ctx.fillRect(w - 18, h - 6, 12, 1);
+        ctx.fillRect(w - 16, h - 13, 10, 1);
 
         cache[key] = c;
         return c;
     }
 
-    function drawIronMine(scale = 2) {
-        const key = `ironmine_${scale}`;
+    function drawIronMine() {
+        const key = 'iron_mine';
         if (cache[key]) return cache[key];
         const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
 
-        // Mine entrance (dark cave)
+        // Rock mound
+        ctx.fillStyle = '#6a6050';
+        ctx.fillRect(4, 14, w - 8, h - 18);
+        ctx.fillStyle = '#7a7060';
+        ctx.fillRect(8, 10, w - 16, 6);
         ctx.fillStyle = '#5a5040';
-        ctx.fillRect(6, 18, w - 12, h - 22);
+        ctx.fillRect(4, h - 8, w - 8, 4);
 
-        // Dark interior
+        // Dark entrance
+        ctx.fillStyle = '#1a1410';
+        ctx.fillRect(14, 24, w - 28, h - 30);
         ctx.fillStyle = '#2a2018';
-        ctx.fillRect(12, 24, w - 24, h - 28);
+        ctx.fillRect(16, 22, w - 32, 4);
 
         // Support beams
         ctx.fillStyle = '#6b4226';
-        ctx.fillRect(10, 18, 4, h - 22);
-        ctx.fillRect(w - 14, 18, 4, h - 22);
+        ctx.fillRect(10, 20, 4, h - 24);
+        ctx.fillRect(w - 14, 20, 4, h - 24);
         ctx.fillRect(10, 18, w - 20, 4);
 
+        // Rails
+        ctx.fillStyle = '#4a4a4a';
+        ctx.fillRect(w / 2 - 6, h - 6, 1, 6);
+        ctx.fillRect(w / 2 + 5, h - 6, 1, 6);
+
         // Ore cart
-        ctx.fillStyle = '#666';
-        ctx.fillRect(w / 2 - 6, h - 14, 12, 8);
-        ctx.fillStyle = '#888';
-        ctx.fillRect(w / 2 - 4, h - 18, 8, 5);
-        // Wheels
-        ctx.fillStyle = '#444';
-        ctx.fillRect(w / 2 - 5, h - 7, 3, 3);
-        ctx.fillRect(w / 2 + 3, h - 7, 3, 3);
-
-        // Iron ore chunks
-        ctx.fillStyle = '#8090a0';
-        ctx.fillRect(w / 2 - 3, h - 16, 3, 3);
-        ctx.fillRect(w / 2 + 1, h - 17, 3, 2);
-
-        // Rocks around entrance
+        ctx.fillStyle = '#5a5a5a';
+        ctx.fillRect(w / 2 - 7, h - 14, 14, 8);
         ctx.fillStyle = '#7a7a7a';
-        ctx.fillRect(2, h - 8, 8, 6);
-        ctx.fillRect(w - 10, h - 10, 8, 8);
+        ctx.fillRect(w / 2 - 7, h - 14, 14, 1);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(w / 2 - 5, h - 6, 3, 3);
+        ctx.fillRect(w / 2 + 2, h - 6, 3, 3);
+        // Ore chunks
+        ctx.fillStyle = '#8090a0';
+        ctx.fillRect(w / 2 - 4, h - 17, 4, 3);
+        ctx.fillRect(w / 2 + 1, h - 18, 4, 4);
+        ctx.fillStyle = '#b0bccc';
+        ctx.fillRect(w / 2 - 3, h - 17, 2, 1);
+
+        // Ore veins in rock
+        ctx.fillStyle = '#8090a0';
+        ctx.fillRect(6, 18, 3, 2); ctx.fillRect(w - 10, 24, 3, 2); ctx.fillRect(w - 8, 14, 2, 2);
 
         cache[key] = c;
         return c;
     }
 
-    function drawChickenHut(scale = 2) {
-        const key = `chickenhut_${scale}`;
+    function drawBlacksmith() {
+        const key = 'blacksmith';
         if (cache[key]) return cache[key];
         const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
 
+        // Stone building
+        ctx.fillStyle = '#8a8070';
+        ctx.fillRect(6, 18, w - 12, h - 22);
+        for (let y = 20; y < h - 6; y += 6) {
+            for (let x = 6; x < w - 8; x += 10) {
+                const off = (Math.floor(y / 6) % 2) * 5;
+                ctx.fillStyle = '#706858';
+                ctx.fillRect(x + off, y, 1, 6);
+                ctx.fillStyle = '#9a9080';
+                ctx.fillRect(x + off + 1, y, 9, 1);
+            }
+        }
+        // Chimney (tall)
+        ctx.fillStyle = '#5a5040';
+        ctx.fillRect(46, 2, 8, 20);
+        ctx.fillStyle = '#4a4030';
+        ctx.fillRect(45, 1, 10, 2);
+
+        // Roof (dark slate)
+        ctx.fillStyle = '#3a3a48';
+        ctx.fillRect(2, 14, w - 4, 6);
+        ctx.fillStyle = '#4a4a5a';
+        ctx.fillRect(4, 10, w - 8, 5);
+        ctx.fillStyle = '#5a5a6a';
+        ctx.fillRect(6, 8, w - 12, 3);
+
+        // Open forge front with glowing fire
+        ctx.fillStyle = '#2a2018';
+        ctx.fillRect(22, 28, 20, 16);
+        ctx.fillStyle = '#ff6a1a';
+        ctx.fillRect(26, 34, 12, 8);
+        ctx.fillStyle = '#ffd040';
+        ctx.fillRect(29, 36, 6, 5);
+        ctx.fillStyle = '#ff9a2a';
+        ctx.fillRect(30, 33, 4, 2);
+
+        // Anvil outside
+        ctx.fillStyle = '#404048';
+        ctx.fillRect(8, h - 12, 12, 4);
+        ctx.fillRect(11, h - 8, 6, 5);
+        ctx.fillStyle = '#6a6a78';
+        ctx.fillRect(8, h - 12, 12, 1);
+        // Hammer
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(w - 14, h - 16, 2, 12);
+        ctx.fillStyle = '#8a8a9a';
+        ctx.fillRect(w - 17, h - 18, 8, 4);
+
+        cache[key] = c;
+        return c;
+    }
+
+    function drawChickenHut() {
+        const key = 'chicken_hut';
+        if (cache[key]) return cache[key];
+        const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+
+        // Dirt yard
+        ctx.fillStyle = '#9a8a5a';
+        ctx.fillRect(2, 30, w - 4, h - 34);
+        ctx.fillStyle = '#8a7a4a';
+        for (let i = 0; i < 10; i++) ctx.fillRect(4 + (i * 11) % (w - 8), 32 + (i * 7) % (h - 38), 2, 1);
+
         // Fence
         ctx.fillStyle = '#8B6914';
-        // Bottom fence
         ctx.fillRect(2, h - 6, w - 4, 2);
-        // Posts
-        for (let x = 2; x < w - 2; x += 10) {
-            ctx.fillRect(x, h - 14, 2, 10);
-        }
-        // Rails
+        for (let x = 2; x < w - 2; x += 10) ctx.fillRect(x, h - 14, 2, 10);
         ctx.fillStyle = '#7a5a10';
         ctx.fillRect(2, h - 12, w - 4, 1);
         ctx.fillRect(2, h - 8, w - 4, 1);
 
-        // Small coop
+        // Coop
         ctx.fillStyle = '#c4a060';
         ctx.fillRect(6, 18, 24, 20);
-        // Coop roof
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.fillRect(24, 20, 6, 18);
         ctx.fillStyle = '#8B4513';
         ctx.fillRect(4, 14, 28, 6);
-        // Coop door
+        ctx.fillStyle = '#9B5523';
+        ctx.fillRect(6, 12, 24, 3);
         ctx.fillStyle = '#4a2a08';
         ctx.fillRect(14, 28, 8, 10);
+        // Ramp
+        ctx.fillStyle = '#a08040';
+        ctx.fillRect(22, 36, 10, 2);
 
-        // Chickens (simple pixel birds)
-        const chickPos = [[38, 40], [44, 36], [40, 48], [50, 44]];
-        chickPos.forEach(([cx, cy]) => {
-            // Body
-            ctx.fillStyle = '#fff';
+        // Chickens
+        const chickPos = [[38, 40], [44, 34], [40, 48], [50, 44]];
+        chickPos.forEach(([cx, cy], i) => {
+            ctx.fillStyle = i === 1 ? '#e8c060' : '#fff';
             ctx.fillRect(cx, cy, 6, 4);
-            // Head
-            ctx.fillStyle = '#fff';
             ctx.fillRect(cx + 5, cy - 2, 3, 3);
-            // Beak
             ctx.fillStyle = '#da3';
             ctx.fillRect(cx + 8, cy - 1, 2, 1);
-            // Comb
             ctx.fillStyle = '#c22';
             ctx.fillRect(cx + 6, cy - 3, 2, 1);
-            // Legs
             ctx.fillStyle = '#da3';
             ctx.fillRect(cx + 1, cy + 4, 1, 2);
             ctx.fillRect(cx + 4, cy + 4, 1, 2);
+            ctx.fillStyle = '#000';
+            ctx.fillRect(cx + 6, cy - 1, 1, 1);
         });
 
         cache[key] = c;
         return c;
     }
 
-    function drawAppleOrchard(scale = 2, grown = true) {
-        const key = `orchard_${scale}_${grown}`;
+    function drawAppleOrchard(grown = true) {
+        const key = `apple_orchard_${grown}`;
         if (cache[key]) return cache[key];
         const w = 3 * TILE_SIZE, h = 2 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
 
-        // Trees in a row
+        // Tilled ground
+        ctx.fillStyle = 'rgba(90, 60, 30, 0.25)';
+        ctx.fillRect(2, 4, w - 4, h - 8);
+
         const treePositions = [[16, 10], [48, 8], [80, 10]];
         treePositions.forEach(([tx, ty]) => {
-            // Trunk
             ctx.fillStyle = '#6b4226';
             ctx.fillRect(tx - 2, ty + 16, 4, 16);
-
             if (grown) {
-                // Full leafy crown
                 const leafColors = ['#2d6b1e', '#3a8528', '#247a16'];
                 for (let dy = -2; dy < 14; dy++) {
                     for (let dx = -10; dx < 10; dx++) {
                         const dist = Math.sqrt(dx * dx + (dy - 5) * (dy - 5));
                         if (dist < 10) {
                             const ci = (Math.abs(dx) + dy) % leafColors.length;
-                            ctx.fillStyle = leafColors[ci];
+                            ctx.fillStyle = (dx + dy > 9) ? '#1d5b0e' : leafColors[ci];
                             ctx.fillRect(tx + dx, ty + dy, 1, 1);
                         }
                     }
                 }
-                // Apples
-                ctx.fillStyle = '#c22';
+                ctx.fillStyle = '#d8382c';
                 ctx.fillRect(tx - 5, ty + 6, 3, 3);
                 ctx.fillRect(tx + 3, ty + 4, 3, 3);
                 ctx.fillRect(tx - 2, ty + 10, 3, 3);
                 ctx.fillRect(tx + 6, ty + 8, 3, 3);
+                ctx.fillStyle = '#ff8a7a';
+                ctx.fillRect(tx - 5, ty + 6, 1, 1);
+                ctx.fillRect(tx + 3, ty + 4, 1, 1);
             } else {
-                // Sapling - small leaves
                 ctx.fillStyle = '#4a8538';
                 ctx.fillRect(tx - 4, ty + 8, 8, 8);
                 ctx.fillRect(tx - 2, ty + 5, 4, 4);
+                ctx.fillStyle = '#6aa548';
+                ctx.fillRect(tx - 3, ty + 9, 2, 2);
+                // support stake
+                ctx.fillStyle = '#a08040';
+                ctx.fillRect(tx + 3, ty + 12, 1, 20);
             }
         });
 
-        // Small fence at bottom
         ctx.fillStyle = '#8B6914';
-        for (let x = 4; x < w - 4; x += 12) {
-            ctx.fillRect(x, h - 8, 2, 6);
-        }
+        for (let x = 4; x < w - 4; x += 12) ctx.fillRect(x, h - 8, 2, 6);
         ctx.fillStyle = '#7a5a10';
         ctx.fillRect(4, h - 5, w - 8, 1);
 
@@ -559,37 +1038,124 @@ const Sprites = (() => {
         return c;
     }
 
-    // Simple seeded random for deterministic flowers
-    function mulberry32(a) {
-        return function() {
-            a |= 0; a = a + 0x6D2B79F5 | 0;
-            let t = Math.imul(a ^ a >>> 15, 1 | a);
-            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-            return ((t ^ t >>> 14) >>> 0) / 4294967296;
-        };
+    function drawFarm(grown = true) {
+        const key = `farm_${grown}`;
+        if (cache[key]) return cache[key];
+        const w = 3 * TILE_SIZE, h = 3 * TILE_SIZE;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+
+        // Field with furrows
+        ctx.fillStyle = '#8a6a3a';
+        ctx.fillRect(2, 2, w - 4, h - 4);
+        for (let y = 6; y < h - 4; y += 6) {
+            ctx.fillStyle = '#75592c';
+            ctx.fillRect(4, y, w - 8, 2);
+        }
+        // Crops
+        for (let y = 6; y < h - 6; y += 6) {
+            for (let x = 6; x < w - 6; x += 5) {
+                if (grown) {
+                    ctx.fillStyle = (x + y) % 10 < 5 ? '#e0b830' : '#d4a420';
+                    ctx.fillRect(x, y - 3, 2, 5);
+                    ctx.fillStyle = '#f0d060';
+                    ctx.fillRect(x, y - 4, 2, 2);
+                } else {
+                    ctx.fillStyle = '#6aa548';
+                    ctx.fillRect(x, y, 1, 2);
+                    ctx.fillRect(x + 1, y - 1, 1, 2);
+                }
+            }
+        }
+        // Scarecrow
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(w - 16, 20, 2, 26);
+        ctx.fillRect(w - 24, 26, 18, 2);
+        ctx.fillStyle = '#c4a060';
+        ctx.fillRect(w - 18, 14, 6, 6);
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(w - 20, 12, 10, 3);
+        ctx.fillStyle = '#b04040';
+        ctx.fillRect(w - 19, 28, 8, 8);
+
+        // Fence
+        ctx.fillStyle = '#8B6914';
+        for (let x = 2; x < w - 2; x += 10) ctx.fillRect(x, h - 8, 2, 7);
+        ctx.fillStyle = '#7a5a10';
+        ctx.fillRect(2, h - 5, w - 4, 1);
+
+        cache[key] = c;
+        return c;
     }
 
     // Get building sprite by type
     function getBuilding(type, extra) {
+        const grown = extra?.grown !== false;
         switch (type) {
             case 'castle': return drawCastle();
             case 'house': return drawHouse();
+            case 'tavern': return drawTavern();
             case 'warehouse': return drawWarehouse();
             case 'lumberjack': return drawLumberjack();
             case 'quarry': return drawQuarry();
             case 'iron_mine': return drawIronMine();
+            case 'blacksmith': return drawBlacksmith();
             case 'chicken_hut': return drawChickenHut();
-            case 'apple_orchard': return drawAppleOrchard(2, extra?.grown !== false);
+            case 'apple_orchard': return drawAppleOrchard(grown);
+            case 'farm': return drawFarm(grown);
             default: return null;
         }
     }
 
+    // Black silhouette of a building sprite, used as a soft drop shadow
+    function getBuildingShadow(type, extra) {
+        const grown = extra?.grown !== false;
+        const key = `shadow_${type}_${grown}`;
+        if (cache[key]) return cache[key];
+        const sprite = getBuilding(type, extra);
+        if (!sprite) return null;
+        const c = createCanvas(sprite.width, sprite.height);
+        const ctx = c.getContext('2d');
+        ctx.drawImage(sprite, 0, 0);
+        ctx.globalCompositeOperation = 'source-in';
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, c.width, c.height);
+        cache[key] = c;
+        return c;
+    }
+
+    // Thumbnail of a building for the menu (fits into size x size)
+    function getBuildingThumb(type, size = 40) {
+        const key = `thumb_${type}_${size}`;
+        if (cache[key]) return cache[key];
+        const sprite = getBuilding(type);
+        const c = createCanvas(size, size);
+        const ctx = c.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        if (sprite) {
+            const scale = Math.min(size / sprite.width, size / sprite.height);
+            const dw = Math.floor(sprite.width * scale);
+            const dh = Math.floor(sprite.height * scale);
+            ctx.drawImage(sprite, Math.floor((size - dw) / 2), Math.floor((size - dh) / 2), dw, dh);
+        }
+        cache[key] = c;
+        return c;
+    }
+
     return {
+        TILE_VARIANTS,
+        drawTile,
+        drawShore,
+        drawWave,
         drawTree,
         drawPineTree,
         drawStonePile,
         drawFlowers,
+        drawVillager,
+        drawIcon,
         getBuilding,
+        getBuildingShadow,
+        getBuildingThumb,
         mulberry32,
     };
 })();

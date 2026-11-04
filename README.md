@@ -5,37 +5,61 @@ A medieval castle builder game in the browser. Inspired by Stronghold, Civilizat
 ## Play
 
 Open `index.html` in any modern browser — no build step or dependencies needed.
+Turn your sound on: music, ambience and effects are all synthesized in the browser.
 
 ## How to Play
 
-- **Place your Castle** first (click it in the right panel, then click the map)
-- **Drag** the map to scroll around
+- **Place your Castle** first (it is pre-selected, just click the map). The calendar starts once it stands.
+- **Drag** the map to scroll, **mouse wheel** / **+** / **-** to zoom, **arrow keys** to pan, click the **minimap** to jump
 - **Right-click** or **Escape** to cancel placement
-- **Space** to pause/unpause, **1/2/3** for speed
+- **Space** to pause/unpause, **1/2/3** for speed, **M** mute, **H** help, **C** center on the Castle
+- Every building has a **hotkey** (shown in the menu)
+- Click a placed building for details or to **demolish** it (50% refund, **Del** key)
+- Progress is **saved automatically**; use *Continue* on the title screen
 
 ### Buildings
 
-| Building | Cost | Workers | Output |
+| Building | Cost | Workers | Effect |
 |---|---|---|---|
-| Castle | Free | — | +10 population |
-| Warehouse | Free (limit 1) | — | +200 storage |
-| House | 15 wood, 10 stone | — | +5 population |
-| Lumberjack | 10 wood | 2 | +6 wood/day (near trees) |
+| Castle | Free | — | +10 villagers |
+| Warehouse | Free (limit 1) | — | +300 storage |
+| House | 15 wood, 10 stone | — | +5 villagers |
+| Tavern | 20 wood, 10 stone, 5 iron | — | +8 villagers |
+| Lumberjack | 10 wood | 2 | +6 wood/day (near forest) |
 | Stone Quarry | 10 wood | 2 | +4 stone/day (near stone) |
 | Iron Mine | 15 wood, 10 stone | 2 | +2 iron/day (near stone) |
-| Chicken Hut | 10 wood, 5 stone | 1 | +4 food/day |
-| Apple Orchard | 5 wood | 1 | +8 food/day (5 day grow) |
+| Blacksmith | 20 wood, 15 stone, 10 iron | 1 | +25% wood, stone and iron production (limit 1) |
+| Chicken Hut | 10 wood, 5 stone | 1 | +3 food/day |
+| Apple Orchard | 15 wood | 1 | +6 food/day after 6 days |
+| Wheat Farm | 20 wood, 10 stone | 2 | +10 food/day after 4 days |
 
 ### Tips
 
-- Every villager eats **1 food/day** — build food production early
-- **3 consecutive days** without food = game over
-- Lumberjacks and quarries must be placed **near** forests/stone deposits
-- Resource bar shows production rates (e.g. `40 (+6)` means 40 wood, gaining 6/day)
+- Every **working** villager eats **1 food/day**. Idle villagers feed themselves, so housing alone is safe.
+- **3 consecutive days** without food = game over. The food counter turns red while you are in danger.
+- Lumberjacks, quarries and mines must be within **5 tiles** of forest / stone deposits. The dashed box while placing shows the radius.
+- Resources are capped by **storage** (shown in the top bar). Build the Warehouse before your stockpiles fill up.
+- The **goal box** above the minimap always shows your next milestone.
 
 ## Tech
 
-Pure HTML5 Canvas + vanilla JS. All pixel art is procedurally generated — no external assets.
+Pure HTML5 Canvas + vanilla JS. All pixel art is procedurally generated and all audio is synthesized with the Web Audio API — no external assets.
+
+Modules in `js/`:
+
+| File | Purpose |
+|---|---|
+| `constants.js` | Balance, building definitions, milestones, palettes |
+| `audio.js` | Procedural sound effects, ambient wind/birds, music loop |
+| `sprites.js` | Pixel-art tiles, buildings, villagers, icons |
+| `map.js` | Seeded terrain generation |
+| `buildings.js` | Placed buildings, save/load serialization |
+| `villagers.js` | Cosmetic walking workers |
+| `effects.js` | Smoke, dust, sparks, floating text |
+| `game.js` | Economy, day ticks, milestones, save/load |
+| `renderer.js` | Camera (pan/zoom, HiDPI), world rendering, minimap |
+| `ui.js` | Menus, tooltips, input, notifications |
+| `main.js` | Bootstrap and game loop |
 
 ## Deploy
 

@@ -31,6 +31,7 @@ const BuildingManager = (() => {
             dayPlaced: 0,
             grown: def.production?.growthDays ? false : true,
             growthProgress: 0,
+            placedAt: performance.now(), // for the pop-in animation
         };
 
         placedBuildings.push(building);
@@ -64,6 +65,38 @@ const BuildingManager = (() => {
         return placedBuildings.filter(b => b.def.production && b.active && b.grown);
     }
 
+    // ---- Save / load ----
+    function serialize() {
+        return placedBuildings.map(b => ({
+            id: b.id,
+            type: b.type,
+            tileX: b.tileX,
+            tileY: b.tileY,
+            workers: b.workers,
+            active: b.active,
+            dayPlaced: b.dayPlaced,
+            grown: b.grown,
+            growthProgress: b.growthProgress,
+        }));
+    }
+
+    function deserialize(list) {
+        reset();
+        (list || []).forEach(s => {
+            if (!BUILDINGS[s.type]) return;
+            const b = place(s.type, s.tileX, s.tileY);
+            if (!b) return;
+            b.id = s.id ?? b.id;
+            b.workers = s.workers ?? 0;
+            b.active = s.active ?? (b.maxWorkers === 0);
+            b.dayPlaced = s.dayPlaced ?? 1;
+            b.grown = s.grown ?? b.grown;
+            b.growthProgress = s.growthProgress ?? 0;
+            b.placedAt = 0; // no pop-in for loaded buildings
+            nextId = Math.max(nextId, b.id + 1);
+        });
+    }
+
     return {
         reset,
         place,
@@ -73,5 +106,7 @@ const BuildingManager = (() => {
         getBuildingAt,
         countByType,
         getProductionBuildings,
+        serialize,
+        deserialize,
     };
 })();

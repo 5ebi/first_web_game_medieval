@@ -3,51 +3,45 @@
 // ============================================
 
 const Game = (() => {
-    let state = {
-        started: false,
-        paused: false,
-        speed: 1,
-        day: 1,
-        dayProgress: 0,  // 0 to 1
-        resources: {
-            wood: 50,
-            stone: 30,
-            iron: 0,
-            food: 40,
-        },
-        maxStorage: 100,  // Base storage, increases with warehouse
-        populationCap: 0,
-        populationUsed: 0,
-        starvationDays: 0,
-        gameOver: false,
-    };
+    function freshState() {
+        return {
+            started: false,
+            paused: false,
+            speed: 1,
+            lastSpeed: 1,
+            day: 1,
+            dayProgress: 0,  // 0 to 1
+            resources: {
+                wood: 60,
+                stone: 30,
+                iron: 0,
+                food: 40,
+            },
+            maxStorage: BASE_STORAGE,
+            populationCap: 0,
+            populationUsed: 0,
+            starvationDays: 0,
+            gameOver: false,
+            milestones: [],       // ids of achieved milestones
+            storageWarned: {},    // resource -> true once "storage full" was shown
+            stats: { built: 0, demolished: 0, maxPop: 0 },
+        };
+    }
+
+    let state = freshState();
 
     let callbacks = {
         onDayTick: null,
         onResourceChange: null,
         onNotification: null,
         onGameOver: null,
+        onMilestone: null,
+        onProduce: null,
+        onBuildingsChanged: null,
     };
 
     function reset() {
-        state = {
-            started: false,
-            paused: false,
-            speed: 1,
-            day: 1,
-            dayProgress: 0,
-            resources: {
-                wood: 50,
-                stone: 30,
-                iron: 0,
-                food: 40,
-            },
-            maxStorage: 100,
-            populationCap: 0,
-            populationUsed: 0,
-            starvationDays: 0,
-            gameOver: false,
-        };
+        state = freshState();
         BuildingManager.reset();
     }
 
@@ -59,14 +53,64 @@ const Game = (() => {
         Object.assign(callbacks, cbs);
     }
 
+    function notify(msg, type) {
+        if (callbacks.onNotification) callbacks.onNotification(msg, type);
+    }
+
     function start() {
         state.started = true;
         state.paused = false;
     }
 
     function setSpeed(speed) {
-        state.speed = speed;
-        state.paused = speed === 0;
+        if (speed === 0) {
+            if (state.speed > 0) state.lastSpeed = state.speed;
+            state.paused = true;
+            state.speed = 0;
+        } else {
+            state.speed = speed;
+            state.lastSpeed = speed;
+            state.paused = false;
+        }
+    }
+
+    function togglePause() {
+        if (state.paused) setSpeed(state.lastSpeed || 1);
+        else setSpeed(0);
+        return state.paused;
+    }
+
+    // ---- Economy helpers ----
+    function hasCastle() {
+        return BuildingManager.countByType('castle') > 0;
+    }
+
+    function getProductionMultiplier(resource) {
+        if (resource === 'food') return 1;
+        let bonus = 0;
+        BuildingManager.getAll().forEach(b => {
+            if (b.def.provides?.productionBonus && b.active) bonus += b.def.provides.productionBonus;
+        });
+        return 1 + bonus;
+    }
+
+    // Production per day for a single building (after bonuses)
+    function getBuildingOutput(b) {
+        if (!b.def.production) return 0;
+        return b.def.production.amount * getProductionMultiplier(b.def.production.resource);
+    }
+
+    function getRates() {
+        const rates = { wood: 0, stone: 0, iron: 0, food: 0 };
+        BuildingManager.getProductionBuildings().forEach(b => {
+            rates[b.def.production.resource] += getBuildingOutput(b);
+        });
+        return rates;
+    }
+
+    function getFoodConsumption() {
+        // Working villagers eat 1 food per day. Idle villagers forage for themselves.
+        return state.populationUsed;
     }
 
     // ---- Building placement logic ----
@@ -78,35 +122,46 @@ const Game = (() => {
                def.cost.iron <= state.resources.iron;
     }
 
+    // Human readable reason why a building can't be built right now (null = ok)
+    function getUnavailableReason(type) {
+        const def = BUILDINGS[type];
+        if (!def) return 'Unknown building';
+        if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) {
+            return def.limit === 1 ? 'Already built' : `Limit of ${def.limit} reached`;
+        }
+        if (type !== 'castle' && !hasCastle()) return 'Place your Castle first';
+        const missing = [];
+        ['wood', 'stone', 'iron'].forEach(r => {
+            if (def.cost[r] > state.resources[r]) missing.push(`${def.cost[r] - Math.floor(state.resources[r])} ${r}`);
+        });
+        if (missing.length) return `Need ${missing.join(', ')} more`;
+        const free = getFreeWorkers();
+        if (def.workers > free) return `Needs ${def.workers} free villagers (have ${free}). Build a House.`;
+        return null;
+    }
+
     function canPlace(type, tileX, tileY) {
         const def = BUILDINGS[type];
         if (!def) return { ok: false, reason: 'Unknown building type' };
 
-        // Check limit
-        if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) {
-            return { ok: false, reason: `You can only build ${def.limit} ${def.name}` };
-        }
+        const reason = getUnavailableReason(type);
+        if (reason) return { ok: false, reason };
 
-        // Check affordability
-        if (!canAfford(type)) {
-            return { ok: false, reason: 'Not enough resources' };
-        }
-
-        // Check available workers
-        const freeWorkers = state.populationCap - state.populationUsed;
-        if (def.workers > freeWorkers) {
-            return { ok: false, reason: `Need ${def.workers} free villagers (have ${freeWorkers})` };
-        }
-
-        // Check terrain
         if (!GameMap.isBuildable(tileX, tileY, def.width, def.height, BuildingManager.getAll())) {
-            return { ok: false, reason: 'Cannot build here' };
+            // Distinguish water from overlap for a better hint
+            let water = false;
+            for (let dy = 0; dy < def.height && !water; dy++) {
+                for (let dx = 0; dx < def.width; dx++) {
+                    const t = GameMap.getTerrain(tileX + dx, tileY + dy);
+                    if (t === TERRAIN.WATER || t === TERRAIN.SAND) { water = true; break; }
+                }
+            }
+            return { ok: false, reason: water ? 'Cannot build on water or sand' : 'Space is occupied' };
         }
 
-        // Check resource proximity for production buildings
         if (def.production?.requires) {
             if (!GameMap.hasNearbyResource(tileX, tileY, def.width, def.height, def.production.requires)) {
-                return { ok: false, reason: `Must be near ${def.production.requires === 'FOREST' ? 'trees' : 'stone deposits'}` };
+                return { ok: false, reason: `Must be near ${def.production.requires === 'FOREST' ? 'a forest' : 'stone deposits'}` };
             }
         }
 
@@ -116,53 +171,105 @@ const Game = (() => {
     function placeBuilding(type, tileX, tileY) {
         const check = canPlace(type, tileX, tileY);
         if (!check.ok) {
-            if (callbacks.onNotification) callbacks.onNotification(check.reason, 'warning');
+            notify(check.reason, 'warning');
             return null;
         }
 
         const def = BUILDINGS[type];
 
-        // Deduct cost
         state.resources.wood -= def.cost.wood;
         state.resources.stone -= def.cost.stone;
         state.resources.iron -= def.cost.iron;
 
-        // Place building
         const building = BuildingManager.place(type, tileX, tileY);
         building.dayPlaced = state.day;
 
-        // Auto-assign workers
         if (def.workers > 0) {
             building.workers = def.workers;
             building.active = true;
             state.populationUsed += def.workers;
         }
 
-        // Apply provides
-        if (def.provides.populationCap) {
-            state.populationCap += def.provides.populationCap;
-        }
-        if (def.provides.storage) {
-            state.maxStorage += def.provides.storage;
-        }
+        if (def.provides.populationCap) state.populationCap += def.provides.populationCap;
+        if (def.provides.storage) state.maxStorage += def.provides.storage;
+
+        state.stats.built++;
+        state.stats.maxPop = Math.max(state.stats.maxPop, state.populationUsed);
 
         if (callbacks.onResourceChange) callbacks.onResourceChange();
-        if (callbacks.onNotification) callbacks.onNotification(`${def.name} built!`, 'success');
+        if (callbacks.onBuildingsChanged) callbacks.onBuildingsChanged();
+        notify(`${def.name} built!`, 'success');
+        checkMilestones();
+        save();
 
         return building;
+    }
+
+    function canDemolish(building) {
+        if (!building) return { ok: false, reason: 'Nothing selected' };
+        if (building.type === 'castle') return { ok: false, reason: 'The Castle cannot be demolished' };
+        if (building.def.provides.populationCap) {
+            // Removing housing must not strand working villagers
+            const capAfter = state.populationCap - building.def.provides.populationCap;
+            if (capAfter < state.populationUsed) {
+                return { ok: false, reason: `Villagers still live here. Free ${state.populationUsed - capAfter} workers first.` };
+            }
+        }
+        return { ok: true };
+    }
+
+    function demolishBuilding(id) {
+        const b = BuildingManager.getById(id);
+        const check = canDemolish(b);
+        if (!check.ok) {
+            notify(check.reason, 'warning');
+            return false;
+        }
+        const def = b.def;
+        // Refund part of the cost
+        const refund = {};
+        ['wood', 'stone', 'iron'].forEach(r => {
+            const amt = Math.floor(def.cost[r] * DEMOLISH_REFUND);
+            if (amt > 0) {
+                refund[r] = amt;
+                state.resources[r] = Math.min(state.maxStorage, state.resources[r] + amt);
+            }
+        });
+        if (b.workers > 0) state.populationUsed -= b.workers;
+        if (def.provides.populationCap) state.populationCap -= def.provides.populationCap;
+        if (def.provides.storage) {
+            state.maxStorage -= def.provides.storage;
+            Object.keys(state.resources).forEach(r => {
+                state.resources[r] = Math.min(state.resources[r], state.maxStorage);
+            });
+        }
+        BuildingManager.remove(id);
+        state.stats.demolished++;
+
+        const refundStr = Object.entries(refund).map(([r, a]) => `+${a} ${r}`).join(', ');
+        notify(`${def.name} demolished${refundStr ? ' (' + refundStr + ')' : ''}`, 'info');
+        if (callbacks.onResourceChange) callbacks.onResourceChange();
+        if (callbacks.onBuildingsChanged) callbacks.onBuildingsChanged();
+        save();
+        return true;
     }
 
     // ---- Day tick logic ----
     function update(deltaMs) {
         if (!state.started || state.paused || state.gameOver) return;
+        // The calendar only starts once the castle stands
+        if (!hasCastle()) return;
 
         const dayDuration = BASE_DAY_DURATION / state.speed;
         state.dayProgress += deltaMs / dayDuration;
 
-        while (state.dayProgress >= 1) {
+        let ticks = 0;
+        while (state.dayProgress >= 1 && ticks < 10) {
             state.dayProgress -= 1;
             processDayTick();
+            ticks++;
         }
+        if (state.dayProgress >= 1) state.dayProgress = 0; // guard against huge deltas (tab was hidden)
     }
 
     function processDayTick() {
@@ -172,78 +279,142 @@ const Game = (() => {
         const producers = BuildingManager.getProductionBuildings();
         producers.forEach(b => {
             const res = b.def.production.resource;
-            const amount = b.def.production.amount;
-            state.resources[res] = Math.min(state.resources[res] + amount, state.maxStorage);
+            const amount = getBuildingOutput(b);
+            const before = state.resources[res];
+            state.resources[res] = Math.min(before + amount, state.maxStorage);
+            const gained = state.resources[res] - before;
+            if (callbacks.onProduce) callbacks.onProduce(b, res, gained);
+            if (gained < amount - 0.001 && !state.storageWarned[res]) {
+                state.storageWarned[res] = true;
+                notify(`Storage full: ${res} is going to waste. Build a Warehouse!`, 'warning');
+            }
+            if (gained >= amount - 0.001 && state.resources[res] < state.maxStorage * 0.9) {
+                state.storageWarned[res] = false;
+            }
         });
 
-        // Growth for orchards
+        // Growth for orchards / farms
         BuildingManager.getAll().forEach(b => {
             if (b.def.production?.growthDays && !b.grown) {
                 b.growthProgress++;
                 if (b.growthProgress >= b.def.production.growthDays) {
                     b.grown = true;
-                    if (callbacks.onNotification) {
-                        callbacks.onNotification(`${b.def.name} is now producing!`, 'success');
-                    }
+                    notify(`${b.def.name} is now producing!`, 'grown');
                 }
             }
         });
 
-        // Food consumption: 1 food per villager per day
-        // All villagers in the settlement eat, whether working or idle
-        const foodNeeded = state.populationCap;
-
+        // Food consumption
+        const foodNeeded = getFoodConsumption();
         if (foodNeeded > 0) {
             if (state.resources.food >= foodNeeded) {
                 state.resources.food -= foodNeeded;
+                if (state.starvationDays > 0) notify('Your people are fed again.', 'success');
                 state.starvationDays = 0;
             } else {
-                // Partial food - eat what's available
                 state.resources.food = 0;
                 state.starvationDays++;
-
-                if (state.starvationDays >= 3) {
-                    // Game over
+                if (state.starvationDays >= STARVATION_LIMIT) {
                     state.gameOver = true;
+                    clearSave();
                     if (callbacks.onGameOver) callbacks.onGameOver();
                 } else {
-                    if (callbacks.onNotification) {
-                        callbacks.onNotification(`Your people are starving! (${state.starvationDays}/3 days)`, 'warning');
-                    }
+                    notify(`Your people are starving! (${state.starvationDays}/${STARVATION_LIMIT} days)`, 'danger');
                 }
             }
         }
 
-        // Warnings
-        if (state.resources.food <= foodNeeded * 3 && state.resources.food > 0 && state.day % 5 === 0) {
-            if (callbacks.onNotification) {
-                callbacks.onNotification('Food supplies running low!', 'warning');
-            }
+        // Low food warning (a few days ahead)
+        const rates = getRates();
+        const net = rates.food - foodNeeded;
+        if (net < 0 && state.resources.food > 0 && state.resources.food <= -net * 4 && state.day % 3 === 0) {
+            const daysLeft = Math.ceil(state.resources.food / -net);
+            notify(`Food runs out in ~${daysLeft} day${daysLeft === 1 ? '' : 's'}! Build food production.`, 'warning');
         }
+
+        checkMilestones();
 
         if (callbacks.onDayTick) callbacks.onDayTick();
         if (callbacks.onResourceChange) callbacks.onResourceChange();
+
+        if (state.day % 5 === 0) save();
+    }
+
+    // ---- Milestones ----
+    function checkMilestones() {
+        MILESTONES.forEach(m => {
+            if (state.milestones.includes(m.id)) return;
+            if (m.check(state, BuildingManager)) {
+                state.milestones.push(m.id);
+                if (callbacks.onMilestone) callbacks.onMilestone(m);
+            }
+        });
+    }
+
+    function getNextMilestone() {
+        return MILESTONES.find(m => !state.milestones.includes(m.id)) || null;
     }
 
     // Check if a building type's button should be enabled
     function isBuildingAvailable(type) {
-        const def = BUILDINGS[type];
-        if (!def) return false;
-
-        // Check limit
-        if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) return false;
-
-        // Castle must be first building
-        if (type !== 'castle' && BuildingManager.countByType('castle') === 0) return false;
-
-        // Need castle first for everything else
-        if (type === 'warehouse' && BuildingManager.countByType('castle') === 0) return false;
-
-        return canAfford(type);
+        return getUnavailableReason(type) === null;
     }
 
     function getFreeWorkers() {
         return state.populationCap - state.populationUsed;
+    }
+
+    // ---- Save / Load ----
+    function save() {
+        if (!state.started || state.gameOver) return;
+        try {
+            const data = {
+                version: 2,
+                seed: GameMap.getSeed(),
+                state: Object.assign({}, state, { started: true }),
+                buildings: BuildingManager.serialize(),
+                savedAt: Date.now(),
+            };
+            localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+        } catch (e) { /* storage might be unavailable */ }
+    }
+
+    function hasSave() {
+        try {
+            return !!localStorage.getItem(SAVE_KEY);
+        } catch (e) { return false; }
+    }
+
+    function getSaveInfo() {
+        try {
+            const raw = localStorage.getItem(SAVE_KEY);
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            return { day: data.state?.day, buildings: data.buildings?.length || 0, savedAt: data.savedAt };
+        } catch (e) { return null; }
+    }
+
+    function load() {
+        try {
+            const raw = localStorage.getItem(SAVE_KEY);
+            if (!raw) return false;
+            const data = JSON.parse(raw);
+            if (!data || data.version !== 2) return false;
+            GameMap.generate(data.seed);
+            state = Object.assign(freshState(), data.state);
+            state.paused = false;
+            state.speed = state.lastSpeed || 1;
+            state.gameOver = false;
+            state.started = true;
+            BuildingManager.deserialize(data.buildings);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function clearSave() {
+        try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
     }
 
     return {
@@ -252,11 +423,26 @@ const Game = (() => {
         setCallbacks,
         start,
         setSpeed,
+        togglePause,
         canAfford,
         canPlace,
         placeBuilding,
+        canDemolish,
+        demolishBuilding,
         update,
         isBuildingAvailable,
+        getUnavailableReason,
         getFreeWorkers,
+        getRates,
+        getFoodConsumption,
+        getBuildingOutput,
+        getProductionMultiplier,
+        getNextMilestone,
+        hasCastle,
+        save,
+        load,
+        hasSave,
+        getSaveInfo,
+        clearSave,
     };
 })();
