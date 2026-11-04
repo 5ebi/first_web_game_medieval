@@ -94,18 +94,22 @@
         UI.showNotification('New game! Place your Castle.', 'info');
     });
 
-    // Save whenever the page may go away (tab switch, app switch, close).
-    // pagehide/visibilitychange are the events mobile browsers reliably fire.
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') SaveGame.save();
-    });
-    window.addEventListener('pagehide', () => SaveGame.save());
-
     // Main game loop
     let lastTime = performance.now();
 
+    // Save whenever the page may go away (tab switch, app switch, close).
+    // pagehide/visibilitychange are the events mobile browsers reliably fire.
+    // Time does not pass while the game is hidden: on return we start counting
+    // from "now" instead of catching up on every missed day at once.
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') SaveGame.save();
+        else lastTime = performance.now();
+    });
+    window.addEventListener('pagehide', () => SaveGame.save());
+
     function gameLoop(time) {
-        const delta = time - lastTime;
+        // Clamp: a stalled or throttled frame never advances more than MAX_FRAME_MS
+        const delta = Math.min(Math.max(time - lastTime, 0), MAX_FRAME_MS);
         lastTime = time;
 
         // Update game logic

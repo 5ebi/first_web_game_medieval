@@ -1,14 +1,32 @@
 // ============================================
 // Renderer - Canvas Drawing
 // ============================================
+//
+// Two layers:
+//  - a static layer (terrain, flowers, stone piles and ALL trees) baked once
+//    into an offscreen canvas per map,
+//  - a dynamic pass per frame: buildings plus the few trees that overlap a
+//    building, depth-sorted by their base.
+// Frames are only redrawn when something visible changed (camera, buildings,
+// placement preview, day/night tint, a new day), so an idle game costs ~0 CPU.
 
 const Renderer = (() => {
     let canvas, ctx;
     let camera = { x: 0, y: 0 };
     let canvasWidth, canvasHeight;
 
-    // Terrain tile cache
+    // Static map layer
     let terrainCanvas = null;
+
+    // Redraw bookkeeping
+    let dirty = true;
+    let lastBuildingsVersion = -1;
+    let lastPreviewKey = '';
+    let lastTintKey = -1;
+    let lastDay = -1;
+
+    // Trees whose sprite overlaps a building; they must be depth-sorted with it
+    let frontTrees = [];
 
     function init(canvasEl) {
         canvas = canvasEl;
@@ -26,17 +44,21 @@ const Renderer = (() => {
         canvasHeight = window.innerHeight;
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
-        // Invalidate terrain cache on resize
-        terrainCanvas = null;
+        dirty = true;
     }
 
-    function getCamera() { return camera; }
+    function getCamera() { return { x: camera.x, y: camera.y }; }
 
     function setCamera(x, y) {
         // Clamp camera
         const menuWidth = 220;
-        camera.x = Math.max(0, Math.min(MAP_PIXEL_W - canvasWidth + menuWidth, x));
-        camera.y = Math.max(-50, Math.min(MAP_PIXEL_H - canvasHeight + 50, y));
+        const nx = Math.round(Math.max(0, Math.min(MAP_PIXEL_W - canvasWidth + menuWidth, x)));
+        const ny = Math.round(Math.max(-50, Math.min(MAP_PIXEL_H - canvasHeight + 50, y)));
+        if (nx !== camera.x || ny !== camera.y) {
+            camera.x = nx;
+            camera.y = ny;
+            dirty = true;
+        }
     }
 
     function moveCamera(dx, dy) {
@@ -58,7 +80,31 @@ const Renderer = (() => {
         };
     }
 
-    // Pre-render terrain tiles to a big canvas
+    function markDirty() { dirty = true; }
+
+    // ---- Trees ----
+    function treeSprite(t) {
+        return t.type === 'pine' ? Sprites.drawPineTree() : Sprites.drawTree();
+    }
+
+    function drawTree(c, t, offX, offY) {
+        const sprite = treeSprite(t);
+        c.drawImage(sprite,
+            Math.round(t.x - offX - sprite.width / 2),
+            Math.round(t.y - offY - sprite.height + 16));
+    }
+
+    function treeRect(t) {
+        const sprite = treeSprite(t);
+        return {
+            x: t.x - sprite.width / 2,
+            y: t.y - sprite.height + 16,
+            w: sprite.width,
+            h: sprite.height,
+        };
+    }
+
+    // ---- Static layer: everything that never moves ----
     function renderTerrainCache() {
         if (terrainCanvas) return;
         terrainCanvas = document.createElement('canvas');
@@ -90,7 +136,7 @@ const Renderer = (() => {
                 tctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, 1);
                 tctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, 1, TILE_SIZE);
 
-                // Water animation shimmer
+                // Water shimmer
                 if (t === TERRAIN.WATER) {
                     if ((x + y) % 3 === 0) {
                         tctx.fillStyle = 'rgba(255,255,255,0.1)';
@@ -108,153 +154,174 @@ const Renderer = (() => {
             }
         }
 
-        // Draw flower decorations
-        const decs = GameMap.getDecorations();
-        decs.forEach(d => {
+        // Flower decorations
+        GameMap.getDecorations().forEach(d => {
             const flowerSprite = Sprites.drawFlowers(2, d.seed);
             tctx.drawImage(flowerSprite, d.x * TILE_SIZE, d.y * TILE_SIZE);
         });
+
+        // Stone piles
+        const stonePileSprite = Sprites.drawStonePile();
+        GameMap.getStones().forEach(s => {
+            tctx.drawImage(stonePileSprite, Math.round(s.x), Math.round(s.y));
+        });
+
+        // Trees (already sorted by y in GameMap, so overlaps are correct)
+        GameMap.getTrees().forEach(t => drawTree(tctx, t, 0, 0));
+
+        lastBuildingsVersion = -1; // front trees depend on the map
+        dirty = true;
     }
 
+    function rectsOverlap(a, b) {
+        return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    }
+
+    // Only runs when buildings change, not per frame
+    function computeFrontTrees() {
+        const rects = BuildingManager.getAll().map(b => ({ x: b.pixelX, y: b.pixelY, w: b.width, h: b.height }));
+        frontTrees = rects.length === 0 ? [] : GameMap.getTrees().filter(t => {
+            const r = treeRect(t);
+            return rects.some(br => rectsOverlap(r, br));
+        });
+    }
+
+    // Night tint alpha for the current day phase, quantized so we only
+    // redraw when the change is actually visible
+    function nightTintKey() {
+        const dayPhase = Game.getState().dayProgress;
+        let alpha = 0;
+        if (dayPhase > 0.7) alpha = (dayPhase - 0.7) / 0.3 * 0.15;
+        else if (dayPhase < 0.15) alpha = (0.15 - dayPhase) / 0.15 * 0.15;
+        return Math.round(alpha * 255);
+    }
+
+    function previewKey(pp) {
+        return pp ? `${pp.type}|${pp.tileX}|${pp.tileY}|${pp.valid}` : '';
+    }
+
+    // Returns true when a frame was actually drawn
     function render(placementPreview) {
-        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        renderTerrainCache();
+
+        const version = BuildingManager.getVersion();
+        if (version !== lastBuildingsVersion) {
+            lastBuildingsVersion = version;
+            computeFrontTrees();
+            dirty = true;
+        }
+
+        const tintKey = nightTintKey();
+        const pKey = previewKey(placementPreview);
+        const day = Game.getState().day;
+        if (tintKey !== lastTintKey || pKey !== lastPreviewKey || day !== lastDay) dirty = true;
+        if (!dirty) return false;
+
+        lastTintKey = tintKey;
+        lastPreviewKey = pKey;
+        lastDay = day;
+        dirty = false;
 
         // Background (for areas outside map)
         ctx.fillStyle = '#1a3a1a';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        // Render terrain cache
-        renderTerrainCache();
+        // Static layer (only the visible portion)
+        const sx = Math.max(0, camera.x);
+        const sy = Math.max(0, camera.y);
+        const sw = Math.min(MAP_PIXEL_W, camera.x + canvasWidth) - sx;
+        const sh = Math.min(MAP_PIXEL_H, camera.y + canvasHeight) - sy;
+        if (sw > 0 && sh > 0) {
+            ctx.drawImage(terrainCanvas, sx, sy, sw, sh, sx - camera.x, sy - camera.y, sw, sh);
+        }
 
-        // Calculate visible area
-        const startTileX = Math.max(0, Math.floor(camera.x / TILE_SIZE) - 1);
-        const startTileY = Math.max(0, Math.floor(camera.y / TILE_SIZE) - 1);
-        const endTileX = Math.min(MAP_WIDTH, Math.ceil((camera.x + canvasWidth) / TILE_SIZE) + 1);
-        const endTileY = Math.min(MAP_HEIGHT, Math.ceil((camera.y + canvasHeight) / TILE_SIZE) + 1);
-
-        // Draw terrain from cache (only visible portion)
-        const sx = startTileX * TILE_SIZE;
-        const sy = startTileY * TILE_SIZE;
-        const sw = (endTileX - startTileX) * TILE_SIZE;
-        const sh = (endTileY - startTileY) * TILE_SIZE;
-        ctx.drawImage(terrainCanvas, sx, sy, sw, sh,
-            sx - camera.x, sy - camera.y, sw, sh);
-
-        // Draw stone piles
-        const stonePileSprite = Sprites.drawStonePile();
-        GameMap.getStones().forEach(s => {
-            if (s.x + 32 > camera.x && s.x - 32 < camera.x + canvasWidth &&
-                s.y + 24 > camera.y && s.y - 24 < camera.y + canvasHeight) {
-                ctx.drawImage(stonePileSprite, s.x - camera.x, s.y - camera.y);
-            }
-        });
-
-        // Collect all drawable things for depth sorting
+        // Dynamic, depth-sorted pass: buildings + trees overlapping them
+        const viewL = camera.x, viewT = camera.y, viewR = camera.x + canvasWidth, viewB = camera.y + canvasHeight;
         const drawables = [];
+        const visibleBuildings = [];
 
-        // Trees
-        const trees = GameMap.getTrees();
-        trees.forEach(t => {
-            if (t.x + 40 > camera.x && t.x - 40 < camera.x + canvasWidth &&
-                t.y + 60 > camera.y && t.y - 60 < camera.y + canvasHeight) {
-                drawables.push({
-                    y: t.y + 30, // Sort by base
-                    draw: () => {
-                        const sprite = t.type === 'pine' ? Sprites.drawPineTree() : Sprites.drawTree();
-                        ctx.drawImage(sprite,
-                            t.x - camera.x - sprite.width / 2,
-                            t.y - camera.y - sprite.height + 16);
-                    }
-                });
+        BuildingManager.getAll().forEach(b => {
+            if (b.pixelX + b.width > viewL && b.pixelX < viewR && b.pixelY + b.height > viewT && b.pixelY < viewB) {
+                drawables.push({ y: b.pixelY + b.height, building: b });
+                visibleBuildings.push(b);
+            }
+        });
+        frontTrees.forEach(t => {
+            const r = treeRect(t);
+            if (r.x + r.w > viewL && r.x < viewR && r.y + r.h > viewT && r.y < viewB) {
+                drawables.push({ y: t.y + 30, tree: t });
             }
         });
 
-        // Buildings
-        const buildings = BuildingManager.getAll();
-        buildings.forEach(b => {
-            const bx = b.pixelX - camera.x;
-            const by = b.pixelY - camera.y;
-            if (bx + b.width > 0 && bx < canvasWidth && by + b.height > 0 && by < canvasHeight) {
-                drawables.push({
-                    y: b.pixelY + b.height,
-                    draw: () => {
-                        const sprite = Sprites.getBuilding(b.type, { grown: b.grown });
-                        if (sprite) {
-                            ctx.drawImage(sprite, bx, by);
-                        }
-
-                        // Worker indicator
-                        if (b.maxWorkers > 0) {
-                            ctx.fillStyle = 'rgba(0,0,0,0.5)';
-                            ctx.fillRect(bx + 2, by + b.height - 10, 36, 10);
-                            ctx.fillStyle = b.active ? '#4a4' : '#a44';
-                            ctx.font = '9px monospace';
-                            ctx.fillText(`👤${b.workers}/${b.maxWorkers}`, bx + 4, by + b.height - 2);
-                        }
-
-                        // Growth progress for orchards
-                        if (!b.grown && b.def.production?.growthDays) {
-                            const pct = b.growthProgress / b.def.production.growthDays;
-                            ctx.fillStyle = 'rgba(0,0,0,0.6)';
-                            ctx.fillRect(bx + 2, by - 10, b.width - 4, 8);
-                            ctx.fillStyle = '#4a4';
-                            ctx.fillRect(bx + 3, by - 9, (b.width - 6) * pct, 6);
-                            ctx.fillStyle = '#fff';
-                            ctx.font = '8px monospace';
-                            ctx.fillText('Growing...', bx + 4, by - 3);
-                        }
-                    }
-                });
-            }
-        });
-
-        // Sort by Y and draw
         drawables.sort((a, b) => a.y - b.y);
-        drawables.forEach(d => d.draw());
+        drawables.forEach(d => {
+            if (d.building) {
+                const b = d.building;
+                const sprite = Sprites.getBuilding(b.type, { grown: b.grown });
+                if (sprite) ctx.drawImage(sprite, b.pixelX - camera.x, b.pixelY - camera.y);
+            } else {
+                drawTree(ctx, d.tree, camera.x, camera.y);
+            }
+        });
+
+        // Labels always on top of trees and neighbours
+        visibleBuildings.forEach(b => drawBuildingLabels(b, b.pixelX - camera.x, b.pixelY - camera.y));
 
         // Placement preview
-        if (placementPreview) {
-            const pp = placementPreview;
-            const def = BUILDINGS[pp.type];
-            if (def) {
-                const px = pp.tileX * TILE_SIZE - camera.x;
-                const py = pp.tileY * TILE_SIZE - camera.y;
-                const pw = def.width * TILE_SIZE;
-                const ph = def.height * TILE_SIZE;
-
-                // Draw preview sprite with transparency
-                ctx.globalAlpha = 0.6;
-                const sprite = Sprites.getBuilding(pp.type);
-                if (sprite) {
-                    ctx.drawImage(sprite, px, py);
-                }
-                ctx.globalAlpha = 1;
-
-                // Draw placement grid
-                const canBuild = pp.valid;
-                ctx.strokeStyle = canBuild ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(px, py, pw, ph);
-
-                // Fill with tint
-                ctx.fillStyle = canBuild ? 'rgba(0, 255, 0, 0.1)' : 'rgba(255, 0, 0, 0.15)';
-                ctx.fillRect(px, py, pw, ph);
-            }
-        }
+        if (placementPreview) drawPlacementPreview(placementPreview);
 
         // Day/night cycle tint
-        const gs = Game.getState();
-        const dayPhase = gs.dayProgress;
-        // Subtle darkening at "night" part of cycle
-        if (dayPhase > 0.7) {
-            const nightAlpha = (dayPhase - 0.7) / 0.3 * 0.15;
-            ctx.fillStyle = `rgba(10, 10, 40, ${nightAlpha})`;
-            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-        } else if (dayPhase < 0.15) {
-            const nightAlpha = (0.15 - dayPhase) / 0.15 * 0.15;
-            ctx.fillStyle = `rgba(10, 10, 40, ${nightAlpha})`;
+        if (tintKey > 0) {
+            ctx.fillStyle = `rgba(10, 10, 40, ${(tintKey / 255).toFixed(3)})`;
             ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         }
+        return true;
+    }
+
+    function drawBuildingLabels(b, bx, by) {
+        // Worker indicator
+        if (b.maxWorkers > 0) {
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(bx + 2, by + b.height - 10, 36, 10);
+            ctx.fillStyle = b.active ? '#4a4' : '#a44';
+            ctx.font = '9px monospace';
+            ctx.fillText(`👤${b.workers}/${b.maxWorkers}`, bx + 4, by + b.height - 2);
+        }
+
+        // Growth progress for orchards
+        if (!b.grown && b.def.production?.growthDays) {
+            const pct = b.growthProgress / b.def.production.growthDays;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(bx + 2, by - 10, b.width - 4, 8);
+            ctx.fillStyle = '#4a4';
+            ctx.fillRect(bx + 3, by - 9, (b.width - 6) * pct, 6);
+            ctx.fillStyle = '#fff';
+            ctx.font = '8px monospace';
+            ctx.fillText('Growing...', bx + 4, by - 3);
+        }
+    }
+
+    function drawPlacementPreview(pp) {
+        const def = BUILDINGS[pp.type];
+        if (!def) return;
+        const px = pp.tileX * TILE_SIZE - camera.x;
+        const py = pp.tileY * TILE_SIZE - camera.y;
+        const pw = def.width * TILE_SIZE;
+        const ph = def.height * TILE_SIZE;
+
+        // Preview sprite with transparency
+        ctx.globalAlpha = 0.6;
+        const sprite = Sprites.getBuilding(pp.type);
+        if (sprite) ctx.drawImage(sprite, px, py);
+        ctx.globalAlpha = 1;
+
+        // Placement outline + tint
+        const canBuild = pp.valid;
+        ctx.strokeStyle = canBuild ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(px, py, pw, ph);
+        ctx.fillStyle = canBuild ? 'rgba(0, 255, 0, 0.1)' : 'rgba(255, 0, 0, 0.15)';
+        ctx.fillRect(px, py, pw, ph);
     }
 
     return {
@@ -266,6 +333,7 @@ const Renderer = (() => {
         screenToWorld,
         screenToTile,
         render,
-        invalidateTerrainCache: () => { terrainCanvas = null; },
+        markDirty,
+        invalidateTerrainCache: () => { terrainCanvas = null; dirty = true; },
     };
 })();

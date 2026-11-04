@@ -5,10 +5,12 @@
 const BuildingManager = (() => {
     let placedBuildings = [];
     let nextId = 1;
+    let version = 0; // bumps on every change so the renderer knows when to rebuild caches
 
     function reset() {
         placedBuildings = [];
         nextId = 1;
+        version++;
     }
 
     function place(type, tileX, tileY) {
@@ -34,11 +36,17 @@ const BuildingManager = (() => {
         };
 
         placedBuildings.push(building);
+        version++;
         return building;
     }
 
     function remove(id) {
         placedBuildings = placedBuildings.filter(b => b.id !== id);
+        version++;
+    }
+
+    function getVersion() {
+        return version;
     }
 
     function getAll() {
@@ -73,5 +81,6 @@ const BuildingManager = (() => {
         getBuildingAt,
         countByType,
         getProductionBuildings,
+        getVersion,
     };
 })();

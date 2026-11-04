@@ -11,6 +11,10 @@ const MAP_PIXEL_H = MAP_HEIGHT * TILE_SIZE;
 // Time: 1 real minute = 1 game day at 1x speed
 const BASE_DAY_DURATION = 60000; // ms per day at 1x
 
+// Longest time step a single frame may simulate. Protects against huge
+// catch-up jumps after the tab was in the background or the phone was locked.
+const MAX_FRAME_MS = 250;
+
 // Storage cap for each resource before a warehouse is built
 const BASE_STORAGE = 100;
 
