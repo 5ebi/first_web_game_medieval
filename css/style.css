@@ -972,15 +972,53 @@ button {
         display: none;
     }
 
+    /* Welcome / game over must fit ~340px of height without scrolling */
+    .overlay {
+        padding-top: calc(8px + var(--safe-top));
+        padding-bottom: calc(8px + var(--safe-bottom));
+    }
+
     .overlay-box {
-        padding: 18px 24px;
+        max-width: 560px;
+        padding: 14px 24px;
     }
 
     .overlay-box h1 {
-        font-size: 38px;
+        font-size: 36px;
+        margin-bottom: 2px;
+    }
+
+    .overlay-box .subtitle {
+        font-size: 18px;
+        margin-bottom: 10px;
     }
 
     .overlay-box .instructions {
-        margin-bottom: 14px;
+        font-size: 13px;
+        line-height: 1.4;
+        margin-bottom: 12px;
+    }
+
+    .overlay-box .instructions > p {
+        display: none;
+    }
+
+    .overlay-box .instructions ul {
+        margin-top: 0;
+    }
+
+    .overlay-box .instructions li {
+        margin-bottom: 2px;
+    }
+
+    .overlay-actions {
+        flex-direction: row;
+        justify-content: center;
+    }
+
+    .overlay-box button {
+        min-height: 44px;
+        font-size: 21px;
+        padding: 8px 24px;
     }
 }
