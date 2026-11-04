@@ -55,6 +55,9 @@
         onBuildingPlaced: () => {
             SaveGame.save();
         },
+        onDayReport: (report) => {
+            UI.showDayReport(report);
+        },
     });
 
     // Resume a saved settlement, or prepare a fresh map behind the welcome screen
@@ -111,6 +114,7 @@
 
         // Update game logic
         if (running) Game.update(delta);
+        UI.tick();
 
         // Render
         Renderer.render(UI.getPlacementPreview());

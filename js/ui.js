@@ -18,10 +18,12 @@ const UI = (() => {
     function init() {
         els = {
             hud: document.getElementById('hud'),
-            resWood: document.getElementById('res-wood'),
-            resStone: document.getElementById('res-stone'),
-            resIron: document.getElementById('res-iron'),
-            resFood: document.getElementById('res-food'),
+            values: {
+                wood: document.getElementById('res-wood'),
+                stone: document.getElementById('res-stone'),
+                iron: document.getElementById('res-iron'),
+                food: document.getElementById('res-food'),
+            },
             resPop: document.getElementById('res-pop'),
             resDay: document.getElementById('res-day'),
             rates: {
@@ -31,6 +33,14 @@ const UI = (() => {
                 food: document.getElementById('rate-food'),
                 pop: document.getElementById('rate-pop'),
             },
+            fills: {
+                wood: document.getElementById('fill-wood'),
+                stone: document.getElementById('fill-stone'),
+                iron: document.getElementById('fill-iron'),
+                food: document.getElementById('fill-food'),
+            },
+            dayPill: document.getElementById('day-pill'),
+            dayFill: document.getElementById('day-fill'),
             buildingMenu: document.getElementById('building-menu'),
             buildingList: document.getElementById('building-list'),
             infoPanel: document.getElementById('info-panel'),
@@ -59,6 +69,13 @@ const UI = (() => {
         setupKeyboard();
 
         els.infoClose.addEventListener('click', hideInfo);
+
+        // Tap a resource for the full story (amount / cap, per day, how long it lasts)
+        document.querySelectorAll('#resource-bar .resource').forEach(chip => {
+            chip.addEventListener('click', () => {
+                showTooltipFor(chip, resourceDetail(chip.dataset.res), { timeout: 4000 });
+            });
+        });
         els.pbConfirm.addEventListener('click', confirmPlacement);
         els.pbCancel.addEventListener('click', deselectBuilding);
 
@@ -129,7 +146,7 @@ const UI = (() => {
 
     function infoText(def) {
         const info = [];
-        if (def.provides.populationCap) info.push(`+${def.provides.populationCap} villagers`);
+        if (def.provides.populationCap) info.push(`+${def.provides.populationCap} villagers (eat ${def.provides.populationCap} food/day)`);
         if (def.provides.storage) info.push(`+${def.provides.storage} storage`);
         if (def.production) {
             let p = `+${def.production.amount} ${def.production.resource}/day`;
@@ -560,6 +577,8 @@ const UI = (() => {
         const inSidebar = r.left > window.innerWidth / 2 && r.top > 60 && r.width < window.innerWidth / 2;
         if (inSidebar) {
             showTooltip(text, r.left - t.width - 8, r.top + r.height / 2 - t.height / 2, opts);
+        } else if (r.top < window.innerHeight / 2) {
+            showTooltip(text, r.left + r.width / 2 - t.width / 2, r.bottom + 8, opts);
         } else {
             showTooltip(text, r.left + r.width / 2 - t.width / 2, r.top - t.height - 8, opts);
         }
@@ -603,41 +622,130 @@ const UI = (() => {
         els.infoPanel.classList.add('hidden');
     }
 
+    const RES_NAMES = { wood: 'Wood', stone: 'Stone', iron: 'Iron', food: 'Food' };
+    const fullNotified = {};
+
+    function isProducing(res, rates, foodProduced) {
+        return res === 'food' ? foodProduced > 0 : rates[res] > 0;
+    }
+
+    function resourceDetail(res) {
+        const gs = Game.getState();
+        const { rates, foodProduced, foodEaten } = Game.getRates();
+        if (res === 'pop') {
+            const free = gs.populationCap - gs.populationUsed;
+            return `Villagers: ${gs.populationCap} live here, ${gs.populationUsed} work, ${free} free. Each one eats 1 food a day.`;
+        }
+        const max = gs.maxStorage;
+        const amount = Math.floor(gs.resources[res]);
+        let text = `${RES_NAMES[res]}: ${amount} / ${max} stored`;
+        if (res === 'food') {
+            text += ` · +${foodProduced} grown, −${foodEaten} eaten a day`;
+            if (rates.food < 0) text += ` · lasts ${Math.floor(gs.resources.food / -rates.food)} more days`;
+        } else if (rates[res] > 0) {
+            text += ` · +${rates[res]} a day`;
+        } else {
+            text += ' · nothing produces it yet';
+        }
+        const rate = res === 'food' ? rates.food : rates[res];
+        if (gs.resources[res] >= max && isProducing(res, rates, foodProduced)) {
+            text += BuildingManager.countByType('warehouse') === 0
+                ? ' · Storage full, production is wasted! Build a Warehouse.'
+                : ' · Storage full, production is wasted!';
+        } else if (rate > 0) {
+            text += ` · full in ${Math.ceil((max - amount) / rate)} days`;
+        }
+        return text;
+    }
+
     function updateResources() {
         const gs = Game.getState();
+        const { rates, foodProduced } = Game.getRates();
+        const max = gs.maxStorage;
 
-        // Calculate production rates
-        const producers = BuildingManager.getProductionBuildings();
-        const rates = { wood: 0, stone: 0, iron: 0, food: 0 };
-        producers.forEach(b => {
-            rates[b.def.production.resource] += b.def.production.amount;
+        ['wood', 'stone', 'iron', 'food'].forEach(res => {
+            const chip = els.rates[res].closest('.resource');
+            const amount = gs.resources[res];
+            const rate = rates[res];
+            const producing = isProducing(res, rates, foodProduced);
+            const full = amount >= max && producing;
+            const fill = Math.min(1, amount / max);
+
+            els.values[res].textContent = Math.floor(amount);
+            els.fills[res].style.transform = `scaleX(${fill.toFixed(3)})`;
+            chip.classList.toggle('full', full);
+            chip.classList.toggle('near-full', !full && producing && fill >= 0.85);
+
+            let text = rate > 0 ? `+${rate}` : rate < 0 ? `${rate}` : '';
+            if (full) text += text ? ' · full' : 'full';
+            let alert = false;
+            if (res === 'food') {
+                if (rate < 0) {
+                    const days = Math.floor(amount / -rate);
+                    text += ` · ${days}d`;
+                    alert = days <= 2;
+                }
+                alert = alert || gs.starvationDays > 0;
+            }
+            chip.classList.toggle('alert', alert);
+            els.rates[res].textContent = text;
+            els.rates[res].classList.toggle('up', rate > 0 && !full);
+            els.rates[res].classList.toggle('down', rate < 0);
+            chip.title = resourceDetail(res);
+
+            // Say it once when production starts going to waste
+            if (full && !fullNotified[res]) {
+                fullNotified[res] = true;
+                const hint = BuildingManager.countByType('warehouse') === 0 ? ' Build a Warehouse to store more.' : '';
+                showNotification(`${RES_NAMES[res]} storage is full!${hint}`, 'warning');
+            } else if (!full) {
+                fullNotified[res] = false;
+            }
         });
-        // Food consumption
-        rates.food -= gs.populationCap;
-
-        function setRate(el, val) {
-            el.textContent = val > 0 ? `+${val}` : val < 0 ? `${val}` : '';
-            el.classList.toggle('up', val > 0);
-            el.classList.toggle('down', val < 0);
-        }
-
-        els.resWood.textContent = Math.floor(gs.resources.wood);
-        els.resStone.textContent = Math.floor(gs.resources.stone);
-        els.resIron.textContent = Math.floor(gs.resources.iron);
-        els.resFood.textContent = Math.floor(gs.resources.food);
-        ['wood', 'stone', 'iron', 'food'].forEach(r => setRate(els.rates[r], rates[r]));
 
         els.resPop.textContent = `${gs.populationUsed}/${gs.populationCap}`;
         const free = gs.populationCap - gs.populationUsed;
         els.rates.pop.textContent = gs.populationCap > 0 ? `${free} free` : '';
-        els.rates.pop.classList.remove('up', 'down');
+        els.rates.pop.closest('.resource').title = resourceDetail('pop');
 
         els.resDay.textContent = `Day ${gs.day}`;
 
-        // Flash food red if starving
-        els.resFood.closest('.resource').classList.toggle('alert', gs.starvationDays > 0);
-
         updateBuildingButtons();
+    }
+
+    // Per frame: only the cheap day-progress bar
+    let lastDayFill = -1;
+    let lastPaused = null;
+    function tick() {
+        const gs = Game.getState();
+        const p = gs.started ? gs.dayProgress : 0;
+        if (Math.abs(p - lastDayFill) >= 0.002 || p < lastDayFill) {
+            els.dayFill.style.transform = `scaleX(${p.toFixed(3)})`;
+            lastDayFill = p;
+        }
+        if (gs.paused !== lastPaused) {
+            els.dayPill.classList.toggle('paused', gs.paused);
+            lastPaused = gs.paused;
+        }
+    }
+
+    // End of day: numbers float up from every producer, the castle shows what was eaten
+    function showDayReport(report) {
+        report.produced.forEach(p => {
+            const b = p.building;
+            const wasted = p.amount < p.wanted;
+            const text = p.amount > 0 ? `+${p.amount}` : 'full';
+            // start mid-building so the rise stays over its own roof, not the neighbour's labels
+            Renderer.spawnFloater(b.pixelX + b.width / 2, b.pixelY + b.height / 2, text, wasted ? '#ffcf6b' : '#c8f5a0', p.res);
+        });
+        if (report.foodNeeded > 0) {
+            const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+            if (castle) {
+                const hungry = report.foodEaten < report.foodNeeded;
+                Renderer.spawnFloater(castle.pixelX + castle.width / 2, castle.pixelY + castle.height / 2,
+                    `-${report.foodNeeded}`, hungry ? '#ff5a4a' : '#ffa898', 'food');
+            }
+        }
     }
 
     function showNotification(message, type = 'info') {
@@ -740,5 +848,7 @@ const UI = (() => {
         getGameOverEl,
         updateBuildingButtons,
         measureLayout,
+        tick,
+        showDayReport,
     };
 })();

@@ -32,6 +32,7 @@ const Game = (() => {
         onNotification: null,
         onGameOver: null,
         onBuildingPlaced: null,
+        onDayReport: null, // ({ produced: [{ building, res, amount, wanted }], foodNeeded, foodEaten })
     };
 
     function reset() {
@@ -247,12 +248,15 @@ const Game = (() => {
     function processDayTick() {
         state.day++;
 
-        // Production
+        // Production (capped by storage; the report says how much really arrived)
+        const produced = [];
         const producers = BuildingManager.getProductionBuildings();
         producers.forEach(b => {
             const res = b.def.production.resource;
-            const amount = b.def.production.amount;
-            state.resources[res] = Math.min(state.resources[res] + amount, state.maxStorage);
+            const wanted = b.def.production.amount;
+            const before = state.resources[res];
+            state.resources[res] = Math.min(before + wanted, state.maxStorage);
+            produced.push({ building: b, res, amount: state.resources[res] - before, wanted });
         });
 
         // Growth for orchards
@@ -271,6 +275,7 @@ const Game = (() => {
         // Food consumption: 1 food per villager per day
         // All villagers in the settlement eat, whether working or idle
         const foodNeeded = state.populationCap;
+        const foodEaten = Math.min(foodNeeded, state.resources.food);
 
         if (foodNeeded > 0) {
             if (state.resources.food >= foodNeeded) {
@@ -300,8 +305,20 @@ const Game = (() => {
             }
         }
 
+        if (callbacks.onDayReport) callbacks.onDayReport({ produced, foodNeeded, foodEaten });
         if (callbacks.onDayTick) callbacks.onDayTick();
         if (callbacks.onResourceChange) callbacks.onResourceChange();
+    }
+
+    // Net change per day for each resource (production minus food eaten)
+    function getRates() {
+        const rates = { wood: 0, stone: 0, iron: 0, food: 0 };
+        BuildingManager.getProductionBuildings().forEach(b => {
+            rates[b.def.production.resource] += b.def.production.amount;
+        });
+        const foodProduced = rates.food;
+        rates.food -= state.populationCap;
+        return { rates, foodProduced, foodEaten: state.populationCap };
     }
 
     // Check if a building type's button should be enabled
@@ -328,6 +345,7 @@ const Game = (() => {
         getBuildBlocker,
         getMissingCost,
         getFreeWorkers,
+        getRates,
         serialize,
         load,
     };

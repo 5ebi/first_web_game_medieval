@@ -15,46 +15,51 @@
         <!-- Top HUD: resources + time controls -->
         <header id="hud">
             <div id="resource-bar">
-                <div class="resource" data-res="wood" title="Wood">
+                <button type="button" class="resource" data-res="wood" title="Wood">
                     <span class="resource-icon" data-icon="wood"></span>
                     <span class="res-text">
                         <span class="res-value" id="res-wood">50</span>
                         <span class="res-rate" id="rate-wood"></span>
                     </span>
-                </div>
-                <div class="resource" data-res="stone" title="Stone">
+                    <span class="res-fill" aria-hidden="true"><span id="fill-wood"></span></span>
+                </button>
+                <button type="button" class="resource" data-res="stone" title="Stone">
                     <span class="resource-icon" data-icon="stone"></span>
                     <span class="res-text">
                         <span class="res-value" id="res-stone">30</span>
                         <span class="res-rate" id="rate-stone"></span>
                     </span>
-                </div>
-                <div class="resource" data-res="iron" title="Iron">
+                    <span class="res-fill" aria-hidden="true"><span id="fill-stone"></span></span>
+                </button>
+                <button type="button" class="resource" data-res="iron" title="Iron">
                     <span class="resource-icon" data-icon="iron"></span>
                     <span class="res-text">
                         <span class="res-value" id="res-iron">0</span>
                         <span class="res-rate" id="rate-iron"></span>
                     </span>
-                </div>
-                <div class="resource" data-res="food" title="Food">
+                    <span class="res-fill" aria-hidden="true"><span id="fill-iron"></span></span>
+                </button>
+                <button type="button" class="resource" data-res="food" title="Food">
                     <span class="resource-icon" data-icon="food"></span>
                     <span class="res-text">
                         <span class="res-value" id="res-food">40</span>
                         <span class="res-rate" id="rate-food"></span>
                     </span>
-                </div>
-                <div class="resource" data-res="pop" title="Villagers (working / total)">
+                    <span class="res-fill" aria-hidden="true"><span id="fill-food"></span></span>
+                </button>
+                <button type="button" class="resource" data-res="pop" title="Villagers (working / total)">
                     <span class="resource-icon" data-icon="pop"></span>
                     <span class="res-text">
                         <span class="res-value" id="res-pop">0/0</span>
                         <span class="res-rate" id="rate-pop"></span>
                     </span>
-                </div>
+                </button>
             </div>
             <div id="time-bar">
-                <div id="day-pill" title="Day">
+                <div id="day-pill" title="Day · 1 day = 1 minute at 1×">
                     <span class="resource-icon" data-icon="day"></span>
                     <span id="res-day">Day 1</span>
+                    <span class="day-bar" aria-hidden="true"><span id="day-fill"></span></span>
                 </div>
                 <div id="game-speed">
                     <button type="button" id="speed-pause" class="speed-btn" title="Pause (Space)" aria-label="Pause">&#10074;&#10074;</button>

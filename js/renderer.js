@@ -32,6 +32,11 @@ const Renderer = (() => {
     // Trees whose sprite overlaps a building; they must be depth-sorted with it
     let frontTrees = [];
 
+    // Floating yield numbers ("+6" over a lumberjack at the end of a day)
+    let floaters = [];
+    const FLOATER_MS = 1600;
+    const FLOAT_FONT = '17px "Jersey 10", monospace';
+
     function init(canvasEl) {
         canvas = canvasEl;
         ctx = canvas.getContext('2d');
@@ -251,6 +256,7 @@ const Renderer = (() => {
         const pKey = previewKey(placementPreview);
         const day = Game.getState().day;
         if (tintKey !== lastTintKey || pKey !== lastPreviewKey || day !== lastDay) dirty = true;
+        if (floaters.length > 0) dirty = true; // animating
         if (!dirty) return false;
 
         lastTintKey = tintKey;
@@ -314,7 +320,42 @@ const Renderer = (() => {
             ctx.fillStyle = `rgba(10, 10, 40, ${(tintKey / 255).toFixed(3)})`;
             ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         }
+
+        // Yields float above the night tint so they stay readable
+        if (floaters.length > 0) drawFloaters(performance.now());
         return true;
+    }
+
+    function spawnFloater(worldX, worldY, text, color, icon) {
+        floaters.push({ wx: worldX, wy: worldY, text, color, icon, t0: performance.now() });
+        dirty = true;
+    }
+
+    function drawFloaters(now) {
+        floaters = floaters.filter(f => now - f.t0 < FLOATER_MS);
+        ctx.font = FLOAT_FONT;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        ctx.lineJoin = 'round';
+        floaters.forEach(f => {
+            const p = Math.min(1, (now - f.t0) / FLOATER_MS);
+            const rise = 30 * (1 - Math.pow(1 - p, 3)); // ease-out
+            ctx.globalAlpha = p < 0.65 ? 1 : 1 - (p - 0.65) / 0.35;
+            const iconW = f.icon ? 13 : 0;
+            const textW = ctx.measureText(f.text).width;
+            const x = Math.round(f.wx - camera.x - (iconW + textW) / 2);
+            const y = Math.round(f.wy - camera.y - rise);
+            if (f.icon) {
+                const icon = Sprites.getIcon(f.icon);
+                if (icon) ctx.drawImage(icon, x, y - 5);
+            }
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(20, 12, 4, 0.9)';
+            ctx.strokeText(f.text, x + iconW, y);
+            ctx.fillStyle = f.color;
+            ctx.fillText(f.text, x + iconW, y);
+        });
+        ctx.globalAlpha = 1;
     }
 
     const LABEL_FONT = '13px "Jersey 10", monospace';
@@ -419,6 +460,7 @@ const Renderer = (() => {
         getViewport,
         centerOn,
         centerCamera,
-        invalidateTerrainCache: () => { terrainCanvas = null; dirty = true; },
+        spawnFloater,
+        invalidateTerrainCache: () => { terrainCanvas = null; floaters = []; dirty = true; },
     };
 })();
