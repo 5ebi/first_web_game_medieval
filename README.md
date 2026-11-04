@@ -66,4 +66,4 @@ Modules in `js/`:
 
 ## Deploy
 
-Push to `main`; the included workflow deploys to GitHub Pages and switches the Pages source to "GitHub Actions" on its first run (if the token lacks permission, set it once by hand under Settings → Pages → Source).
+Push to `main` and the included workflow deploys to GitHub Pages. Set the Pages source once by hand to **GitHub Actions** (repository Settings → Pages → Build and deployment → Source), otherwise GitHub additionally runs its legacy branch build on every push.
