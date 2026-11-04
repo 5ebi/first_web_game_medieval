@@ -28,6 +28,7 @@ const UI = (() => {
             gameOver: document.getElementById('game-over'),
             welcome: document.getElementById('welcome-screen'),
             startBtn: document.getElementById('start-btn'),
+            continueBtn: document.getElementById('continue-btn'),
             restartBtn: document.getElementById('restart-btn'),
             canvas: document.getElementById('game-canvas'),
         };
@@ -319,8 +320,59 @@ const UI = (() => {
         els.welcome.classList.add('hidden');
     }
 
-    function showWelcome() {
+    // savedInfo: null for a fresh start, or { day } when a saved settlement exists
+    let hasSave = false;
+    let confirmNewTimer = null;
+
+    function showWelcome(savedInfo) {
+        hasSave = !!savedInfo;
+        els.continueBtn.classList.toggle('hidden', !hasSave);
+        if (hasSave) els.continueBtn.textContent = `Continue · Day ${savedInfo.day}`;
+        resetNewGameButton();
         els.welcome.classList.remove('hidden');
+    }
+
+    function resetNewGameButton() {
+        clearTimeout(confirmNewTimer);
+        els.startBtn.dataset.confirm = '';
+        els.startBtn.classList.toggle('secondary', hasSave);
+        els.startBtn.textContent = hasSave ? 'New Game' : 'Begin Your Reign';
+    }
+
+    function onContinue(cb) {
+        els.continueBtn.addEventListener('click', cb);
+    }
+
+    // With a save present, "New Game" needs a second tap so a misclick can't wipe the settlement
+    function onNewGame(cb) {
+        els.startBtn.addEventListener('click', () => {
+            if (hasSave && els.startBtn.dataset.confirm !== 'yes') {
+                els.startBtn.dataset.confirm = 'yes';
+                els.startBtn.textContent = 'Tap again to abandon your settlement';
+                clearTimeout(confirmNewTimer);
+                confirmNewTimer = setTimeout(resetNewGameButton, 3000);
+                return;
+            }
+            clearTimeout(confirmNewTimer);
+            hasSave = false;
+            cb();
+        });
+    }
+
+    function syncSpeedButtons() {
+        const gs = Game.getState();
+        document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+        const id = gs.paused ? 'speed-pause' : `speed-${gs.speed}x`;
+        const btn = document.getElementById(id);
+        if (btn) btn.classList.add('active');
+    }
+
+    // Re-sync every piece of UI with the game state (after new game / load)
+    function refreshAll() {
+        deselectBuilding();
+        els.infoPanel.classList.add('hidden');
+        syncSpeedButtons();
+        updateResources();
     }
 
     function getPlacementPreview() {
@@ -340,6 +392,9 @@ const UI = (() => {
         showGameOver,
         hideWelcome,
         showWelcome,
+        onContinue,
+        onNewGame,
+        refreshAll,
         getPlacementPreview,
         getStartBtn,
         getRestartBtn,

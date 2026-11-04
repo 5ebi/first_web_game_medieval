@@ -3,51 +3,39 @@
 // ============================================
 
 const Game = (() => {
-    let state = {
-        started: false,
-        paused: false,
-        speed: 1,
-        day: 1,
-        dayProgress: 0,  // 0 to 1
-        resources: {
-            wood: 50,
-            stone: 30,
-            iron: 0,
-            food: 40,
-        },
-        maxStorage: 100,  // Base storage, increases with warehouse
-        populationCap: 0,
-        populationUsed: 0,
-        starvationDays: 0,
-        gameOver: false,
-    };
-
-    let callbacks = {
-        onDayTick: null,
-        onResourceChange: null,
-        onNotification: null,
-        onGameOver: null,
-    };
-
-    function reset() {
-        state = {
+    function freshState() {
+        return {
             started: false,
             paused: false,
             speed: 1,
             day: 1,
-            dayProgress: 0,
+            dayProgress: 0,  // 0 to 1
             resources: {
                 wood: 50,
                 stone: 30,
                 iron: 0,
                 food: 40,
             },
-            maxStorage: 100,
+            maxStorage: BASE_STORAGE,  // increases with warehouse
             populationCap: 0,
             populationUsed: 0,
             starvationDays: 0,
             gameOver: false,
         };
+    }
+
+    let state = freshState();
+
+    let callbacks = {
+        onDayTick: null,
+        onResourceChange: null,
+        onNotification: null,
+        onGameOver: null,
+        onBuildingPlaced: null,
+    };
+
+    function reset() {
+        state = freshState();
         BuildingManager.reset();
     }
 
@@ -135,16 +123,10 @@ const Game = (() => {
         if (def.workers > 0) {
             building.workers = def.workers;
             building.active = true;
-            state.populationUsed += def.workers;
         }
 
-        // Apply provides
-        if (def.provides.populationCap) {
-            state.populationCap += def.provides.populationCap;
-        }
-        if (def.provides.storage) {
-            state.maxStorage += def.provides.storage;
-        }
+        // Population cap, workers in use and storage all derive from the buildings
+        recalcDerived();
 
         // Start the day timer when the castle is placed
         if (type === 'castle' && !state.started) {
@@ -155,8 +137,72 @@ const Game = (() => {
 
         if (callbacks.onResourceChange) callbacks.onResourceChange();
         if (callbacks.onNotification) callbacks.onNotification(`${def.name} built!`, 'success');
+        if (callbacks.onBuildingPlaced) callbacks.onBuildingPlaced(building);
 
         return building;
+    }
+
+    function recalcDerived() {
+        let populationCap = 0;
+        let populationUsed = 0;
+        let maxStorage = BASE_STORAGE;
+        BuildingManager.getAll().forEach(b => {
+            populationCap += b.def.provides.populationCap || 0;
+            maxStorage += b.def.provides.storage || 0;
+            populationUsed += b.workers;
+        });
+        state.populationCap = populationCap;
+        state.populationUsed = populationUsed;
+        state.maxStorage = maxStorage;
+    }
+
+    // ---- Save / load ----
+    function serialize() {
+        return {
+            day: state.day,
+            dayProgress: state.dayProgress,
+            speed: state.speed,
+            paused: state.paused,
+            resources: { ...state.resources },
+            starvationDays: state.starvationDays,
+            buildings: BuildingManager.getAll().map(b => ({
+                type: b.type,
+                tileX: b.tileX,
+                tileY: b.tileY,
+                workers: b.workers,
+                growthProgress: b.growthProgress,
+                grown: b.grown,
+                dayPlaced: b.dayPlaced,
+            })),
+        };
+    }
+
+    function load(data) {
+        reset();
+        const num = (v, fallback) => (Number.isFinite(v) ? v : fallback);
+
+        (data.buildings || []).forEach(sb => {
+            const def = BUILDINGS[sb.type];
+            if (!def) return;
+            const b = BuildingManager.place(sb.type, num(sb.tileX, 0), num(sb.tileY, 0));
+            b.workers = Math.min(num(sb.workers, def.workers), def.workers);
+            b.active = def.workers === 0 || b.workers > 0;
+            b.growthProgress = num(sb.growthProgress, 0);
+            b.grown = def.production?.growthDays ? !!sb.grown : true;
+            b.dayPlaced = num(sb.dayPlaced, 1);
+        });
+        recalcDerived();
+
+        const res = data.resources || {};
+        Object.keys(state.resources).forEach(k => {
+            state.resources[k] = Math.max(0, num(res[k], state.resources[k]));
+        });
+        state.day = Math.max(1, Math.floor(num(data.day, 1)));
+        state.dayProgress = Math.min(Math.max(num(data.dayProgress, 0), 0), 0.999);
+        state.speed = [0, 1, 2, 3].includes(data.speed) ? data.speed : 1;
+        state.paused = !!data.paused || state.speed === 0;
+        state.starvationDays = Math.max(0, Math.floor(num(data.starvationDays, 0)));
+        state.started = BuildingManager.countByType('castle') > 0;
     }
 
     // ---- Day tick logic ----
@@ -265,5 +311,7 @@ const Game = (() => {
         update,
         isBuildingAvailable,
         getFreeWorkers,
+        serialize,
+        load,
     };
 })();

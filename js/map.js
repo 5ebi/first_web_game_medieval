@@ -7,6 +7,7 @@ const GameMap = (() => {
     let treeMap = [];  // Positions of trees for rendering
     let stoneMap = []; // Positions of stone deposits
     let decorations = []; // Flowers, etc.
+    let currentSeed = 0;
 
     // Seeded random
     function seededRandom(seed) {
@@ -56,6 +57,7 @@ const GameMap = (() => {
     }
 
     function generate(seed = 42) {
+        currentSeed = seed;
         const rng = seededRandom(seed);
         terrain = [];
         treeMap = [];
@@ -158,6 +160,7 @@ const GameMap = (() => {
         return terrain[y][x];
     }
 
+    function getSeed() { return currentSeed; }
     function getTerrainGrid() { return terrain; }
     function getTrees() { return treeMap; }
     function getStones() { return stoneMap; }
@@ -200,6 +203,7 @@ const GameMap = (() => {
 
     return {
         generate,
+        getSeed,
         getTerrain,
         getTerrainGrid,
         getTrees,

@@ -11,6 +11,9 @@ const MAP_PIXEL_H = MAP_HEIGHT * TILE_SIZE;
 // Time: 1 real minute = 1 game day at 1x speed
 const BASE_DAY_DURATION = 60000; // ms per day at 1x
 
+// Storage cap for each resource before a warehouse is built
+const BASE_STORAGE = 100;
+
 // Terrain types
 const TERRAIN = {
     GRASS: 0,
