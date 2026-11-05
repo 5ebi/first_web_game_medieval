@@ -1124,6 +1124,119 @@ const Sprites = (() => {
         return c;
     }
 
+    // ============================================
+    // OPTIONAL EXTERNAL ART
+    // Drop PNG files into assets/ to replace the procedural art.
+    // Missing files are simply ignored (see assets/README.md for the layout).
+    // ============================================
+    const ASSET_BASE = 'assets/';
+    const TERRAIN_ROWS = [
+        TERRAIN.GRASS, TERRAIN.GRASS_DARK, TERRAIN.WATER, TERRAIN.SAND,
+        TERRAIN.DIRT, TERRAIN.FOREST, TERRAIN.STONE_DEPOSIT, TERRAIN.FLOWERS,
+    ];
+    const GROWTH_TYPES = ['apple_orchard', 'farm'];
+
+    function buildingCacheKey(type, grown) {
+        return GROWTH_TYPES.includes(type) ? `${type}_${grown}` : type;
+    }
+
+    function loadImage(src) {
+        return new Promise(resolve => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = src;
+        });
+    }
+
+    function imageToCanvas(img, sx, sy, w, h) {
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, sx, sy, w, h, 0, 0, w, h);
+        return c;
+    }
+
+    // Optional manifest: assets/manifest.json = ["tiles.png", "buildings/house.png", ...]
+    // With a manifest only the listed files are requested (no 404 noise); without one
+    // (or when fetch is unavailable, e.g. file://) every known slot is probed.
+    async function readManifest() {
+        if (location.protocol === 'file:') return null;
+        try {
+            const res = await fetch(ASSET_BASE + 'manifest.json', { cache: 'no-cache' });
+            if (!res.ok) return null;
+            const list = await res.json();
+            return Array.isArray(list) ? new Set(list.map(String)) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    // Returns a promise resolving to the list of replaced asset names
+    async function loadAssets() {
+        const replaced = [];
+        const jobs = [];
+        const manifest = await readManifest();
+        const wanted = (rel) => !manifest || manifest.has(rel);
+        const load = (rel) => wanted(rel) ? loadImage(ASSET_BASE + rel) : Promise.resolve(null);
+
+        // Terrain tile sheet: one row per terrain type, up to 4 variant columns, 32x32 each
+        jobs.push(load('tiles.png').then(img => {
+            if (!img) return;
+            const cols = Math.max(1, Math.floor(img.width / TILE_SIZE));
+            TERRAIN_ROWS.forEach((type, row) => {
+                if ((row + 1) * TILE_SIZE > img.height) return;
+                for (let v = 0; v < TILE_VARIANTS; v++) {
+                    const col = v % cols;
+                    cache[`tile_${type}_${v}`] = imageToCanvas(img, col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                }
+            });
+            replaced.push('tiles');
+        }));
+
+        // Buildings: assets/buildings/<type>.png (+ <type>_young.png for growing ones)
+        Object.keys(BUILDINGS).forEach(type => {
+            jobs.push(load(`buildings/${type}.png`).then(img => {
+                if (!img) return;
+                cache[buildingCacheKey(type, true)] = imageToCanvas(img, 0, 0, img.width, img.height);
+                replaced.push(type);
+            }));
+            if (GROWTH_TYPES.includes(type)) {
+                jobs.push(load(`buildings/${type}_young.png`).then(img => {
+                    if (!img) return;
+                    cache[buildingCacheKey(type, false)] = imageToCanvas(img, 0, 0, img.width, img.height);
+                    replaced.push(type + '_young');
+                }));
+            }
+        });
+
+        // Nature
+        const nature = { 'tree_oak': 'tree_2', 'tree_pine': 'pine_2', 'stone_pile': 'stone_2' };
+        Object.entries(nature).forEach(([file, key]) => {
+            jobs.push(load(`nature/${file}.png`).then(img => {
+                if (!img) return;
+                cache[key] = imageToCanvas(img, 0, 0, img.width, img.height);
+                replaced.push(file);
+            }));
+        });
+
+        // Resource icons: assets/icons/<name>.png (32x32)
+        ['wood', 'stone', 'iron', 'food', 'pop', 'day', 'storage'].forEach(name => {
+            jobs.push(load(`icons/${name}.png`).then(img => {
+                if (!img) return;
+                cache[`icon_${name}`] = imageToCanvas(img, 0, 0, img.width, img.height);
+                replaced.push('icon_' + name);
+            }));
+        });
+
+        await Promise.all(jobs);
+        // Derived caches must be rebuilt from the new art
+        Object.keys(cache).forEach(k => {
+            if (k.startsWith('thumb_') || k.startsWith('shadow_')) delete cache[k];
+        });
+        return replaced;
+    }
+
     // Thumbnail of a building for the menu (fits into size x size)
     function getBuildingThumb(type, size = 40) {
         const key = `thumb_${type}_${size}`;
@@ -1156,6 +1269,7 @@ const Sprites = (() => {
         getBuilding,
         getBuildingShadow,
         getBuildingThumb,
+        loadAssets,
         mulberry32,
     };
 })();

@@ -42,6 +42,10 @@ Turn your sound on: music, ambience and effects are all synthesized in the brows
 - Resources are capped by **storage** (shown in the top bar). Build the Warehouse before your stockpiles fill up.
 - The **goal box** above the minimap always shows your next milestone.
 
+## Custom art
+
+Every sprite can be replaced with your own PNG without touching code. See [`assets/README.md`](assets/README.md) (German) for the file layout, sizes and editor tips; `assets/templates/` contains the current art at the exact sizes as a starting point.
+
 ## Tech
 
 Pure HTML5 Canvas + vanilla JS. All pixel art is procedurally generated and all audio is synthesized with the Web Audio API — no external assets.

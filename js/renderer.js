@@ -164,9 +164,29 @@ const Renderer = (() => {
         minimapTerrain.width = MAP_WIDTH;
         minimapTerrain.height = MAP_HEIGHT;
         const mctx = minimapTerrain.getContext('2d');
+        // Average colour of each terrain tile, so custom tile art also shows on the minimap
+        const avg = {};
+        const probe = document.createElement('canvas');
+        probe.width = TILE_SIZE; probe.height = TILE_SIZE;
+        const pctx = probe.getContext('2d', { willReadFrequently: true });
+        const tileColor = (type) => {
+            if (avg[type]) return avg[type];
+            let col = MINIMAP_COLORS[type] || '#5a8f3c';
+            try {
+                pctx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+                pctx.drawImage(Sprites.drawTile(type, 0), 0, 0);
+                const d = pctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data;
+                let r = 0, g = 0, b = 0, n = 0;
+                for (let i = 0; i < d.length; i += 4) { if (d[i + 3] > 0) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } }
+                if (n) col = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
+            } catch (e) { /* tainted canvas under file:// - keep fallback colour */ }
+            if (type === TERRAIN.FOREST) col = MINIMAP_COLORS[TERRAIN.FOREST]; // trees dominate forests visually
+            avg[type] = col;
+            return col;
+        };
         for (let y = 0; y < MAP_HEIGHT; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
-                mctx.fillStyle = MINIMAP_COLORS[grid[y][x]] || '#5a8f3c';
+                mctx.fillStyle = tileColor(grid[y][x]);
                 mctx.fillRect(x, y, 1, 1);
             }
         }
@@ -294,7 +314,10 @@ const Renderer = (() => {
                 b._smokeT = (b._smokeT || 0) - simDt;
                 if (b._smokeT <= 0) {
                     b._smokeT = 0.35 + Math.random() * 0.3;
-                    Effects.smoke(b.pixelX + b.def.chimney[0], b.pixelY + b.def.chimney[1]);
+                    const spr = Sprites.getBuilding(b.type, { grown: b.grown });
+                    const sx0 = b.pixelX + Math.round((b.width - spr.width) / 2);
+                    const sy0 = b.pixelY + b.height - spr.height;
+                    Effects.smoke(sx0 + b.def.chimney[0], sy0 + b.def.chimney[1]);
                 }
             }
             if (b.type === 'blacksmith' && b.active && simRunning && Math.random() < simDt * 1.5) {
@@ -363,11 +386,15 @@ const Renderer = (() => {
         const sprite = Sprites.getBuilding(b.type, { grown: b.grown });
         if (!sprite) return;
 
+        // Sprites are anchored bottom-center on their footprint, so custom art may be taller/wider
+        const ox = b.pixelX + Math.round((b.width - sprite.width) / 2);
+        const oy = b.pixelY + b.height - sprite.height;
+
         // Soft drop shadow (silhouette offset to the lower right)
         const shadow = Sprites.getBuildingShadow(b.type, { grown: b.grown });
         if (shadow) {
             ctx.globalAlpha = 0.28;
-            ctx.drawImage(shadow, b.pixelX + 4, b.pixelY + 4);
+            ctx.drawImage(shadow, ox + 4, oy + 4);
             ctx.globalAlpha = 1;
         }
 
@@ -383,16 +410,16 @@ const Renderer = (() => {
             }
         }
         if (scale !== 1) {
-            const dw = b.width * scale, dh = b.height * scale;
-            ctx.drawImage(sprite, b.pixelX + (b.width - dw) / 2, b.pixelY + (b.height - dh), dw, dh);
+            const dw = sprite.width * scale, dh = sprite.height * scale;
+            ctx.drawImage(sprite, ox + (sprite.width - dw) / 2, oy + (sprite.height - dh), dw, dh);
         } else {
-            ctx.drawImage(sprite, b.pixelX, b.pixelY);
+            ctx.drawImage(sprite, ox, oy);
         }
 
-        // Night window glow
+        // Night window glow (positions are relative to the sprite's top-left)
         if (night > 0.15 && b.def.lights && scale === 1) {
             ctx.fillStyle = `rgba(255, 190, 80, ${(Math.min(1, (night - 0.15) * 2) * 0.85).toFixed(3)})`;
-            b.def.lights.forEach(([lx, ly, lw, lh]) => ctx.fillRect(b.pixelX + lx, b.pixelY + ly, lw, lh));
+            b.def.lights.forEach(([lx, ly, lw, lh]) => ctx.fillRect(ox + lx, oy + ly, lw, lh));
         }
 
         // Inactive (no workers) indicator
@@ -455,7 +482,7 @@ const Renderer = (() => {
 
         ctx.globalAlpha = 0.7;
         const sprite = Sprites.getBuilding(pp.type);
-        if (sprite) ctx.drawImage(sprite, px, py);
+        if (sprite) ctx.drawImage(sprite, px + Math.round((pw - sprite.width) / 2), py + ph - sprite.height);
         ctx.globalAlpha = 1;
 
         ctx.strokeStyle = pp.valid ? 'rgba(80, 255, 80, 0.9)' : 'rgba(255, 60, 60, 0.9)';

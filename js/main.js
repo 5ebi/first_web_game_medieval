@@ -2,8 +2,12 @@
 // Main Entry Point
 // ============================================
 
-(function() {
+(async function() {
     const canvas = document.getElementById('game-canvas');
+
+    // Optional custom art from assets/ (falls back to procedural sprites)
+    const customArt = await Sprites.loadAssets();
+    if (customArt.length) console.info('Custom art loaded:', customArt.join(', '));
 
     // Initialize systems
     Lang.applyDom();
