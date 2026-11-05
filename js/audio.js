@@ -226,20 +226,89 @@ const AudioSys = (() => {
         lfo.connect(lfoGain);
         lfoGain.connect(g.gain);
 
+        // Wind strength follows the weather
+        windAmp = ctx.createGain();
+        windAmp.gain.value = 0.9;
+
         src.connect(f);
         f.connect(g);
-        g.connect(ambientGain);
+        g.connect(windAmp);
+        windAmp.connect(ambientGain);
         src.start();
         lfo.start();
-        ambientNodes = [src, lfo];
+
+        // Rain: band-limited noise, silent until it rains
+        const rsrc = ctx.createBufferSource();
+        rsrc.buffer = getNoiseBuffer();
+        rsrc.loop = true;
+        rsrc.playbackRate.value = 0.93; // decorrelate from the wind noise
+        const rhp = ctx.createBiquadFilter();
+        rhp.type = 'highpass';
+        rhp.frequency.value = 900;
+        const rlp = ctx.createBiquadFilter();
+        rlp.type = 'lowpass';
+        rlp.frequency.value = 6500;
+        rainGain = ctx.createGain();
+        rainGain.gain.value = 0;
+        rsrc.connect(rhp);
+        rhp.connect(rlp);
+        rlp.connect(rainGain);
+        rainGain.connect(ambientGain);
+        rsrc.start();
+
+        ambientNodes = [src, lfo, rsrc];
 
         scheduleBird();
+        scheduleCricket();
+    }
+
+    // ---------- weather-driven ambience ----------
+    let windAmp = null, rainGain = null;
+    let atm = { rain: 0, wind: 0.3, night: 0 };
+    let lastAtm = { rain: -1, wind: -1 };
+
+    function setAtmosphere(rain, wind, night) {
+        atm = { rain, wind, night };
+        if (!ctx || !rainGain) return;
+        if (Math.abs(rain - lastAtm.rain) > 0.02) {
+            rainGain.gain.setTargetAtTime(rain * 0.11, now(), 0.4);
+            lastAtm.rain = rain;
+        }
+        if (Math.abs(wind - lastAtm.wind) > 0.02) {
+            windAmp.gain.setTargetAtTime(0.5 + wind * 1.4, now(), 0.6);
+            lastAtm.wind = wind;
+        }
+    }
+
+    let cricketTimer = null;
+    function scheduleCricket() {
+        if (cricketTimer) clearTimeout(cricketTimer);
+        cricketTimer = setTimeout(() => {
+            if (ctx && !muted && document.visibilityState === 'visible' && atm.night > 0.5 && atm.rain < 0.3) cricket();
+            scheduleCricket();
+        }, 600 + Math.random() * 1200);
+    }
+
+    function cricket() {
+        const t0 = now();
+        const f = 4200 + Math.random() * 600;
+        for (let i = 0; i < 3; i++) {
+            tone({ freq: f, type: 'sine', dur: 0.025, vol: 0.022 * atm.night, t: t0 + i * 0.055, dest: ambientGain });
+        }
+    }
+
+    function thunder() {
+        if (!ctx || muted) return;
+        const t0 = now();
+        noise({ dur: 0.25, vol: 0.25, filterFreq: 900, type: 'bandpass', q: 0.8, t: t0, dest: ambientGain });
+        noise({ dur: 2.6, vol: 0.55, filterFreq: 140, t: t0 + 0.05, dest: ambientGain });
+        noise({ dur: 1.6, vol: 0.3, filterFreq: 260, t: t0 + 0.6, dest: ambientGain });
     }
 
     function scheduleBird() {
         if (birdTimer) clearTimeout(birdTimer);
         birdTimer = setTimeout(() => {
-            if (ctx && !muted && document.visibilityState === 'visible') bird();
+            if (ctx && !muted && document.visibilityState === 'visible' && atm.night < 0.3 && atm.rain < 0.2) bird();
             scheduleBird();
         }, 2500 + Math.random() * 6000);
     }
@@ -401,5 +470,7 @@ const AudioSys = (() => {
         toggleSfx,
         setSfx,
         isSfxOn,
+        setAtmosphere,
+        thunder,
     };
 })();

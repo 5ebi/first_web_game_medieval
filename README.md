@@ -16,7 +16,8 @@ Turn your sound on: music, ambience and effects are all synthesized in the brows
 - Every building has a **hotkey** (shown in the menu)
 - Click a placed building for details or to **demolish** it (50% refund, **Del** key)
 - Progress is **saved automatically**; use *Continue* on the title screen
-- **Settings** (gear icon or **O**): language (English / Deutsch), music on/off, sound effects on/off. The language follows your browser the first time and is remembered afterwards.
+- **Weather** changes every few days: clear, cloudy, rain with thunder, or fog. The sun icon in the top bar shows the current sky.
+- **Settings** (gear icon or **O**): language (English / Deutsch), music on/off, sound effects on/off, weather & atmosphere on/off. The language follows your browser the first time and is remembered afterwards.
 
 ### Buildings
 
@@ -63,6 +64,7 @@ Modules in `js/`:
 | `buildings.js` | Placed buildings, save/load serialization |
 | `villagers.js` | Cosmetic walking workers |
 | `effects.js` | Smoke, dust, sparks, floating text |
+| `atmosphere.js` | Weather (clear, cloudy, rain, fog), pixel clouds and shadows, fog banks, birds, butterflies, fireflies, leaves, light halos, vignette |
 | `game.js` | Economy, day ticks, milestones, save/load |
 | `renderer.js` | Camera (pan/zoom, HiDPI), world rendering, minimap |
 | `ui.js` | Menus, tooltips, input, notifications |

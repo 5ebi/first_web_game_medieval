@@ -122,6 +122,12 @@ const I18N = {
         's.close': 'Close',
         's.help': 'Show help',
         's.newgame': 'New game',
+        's.fx': 'Weather & atmosphere',
+        'weather.clear': 'Clear', 'weather.cloudy': 'Cloudy', 'weather.rain': 'Rain', 'weather.fog': 'Fog',
+        'weather.title': 'Day {n} · {w}',
+        'weather.rain.start': 'Rain clouds are gathering.',
+        'weather.fog.start': 'A thick fog rolls in.',
+        'weather.clear.start': 'The sky clears up.',
 
         // --- buildings ---
         'bld.castle.name': 'Castle',
@@ -272,6 +278,12 @@ const I18N = {
         's.close': 'Schließen',
         's.help': 'Hilfe anzeigen',
         's.newgame': 'Neues Spiel',
+        's.fx': 'Wetter & Atmosphäre',
+        'weather.clear': 'Klar', 'weather.cloudy': 'Bewölkt', 'weather.rain': 'Regen', 'weather.fog': 'Nebel',
+        'weather.title': 'Tag {n} · {w}',
+        'weather.rain.start': 'Regenwolken ziehen auf.',
+        'weather.fog.start': 'Dichter Nebel zieht auf.',
+        'weather.clear.start': 'Der Himmel klart auf.',
 
         'bld.castle.name': 'Burg',
         'bld.castle.desc': 'Dein Sitz der Macht. Bietet Platz für 10 Bewohner.',

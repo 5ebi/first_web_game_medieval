@@ -112,12 +112,18 @@
         const delta = Math.min(250, time - lastTime); // clamp: tab switches shouldn't fast-forward
         lastTime = time;
 
-        Game.update(delta);
-        UI.tick(delta / 1000);
-        Renderer.render(UI.getPlacementPreview(), UI.getHoverInfo());
-
+        // Schedule first so a single faulty frame can never freeze the game
         requestAnimationFrame(gameLoop);
+
+        try {
+            Game.update(delta);
+            UI.tick(delta / 1000);
+            Renderer.render(UI.getPlacementPreview(), UI.getHoverInfo());
+        } catch (e) {
+            if (!loopErrorLogged) { console.error(e); loopErrorLogged = true; }
+        }
     }
+    let loopErrorLogged = false;
 
     requestAnimationFrame(gameLoop);
 })();

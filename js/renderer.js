@@ -160,6 +160,8 @@ const Renderer = (() => {
         });
 
         // Minimap base (1px per tile)
+        Atmosphere.onMapChanged();
+
         minimapTerrain = document.createElement('canvas');
         minimapTerrain.width = MAP_WIDTH;
         minimapTerrain.height = MAP_HEIGHT;
@@ -227,6 +229,8 @@ const Renderer = (() => {
         Villagers.sync(BuildingManager.getAll());
         Villagers.update(simDt);
         Effects.update(simRunning ? simDt : dt * 0.3);
+        const night = nightAmount(gs);
+        Atmosphere.update(dt, gs, night);
 
         // Clear in screen space
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -300,7 +304,6 @@ const Renderer = (() => {
             }
         });
 
-        const night = nightAmount(gs);
 
         // Buildings
         BuildingManager.getAll().forEach(b => {
@@ -342,8 +345,17 @@ const Renderer = (() => {
         drawables.sort((a, b) => a.y - b.y);
         drawables.forEach(d => d.draw());
 
+        // Atmosphere: fog, cloud shadows, small critters
+        const view = {
+            x0: vx0, y0: vy0, x1: vx1, y1: vy1, zoom, dpr, w: canvasWidth, h: canvasHeight,
+            setWorld: () => { ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -camera.x * dpr * zoom, -camera.y * dpr * zoom); ctx.imageSmoothingEnabled = false; },
+            setScreen: () => { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.imageSmoothingEnabled = false; },
+        };
+        Atmosphere.drawGround(ctx, view);
+
         // Particles & floating texts
         Effects.draw(ctx);
+        Atmosphere.drawSky(ctx, view);
 
         // Placement preview
         if (placementPreview) drawPlacementPreview(placementPreview);
@@ -372,6 +384,9 @@ const Renderer = (() => {
             ctx.fillStyle = `rgba(12, 16, 60, ${(night * 0.42).toFixed(3)})`;
             ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         }
+
+        // Weather, light halos, rain, vignette
+        Atmosphere.drawScreen(ctx, view);
 
         // Placement hint text near the cursor
         if (placementPreview && placementPreview.reason && placementPreview.screenX !== undefined) {

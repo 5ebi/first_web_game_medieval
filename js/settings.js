@@ -8,6 +8,7 @@ const Settings = (() => {
         muted: false,
         musicOn: true,
         sfxOn: true,
+        fxOn: true,
     };
     let data = Object.assign({}, defaults);
 

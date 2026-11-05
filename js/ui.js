@@ -52,6 +52,9 @@ const UI = (() => {
             langBtns: Array.from(document.querySelectorAll('.lang-btn')),
             toggleMusic: $('toggle-music'),
             toggleSfx: $('toggle-sfx'),
+            toggleFx: $('toggle-fx'),
+            dayRes: $('day-res'),
+            iconDay: $('icon-day'),
             menuBtn: $('menu-btn'),
             helpBtn: $('help-btn'),
             helpScreen: $('help-screen'),
@@ -80,6 +83,12 @@ const UI = (() => {
 
         Lang.onChange(onLanguageChanged);
         syncSettingsUI();
+
+        Atmosphere.setWeatherListener((next, prev) => {
+            if (next === 'rain') showNotification(t('weather.rain.start'), 'info');
+            else if (next === 'fog') showNotification(t('weather.fog.start'), 'info');
+            else if (next === 'clear' && (prev === 'rain' || prev === 'fog')) showNotification(t('weather.clear.start'), 'info');
+        });
     }
 
     // ---------- layout ----------
@@ -335,6 +344,11 @@ const UI = (() => {
             AudioSys.play('click');
             syncSettingsUI();
         });
+        els.toggleFx.addEventListener('click', () => {
+            Atmosphere.setEnabled(!Atmosphere.isEnabled());
+            AudioSys.play('click');
+            syncSettingsUI();
+        });
         els.toggleSfx.addEventListener('click', () => {
             AudioSys.init();
             AudioSys.toggleSfx();
@@ -356,6 +370,7 @@ const UI = (() => {
         els.langBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.lang === Lang.get()));
         setToggle(els.toggleMusic, AudioSys.isMusicOn());
         setToggle(els.toggleSfx, AudioSys.isSfxOn());
+        setToggle(els.toggleFx, Atmosphere.isEnabled());
     }
 
     function setToggle(btn, on) {
@@ -592,6 +607,23 @@ const UI = (() => {
         }
         const gs = Game.getState();
         if (els.dayProgress) els.dayProgress.style.width = (gs.dayProgress * 100).toFixed(1) + '%';
+        updateSky(gs);
+    }
+
+    // ---------- sky / weather indicator ----------
+    let lastSkyIcon = '', lastSkyTitle = '';
+    function updateSky(gs) {
+        const icon = Atmosphere.getSkyIcon();
+        if (icon !== lastSkyIcon && els.iconDay) {
+            els.iconDay.innerHTML = '';
+            els.iconDay.appendChild(Sprites.drawIcon(icon));
+            lastSkyIcon = icon;
+        }
+        const title = t('weather.title', { n: gs.day, w: t('weather.' + Atmosphere.getWeather()) });
+        if (title !== lastSkyTitle && els.dayRes) {
+            els.dayRes.title = title;
+            lastSkyTitle = title;
+        }
     }
 
     // ---------- minimap ----------
