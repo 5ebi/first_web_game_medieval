@@ -59,6 +59,9 @@ const UI = (() => {
             toggleFx: $('toggle-fx'),
             dayRes: $('day-res'),
             iconDay: $('icon-day'),
+            seasonRes: $('season-res'),
+            iconSeason: $('icon-season'),
+            resSeason: $('res-season'),
             menuBtn: $('menu-btn'),
             helpBtn: $('help-btn'),
             helpScreen: $('help-screen'),
@@ -187,9 +190,10 @@ const UI = (() => {
 
     function costHtml(def) {
         const parts = [];
-        if (def.cost.wood > 0) parts.push(`<span class="c-wood">${def.cost.wood} ${resName('wood')}</span>`);
-        if (def.cost.stone > 0) parts.push(`<span class="c-stone">${def.cost.stone} ${resName('stone')}</span>`);
-        if (def.cost.iron > 0) parts.push(`<span class="c-iron">${def.cost.iron} ${resName('iron')}</span>`);
+        const cost = Game.getCost(def.key);
+        if (cost.wood > 0) parts.push(`<span class="c-wood">${cost.wood} ${resName('wood')}</span>`);
+        if (cost.stone > 0) parts.push(`<span class="c-stone">${cost.stone} ${resName('stone')}</span>`);
+        if (cost.iron > 0) parts.push(`<span class="c-iron">${cost.iron} ${resName('iron')}</span>`);
         return parts.length ? parts.join(' · ') : `<span class="c-free">${t('free')}</span>`;
     }
 
@@ -214,6 +218,10 @@ const UI = (() => {
         html += `<div class="tt-row"><span>${t('tt.size')}</span><span>${t('tt.tiles', { w: def.width, h: def.height })}</span></div>`;
         html += `<div class="tt-row"><span>${t('tt.cost')}</span><span>${costHtml(def)}</span></div>`;
         if (def.workers) html += `<div class="tt-row"><span>${t('tt.workers')}</span><span>${t('tt.eats', { n: def.workers })}</span></div>`;
+        if (def.production?.resource === 'food') {
+            const wm = SEASONS.find(s => s.id === 'winter').food[def.key];
+            if (wm !== undefined && wm !== 1) html += `<div class="tt-row"><span>${t('tt.winter')}</span><span>${wm === 0 ? t('season.rest') : '×' + fmtMult(wm)}</span></div>`;
+        }
         if (def.production?.requires) html += `<div class="tt-row"><span>${t('tt.needs')}</span><span>${def.production.requires === 'FOREST' ? t('tt.forest') : t('tt.stone')}</span></div>`;
         if (reason) html += `<div class="tt-reason">${reason}</div>`;
         html += `<div class="tt-hint">${t('tt.hotkey', { k: def.hotkey })}</div>`;
@@ -277,6 +285,12 @@ const UI = (() => {
             const type = btn.dataset.type;
             const available = Game.isBuildingAvailable(type);
             btn.classList.toggle('disabled', !available);
+            // Prices can change (e.g. the second warehouse is not free)
+            if (BUILDINGS[type].extraCost) {
+                const costEl = btn.querySelector('.b-cost');
+                const html = costHtml(BUILDINGS[type]);
+                if (costEl && costEl.innerHTML !== html) costEl.innerHTML = html;
+            }
             btn.classList.toggle('selected', type === selectedBuilding);
         });
         const castleBtn = els.buildingList.querySelector('.building-btn[data-type="castle"]');
@@ -701,7 +715,26 @@ const UI = (() => {
 
     // ---------- sky / weather indicator ----------
     let lastSkyIcon = '', lastSkyTitle = '';
+    let lastSeasonKey = '';
+    function updateSeason(gs) {
+        if (!els.seasonRes) return;
+        const s = Game.getSeason();
+        const key = `${s.id}|${s.daysLeft}|${s.toWinter}|${s.year}|${Lang.get()}`;
+        if (key === lastSeasonKey) return;
+        if (!lastSeasonKey.startsWith(s.id + '|')) {
+            els.iconSeason.innerHTML = '';
+            els.iconSeason.appendChild(Sprites.drawIcon(s.id));
+        }
+        lastSeasonKey = key;
+        els.resSeason.textContent = t('season.' + s.id);
+        els.seasonRes.title = s.id === 'winter'
+            ? t('season.tip.winter', { year: s.year, left: s.daysLeft })
+            : t('season.tip', { name: t('season.' + s.id), year: s.year, left: s.daysLeft, winter: s.toWinter });
+        els.seasonRes.classList.toggle('winter-soon', s.id !== 'winter' && s.toWinter <= WINTER_WARNING_DAYS);
+    }
+
     function updateSky(gs) {
+        updateSeason(gs);
         const icon = Atmosphere.getSkyIcon();
         if (icon !== lastSkyIcon && els.iconDay) {
             els.iconDay.innerHTML = '';
@@ -748,12 +781,23 @@ const UI = (() => {
         if (building.def.production) {
             const prod = building.def.production;
             const out = Game.getBuildingOutput(building);
+            const resting = prod.resource === 'food' && Game.getSeasonMultiplier(building.type) === 0;
             const status = building.grown
-                ? (building.active ? `<span class="ok">${t('info.active')}</span>` : `<span class="bad">${t('info.noworkers')}</span>`)
+                ? (!building.active ? `<span class="bad">${t('info.noworkers')}</span>`
+                    : resting ? `<span class="bad">${t('season.rest')}</span>`
+                    : `<span class="ok">${t('info.active')}</span>`)
                 : t('info.growing', { a: building.growthProgress, b: prod.growthDays });
-            const bonus = out > prod.amount ? ` <span class="ok">${t('info.bonus.inline', { n: (out - prod.amount).toFixed(1) })}</span>` : '';
-            html += `<div class="stat"><span class="stat-label">${t('info.production')}</span><span>${t('menu.prod', { n: prod.amount, res: resName(prod.resource) })}${bonus}</span></div>`;
+            // Show what the building really yields today (bonuses and season included)
+            const shown = Math.round(out * 10) / 10;
+            const cls = out > prod.amount ? 'ok' : out < prod.amount ? 'bad' : '';
+            html += `<div class="stat"><span class="stat-label">${t('info.production')}</span><span class="${cls}">${t('menu.prod', { n: shown.toLocaleString(Lang.get() === 'de' ? 'de-DE' : 'en-US'), res: resName(prod.resource) })}</span></div>`;
             html += `<div class="stat"><span class="stat-label">${t('info.status')}</span><span>${status}</span></div>`;
+            if (prod.resource === 'food') {
+                const season = Game.getSeason();
+                const m = Game.getSeasonMultiplier(building.type, season);
+                const cls = m > 1 ? 'ok' : m < 1 ? 'bad' : '';
+                html += `<div class="stat"><span class="stat-label">${t('info.season')}</span><span class="${cls}">${t('season.' + season.id)} ${m === 0 ? '· ' + t('season.rest') : '×' + fmtMult(m)}</span></div>`;
+            }
         }
         if (building.def.provides.populationCap) {
             html += `<div class="stat"><span class="stat-label">${t('info.housing')}</span><span>${t('menu.villagers', { n: building.def.provides.populationCap })}</span></div>`;
@@ -770,7 +814,7 @@ const UI = (() => {
         els.infoActions.innerHTML = '';
         if (building.type !== 'castle') {
             const refund = ['wood', 'stone', 'iron']
-                .map(r => [r, Math.floor(building.def.cost[r] * DEMOLISH_REFUND)])
+                .map(r => [r, Math.floor((building.paid || building.def.cost)[r] * DEMOLISH_REFUND)])
                 .filter(([, a]) => a > 0)
                 .map(([r, a]) => `+${a} ${resName(r)}`).join(', ');
             const btn = document.createElement('button');
@@ -862,6 +906,29 @@ const UI = (() => {
         if (snd) AudioSys.play(snd);
     }
 
+    function fmtMult(m) {
+        return m.toLocaleString(Lang.get() === 'de' ? 'de-DE' : 'en-US', { maximumFractionDigits: 2 });
+    }
+
+    // Big banner when a new season starts
+    function showSeason(season) {
+        const div = document.createElement('div');
+        div.className = `notification season season-${season.id}`;
+        div.innerHTML = `<span class="s-icon"></span><span class="s-text"><span class="s-name">${t('season.' + season.id)}</span><span class="s-sub">${t('season.start.' + season.id)}</span></span>`;
+        // copy the cached icon canvas (a DOM node can only live in one place)
+        const src = Sprites.drawIcon(season.id);
+        const icon = document.createElement('canvas');
+        icon.width = src.width; icon.height = src.height;
+        icon.getContext('2d').drawImage(src, 0, 0);
+        div.querySelector('.s-icon').appendChild(icon);
+        els.notifications.appendChild(div);
+        div.style.animationDelay = `0s, 5s`;
+        setTimeout(() => div.remove(), 5500);
+        AudioSys.play('season', { id: season.id });
+        updateResources();
+        if (selectedPlaced) showBuildingInfo(selectedPlaced);
+    }
+
     function showMilestone(m) {
         const div = document.createElement('div');
         div.className = 'notification milestone';
@@ -920,6 +987,7 @@ const UI = (() => {
         updateBuildingButtons,
         showNotification,
         showMilestone,
+        showSeason,
         showGameOver,
         hideWelcome,
         showWelcome,

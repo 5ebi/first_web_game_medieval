@@ -50,7 +50,8 @@ const BUILDINGS = {
         height: 4,
         cost: { wood: 0, stone: 0, iron: 0 },
         workers: 0,
-        provides: { populationCap: 10 },
+        // Servants gather a little wood and stone, so a settlement can never get stuck at zero
+        provides: { populationCap: 10, trickle: { wood: 2, stone: 1 } },
         production: null,
         limit: 1,
         category: 'core',
@@ -64,10 +65,12 @@ const BUILDINGS = {
         width: 3,
         height: 2,
         cost: { wood: 0, stone: 0, iron: 0 },
+        // The first warehouse is free, every further one costs this
+        extraCost: { wood: 30, stone: 20, iron: 0 },
         workers: 0,
         provides: { storage: 300 },
         production: null,
-        limit: 1,
+        limit: null,
         category: 'core',
         hotkey: 'E',
     },
@@ -221,6 +224,17 @@ const BUILD_ORDER = [
     'chicken_hut', 'apple_orchard', 'farm',
 ];
 
+// Seasons: a year has 46 days. Food buildings yield more in summer and autumn,
+// and rest in winter (chickens still lay a little). Saplings and fields do not grow in winter.
+const SEASONS = [
+    { id: 'spring', days: 12, food: { farm: 1,    apple_orchard: 1,    chicken_hut: 1 },    growth: true },
+    { id: 'summer', days: 12, food: { farm: 1.25, apple_orchard: 1.25, chicken_hut: 1 },    growth: true },
+    { id: 'autumn', days: 12, food: { farm: 1.5,  apple_orchard: 1.5,  chicken_hut: 1 },    growth: true },
+    { id: 'winter', days: 10, food: { farm: 0,    apple_orchard: 0,    chicken_hut: 0.75 }, growth: false },
+];
+const YEAR_DAYS = SEASONS.reduce((a, s) => a + s.days, 0);
+const WINTER_WARNING_DAYS = 6;
+
 // Fraction of the build cost refunded when demolishing
 const DEMOLISH_REFUND = 0.5;
 
@@ -234,6 +248,7 @@ const MILESTONES = [
     { id: 'iron20',   text: 'Stockpile 20 iron',                         check: (s) => s.resources.iron >= 20 },
     { id: 'smith',    text: 'Build a Blacksmith',                        check: (s, bm) => bm.countByType('blacksmith') > 0 },
     { id: 'pop20',    text: 'Grow to 20 working villagers',              check: (s) => s.populationUsed >= 20 },
+    { id: 'winter1',  text: 'Survive your first winter',                 check: (s) => s.day > YEAR_DAYS },
     { id: 'day50',    text: 'Rule for 50 days',                          check: (s) => s.day >= 50 },
     { id: 'food150',  text: 'Store 150 food',                            check: (s) => s.resources.food >= 150 },
     { id: 'bld20',    text: 'Build 20 buildings',                        check: (s, bm) => bm.getAll().length >= 20 },

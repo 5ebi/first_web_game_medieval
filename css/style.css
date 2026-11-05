@@ -1213,3 +1213,69 @@ kbd {
     #place-hint { font-size: 11px; }
     #place-cancel { width: 38px; height: 38px; flex: 0 0 38px; }
 }
+
+/* ---------- Seasons ---------- */
+.resource.season .resource-value {
+    min-width: 58px;
+}
+
+.resource.season.winter-soon .resource-value {
+    color: #9fd0ff;
+    animation: pulse-text 1.4s ease-in-out infinite;
+}
+
+.notification.season {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 22px 10px 14px;
+    border-width: 2px;
+    background: linear-gradient(180deg, rgba(60, 44, 18, 0.97), rgba(36, 26, 10, 0.97));
+    border-color: var(--gold-bright);
+    box-shadow: 0 0 22px rgba(255, 215, 0, 0.3);
+    white-space: normal;
+    max-width: 520px;
+}
+
+.notification.season-winter {
+    border-color: #bcd8f4;
+    background: linear-gradient(180deg, rgba(36, 48, 70, 0.97), rgba(22, 30, 46, 0.97));
+    box-shadow: 0 0 22px rgba(170, 210, 255, 0.35);
+}
+
+.notification.season-autumn { border-color: #e0902a; box-shadow: 0 0 22px rgba(224, 144, 42, 0.35); }
+.notification.season-spring { border-color: #f28ab4; box-shadow: 0 0 22px rgba(242, 138, 180, 0.3); }
+
+.notification.season .s-icon canvas {
+    width: 40px;
+    height: 40px;
+    image-rendering: pixelated;
+    display: block;
+}
+
+.notification.season .s-text {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+}
+
+.notification.season .s-name {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--gold-bright);
+}
+
+.notification.season-winter .s-name { color: #dbeeff; }
+
+.notification.season .s-sub {
+    font-size: 13px;
+    color: var(--text);
+}
+
+@media (max-width: 760px) {
+    #res-season { display: none; }
+    .notification.season .s-name { font-size: 16px; }
+    .notification.season .s-icon canvas { width: 30px; height: 30px; }
+}

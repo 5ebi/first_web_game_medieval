@@ -212,6 +212,22 @@ const AudioSys = (() => {
             });
             [2637, 3136, 2794].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.05, vol: 0.035, t: t0 + 0.38 + i * 0.07 }));
         },
+        season(o = {}) {
+            // A short motif per season: bright for spring/summer, mellow for autumn, cold for winter
+            const motifs = {
+                spring: [523.25, 659.25, 783.99, 1046.5],
+                summer: [587.33, 739.99, 880, 1174.66],
+                autumn: [440, 523.25, 659.25, 587.33],
+                winter: [659.25, 587.33, 493.88, 392],
+            };
+            const notes = motifs[o.id] || motifs.spring;
+            const t0 = now();
+            notes.forEach((f, i) => {
+                tone({ freq: f, type: 'triangle', dur: i === notes.length - 1 ? 0.6 : 0.22, vol: 0.11, t: t0 + i * 0.13 });
+                tone({ freq: f * 2, type: 'sine', dur: 0.3, vol: o.id === 'winter' ? 0.05 : 0.025, t: t0 + i * 0.13 });
+            });
+            tone({ freq: notes[0] / 2, type: 'sine', dur: 1.0, vol: 0.12, t: t0 });
+        },
         tick() {
             tone({ freq: 1200, type: 'sine', dur: 0.03, vol: 0.04 });
         },
@@ -294,11 +310,11 @@ const AudioSys = (() => {
 
     // ---------- weather-driven ambience ----------
     let windAmp = null, rainGain = null;
-    let atm = { rain: 0, wind: 0.3, night: 0 };
+    let atm = { rain: 0, wind: 0.3, night: 0, season: 'spring' };
     let lastAtm = { rain: -1, wind: -1 };
 
-    function setAtmosphere(rain, wind, night) {
-        atm = { rain, wind, night };
+    function setAtmosphere(rain, wind, night, season = 'spring') {
+        atm = { rain, wind, night, season };
         if (!ctx || !rainGain) return;
         if (Math.abs(rain - lastAtm.rain) > 0.02) {
             rainGain.gain.setTargetAtTime(rain * 0.11, now(), 0.4);
@@ -314,7 +330,7 @@ const AudioSys = (() => {
     function scheduleCricket() {
         if (cricketTimer) clearTimeout(cricketTimer);
         cricketTimer = setTimeout(() => {
-            if (ctx && !muted && document.visibilityState === 'visible' && atm.night > 0.5 && atm.rain < 0.3) cricket();
+            if (ctx && !muted && document.visibilityState === 'visible' && atm.night > 0.5 && atm.rain < 0.3 && (atm.season === 'spring' || atm.season === 'summer')) cricket();
             scheduleCricket();
         }, 600 + Math.random() * 1200);
     }
@@ -338,7 +354,7 @@ const AudioSys = (() => {
     function scheduleBird() {
         if (birdTimer) clearTimeout(birdTimer);
         birdTimer = setTimeout(() => {
-            if (ctx && !muted && document.visibilityState === 'visible' && atm.night < 0.3 && atm.rain < 0.2) bird();
+            if (ctx && !muted && document.visibilityState === 'visible' && atm.night < 0.3 && atm.rain < 0.2 && atm.season !== 'winter') bird();
             scheduleBird();
         }, 2500 + Math.random() * 6000);
     }

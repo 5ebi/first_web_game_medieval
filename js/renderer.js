@@ -14,6 +14,8 @@ const Renderer = (() => {
 
     // Terrain tile cache
     let terrainCanvas = null;
+    let terrainSeason = null;   // season the terrain cache was rendered for
+    let season = 'spring';      // current season id (updated every frame)
     let minimapTerrain = null;
 
     let lastFrame = performance.now();
@@ -121,16 +123,18 @@ const Renderer = (() => {
         const tctx = terrainCanvas.getContext('2d');
         tctx.imageSmoothingEnabled = false;
 
+        terrainSeason = season;
+        const winter = season === 'winter';
         const grid = GameMap.getTerrainGrid();
         for (let y = 0; y < MAP_HEIGHT; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
                 const t = grid[y][x];
-                tctx.drawImage(Sprites.drawTile(t, GameMap.getVariant(x, y)), x * TILE_SIZE, y * TILE_SIZE);
+                tctx.drawImage(Sprites.getSeasonalTile(t, GameMap.getVariant(x, y), season), x * TILE_SIZE, y * TILE_SIZE);
             }
         }
 
-        // Shorelines: foam on water tiles bordering land
-        for (let y = 0; y < MAP_HEIGHT; y++) {
+        // Shorelines: foam on water tiles bordering land (frozen in winter: no foam)
+        for (let y = 0; y < MAP_HEIGHT && !winter; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
                 if (grid[y][x] !== TERRAIN.WATER) continue;
                 const land = (tx, ty) => {
@@ -154,8 +158,9 @@ const Renderer = (() => {
             }
         }
 
-        // Flower decorations
+        // Flower decorations: none in winter, fewer in autumn
         GameMap.getDecorations().forEach(d => {
+            if (winter || (season === 'autumn' && d.seed % 3 !== 0)) return;
             tctx.drawImage(Sprites.drawFlowers(2, d.seed), d.x * TILE_SIZE, d.y * TILE_SIZE);
         });
 
@@ -176,13 +181,13 @@ const Renderer = (() => {
             let col = MINIMAP_COLORS[type] || '#5a8f3c';
             try {
                 pctx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
-                pctx.drawImage(Sprites.drawTile(type, 0), 0, 0);
+                pctx.drawImage(Sprites.getSeasonalTile(type, 0, season), 0, 0);
                 const d = pctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data;
                 let r = 0, g = 0, b = 0, n = 0;
                 for (let i = 0; i < d.length; i += 4) { if (d[i + 3] > 0) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } }
                 if (n) col = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
             } catch (e) { /* tainted canvas under file:// - keep fallback colour */ }
-            if (type === TERRAIN.FOREST) col = MINIMAP_COLORS[TERRAIN.FOREST]; // trees dominate forests visually
+            if (type === TERRAIN.FOREST) col = { autumn: '#8a5a22', winter: '#7d9180' }[season] || MINIMAP_COLORS[TERRAIN.FOREST]; // trees dominate forests visually
             avg[type] = col;
             return col;
         };
@@ -231,6 +236,8 @@ const Renderer = (() => {
         Villagers.update(simDt);
         Effects.update(simRunning ? simDt : dt * 0.3);
         const night = nightAmount(gs);
+        season = Game.getSeason().id;
+        if (terrainSeason && season !== terrainSeason) invalidateTerrainCache();
         Atmosphere.update(dt, gs, night);
 
         // Clear in screen space
@@ -272,7 +279,7 @@ const Renderer = (() => {
         const waveFrame = Math.floor(timeSec * 2) % 3;
         for (let ty = startTileY; ty < endTileY; ty++) {
             for (let tx = startTileX; tx < endTileX; tx++) {
-                if (grid[ty][tx] !== TERRAIN.WATER) continue;
+                if (grid[ty][tx] !== TERRAIN.WATER || season === 'winter') continue;
                 if ((tx * 3 + ty * 5) % 4 !== 0) continue;
                 const f = (waveFrame + tx + ty) % 3;
                 const off = Math.sin(timeSec * 1.5 + tx + ty) * 2;
@@ -281,7 +288,7 @@ const Renderer = (() => {
         }
 
         // Stone piles (ground layer)
-        const stonePileSprite = Sprites.drawStonePile();
+        const stonePileSprite = Sprites.getStonePile(season);
         GameMap.getStones().forEach(s => {
             if (s.x + 32 > vx0 && s.x - 32 < vx1 && s.y + 24 > vy0 && s.y - 24 < vy1) {
                 ctx.drawImage(stonePileSprite, s.x, s.y);
@@ -297,7 +304,7 @@ const Renderer = (() => {
                 drawables.push({
                     y: t.y + 16,
                     draw: () => {
-                        const sprite = t.type === 'pine' ? Sprites.drawPineTree() : Sprites.drawTree();
+                        const sprite = Sprites.getTree(t.type === 'pine' ? 'pine' : 'oak', season);
                         drawShadowEllipse(t.x + 3, t.y + 15, 9, 4, 0.22);
                         ctx.drawImage(sprite, t.x - sprite.width / 2, t.y - sprite.height + 16);
                     }
@@ -399,7 +406,9 @@ const Renderer = (() => {
     }
 
     function drawBuilding(b, nowT, night, hoverInfo) {
-        const sprite = Sprites.getBuilding(b.type, { grown: b.grown });
+        const sprite = (season === 'winter' && !b.buildStart)
+            ? Sprites.getBuildingSeasonal(b.type, { grown: b.grown }, season)
+            : Sprites.getBuilding(b.type, { grown: b.grown });
         if (!sprite) return;
 
         // Sprites are anchored bottom-center on their footprint, so custom art may be taller/wider
@@ -448,7 +457,8 @@ const Renderer = (() => {
         // Growth progress for orchards / farms
         if (!b.grown && b.def.production?.growthDays) {
             const gs = Game.getState();
-            const pct = Math.min(1, (b.growthProgress + gs.dayProgress) / b.def.production.growthDays);
+            const dormant = season === 'winter';
+            const pct = Math.min(1, (b.growthProgress + (dormant ? 0 : gs.dayProgress)) / b.def.production.growthDays);
             const bw = Math.min(b.width - 8, 56);
             const bx = b.pixelX + (b.width - bw) / 2;
             const by = b.pixelY - 10;
@@ -458,7 +468,7 @@ const Renderer = (() => {
             ctx.fillRect(bx + 1, by + 1, (bw - 2) * pct, 5);
             ctx.fillStyle = '#fff';
             ctx.font = '7px monospace';
-            ctx.fillText(t('cv.growing'), bx + 2, by - 2);
+            ctx.fillText(dormant ? t('season.rest') : t('cv.growing'), bx + 2, by - 2);
         }
     }
 

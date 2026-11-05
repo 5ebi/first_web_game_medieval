@@ -16,7 +16,12 @@ const Atmosphere = (() => {
         cloudy: { cover: 0.75, fog: 0.1, rain: 0, wind: 0.65, weight: 0.3,  days: [2, 5] },
         rain:   { cover: 1.0,  fog: 0.3, rain: 1, wind: 0.9,  weight: 0.15, days: [2, 4] },
         fog:    { cover: 0.35, fog: 1.0, rain: 0, wind: 0.1,  weight: 0.1,  days: [1.5, 3] },
+        snow:   { cover: 0.9,  fog: 0.2, rain: 0, snow: 1, wind: 0.5, weight: 0, days: [2, 4] },
     };
+    // In winter precipitation falls as snow
+    const WINTER_WEIGHTS = { clear: 0.35, cloudy: 0.3, snow: 0.25, fog: 0.1 };
+    let season = 'spring';
+    let flakes = [];
 
     const FOG_ALPHA = [0, 38, 70, 105, 140]; // alpha per fog band (0-255)
 
@@ -24,7 +29,7 @@ const Atmosphere = (() => {
     let weather = 'clear';
     let weatherUntil = 4;
     let lastGameDay = 0;
-    const p = { cover: 0.18, fog: 0, rain: 0, wind: 0.3 };
+    const p = { cover: 0.18, fog: 0, rain: 0, snow: 0, wind: 0.3 };
     let night = 0, dusk = 0;
     let windX = 0, fogU = 0, fogV = 0;
     let flash = 0;
@@ -268,7 +273,7 @@ const Atmosphere = (() => {
         for (let i = 0; i < 2 && next === prev; i++) {
             let r = Math.random(), acc = 0;
             for (const [k, w] of Object.entries(WEATHERS)) {
-                acc += w.weight;
+                acc += season === 'winter' ? (WINTER_WEIGHTS[k] || 0) : w.weight;
                 if (r <= acc) { next = k; break; }
             }
         }
@@ -282,7 +287,7 @@ const Atmosphere = (() => {
         if (!WEATHERS[name]) return;
         const prev = weather;
         weather = name;
-        if (instant) Object.assign(p, { cover: WEATHERS[name].cover, fog: WEATHERS[name].fog, rain: WEATHERS[name].rain, wind: WEATHERS[name].wind });
+        if (instant) Object.assign(p, { cover: WEATHERS[name].cover, fog: WEATHERS[name].fog, rain: WEATHERS[name].rain, snow: WEATHERS[name].snow || 0, wind: WEATHERS[name].wind });
         if (onWeatherChange && name !== prev) onWeatherChange(name, prev);
     }
 
@@ -292,6 +297,13 @@ const Atmosphere = (() => {
         if (!noise) noise = makeNoise();
 
         night = nightAmt;
+        const newSeason = Game.getSeason().id;
+        if (newSeason !== season) {
+            season = newSeason;
+            // Precipitation follows the season
+            if (season === 'winter' && weather === 'rain') setWeather('snow');
+            else if (season !== 'winter' && weather === 'snow') setWeather('rain');
+        }
         const running = gs.started && !gs.paused && !gs.gameOver;
         const sm = running ? 0.3 + Math.min(gs.speed, 3) * 0.7 : 0.35;
 
@@ -309,11 +321,12 @@ const Atmosphere = (() => {
         lastGameDay = gd;
         if (enabled && Game.hasCastle() && gd >= weatherUntil) pickWeather(gd);
 
-        const target = enabled ? WEATHERS[weather] : { cover: 0, fog: 0, rain: 0, wind: 0.3 };
+        const target = enabled ? WEATHERS[weather] : { cover: 0, fog: 0, rain: 0, snow: 0, wind: 0.3 };
         const k = 1 - Math.exp(-dt * 0.35);
         p.cover += (target.cover - p.cover) * k;
         p.fog += (target.fog - p.fog) * k;
         p.rain += (target.rain - p.rain) * k;
+        p.snow += ((target.snow || 0) - p.snow) * k;
         p.wind += (target.wind - p.wind) * k;
 
         windX += dt * sm * (6 + p.wind * 18);
@@ -321,7 +334,7 @@ const Atmosphere = (() => {
         fogV += dt * sm * 0.08;
 
         if (typeof AudioSys !== 'undefined' && AudioSys.setAtmosphere) {
-            AudioSys.setAtmosphere(enabled ? p.rain : 0, p.wind, night);
+            AudioSys.setAtmosphere(enabled ? p.rain : 0, p.wind, night, season);
         }
 
         if (!enabled) return;
@@ -347,19 +360,20 @@ const Atmosphere = (() => {
     function updateLife(dt, sm) {
         const v = lastView;
         if (!v) return;
-        const day = night < 0.3 && p.rain < 0.3;
+        const day = night < 0.3 && p.rain < 0.3 && p.snow < 0.3;
+        const warm = season === 'spring' || season === 'summer';
 
         // Birds
         birdTimer -= dt;
         if (birdTimer <= 0) {
             birdTimer = rand(12, 30);
-            if (day) spawnFlock(v);
+            if (day && season !== 'winter') spawnFlock(v);
         }
         birds.forEach(b => { b.x += b.vx * dt; b.y += b.vy * dt; b.t += dt; });
         birds = birds.filter(b => inView(b.x, b.y, 900));
 
         // Butterflies near flowers
-        if (day && butterflies.length < 8 && Math.random() < dt * 1.5) {
+        if (day && warm && butterflies.length < 8 && Math.random() < dt * 1.5) {
             const decos = GameMap.getDecorations().filter(d => inView(d.x * TILE_SIZE, d.y * TILE_SIZE, 40));
             if (decos.length) {
                 const d = decos[Math.floor(Math.random() * decos.length)];
@@ -373,7 +387,7 @@ const Atmosphere = (() => {
         butterflies = butterflies.filter(b => b.t < b.life && (day || b.t < b.life - 1));
 
         // Fireflies at night near forests and water
-        if (night > 0.35 && fireflies.length < 26 && Math.random() < dt * 8) {
+        if (warm && night > 0.35 && fireflies.length < 26 && Math.random() < dt * 8) {
             for (let i = 0; i < 12; i++) {
                 const tx = Math.floor(rand(v.x0, v.x1) / TILE_SIZE), ty = Math.floor(rand(v.y0, v.y1) / TILE_SIZE);
                 const t = GameMap.getTerrain(tx, ty);
@@ -392,14 +406,15 @@ const Atmosphere = (() => {
         fireflies = fireflies.filter(f => f.t < f.life);
 
         // Falling leaves when it is windy
-        if (p.wind > 0.45 && night < 0.7 && Math.random() < dt * p.wind * 4) {
+        const autumn = season === 'autumn';
+        if (season !== 'winter' && (p.wind > 0.45 || autumn) && night < 0.7 && Math.random() < dt * (autumn ? 3 + p.wind * 3 : p.wind * 4)) {
             const trees = GameMap.getTrees();
             for (let i = 0; i < 20 && trees.length; i++) {
                 const tr = trees[Math.floor(Math.random() * trees.length)];
                 if (!inView(tr.x, tr.y, 20)) continue;
                 leaves.push({
                     x: tr.x + rand(-10, 10), y: tr.y - rand(10, 34), t: 0, life: rand(2.5, 4), ph: rand(0, 6),
-                    color: ['#3a8528', '#5aa538', '#c49a3a', '#b8632a'][Math.floor(Math.random() * 4)],
+                    color: (autumn ? ['#c8781e', '#e0b040', '#b8521e', '#d89a2a'] : ['#3a8528', '#5aa538', '#c49a3a', '#b8632a'])[Math.floor(Math.random() * 4)],
                 });
                 break;
             }
@@ -542,6 +557,11 @@ const Atmosphere = (() => {
                 ctx.fillStyle = `rgba(40, 55, 80, ${dim.toFixed(3)})`;
                 ctx.fillRect(0, 0, W, H);
             }
+            // Cold, pale winter light
+            if (season === 'winter') {
+                ctx.fillStyle = `rgba(185, 205, 235, ${(0.07 + p.snow * 0.06).toFixed(3)})`;
+                ctx.fillRect(0, 0, W, H);
+            }
         }
 
         // Warm light halos around lit windows and the forge (world space, additive)
@@ -584,6 +604,7 @@ const Atmosphere = (() => {
 
         if (enabled) {
             drawRain(ctx, view);
+            drawSnow(ctx, view);
             if (flash > 0.01) {
                 ctx.fillStyle = `rgba(230, 235, 255, ${(flash * 0.35).toFixed(3)})`;
                 ctx.fillRect(0, 0, W, H);
@@ -630,6 +651,29 @@ const Atmosphere = (() => {
         });
     }
 
+    let lastSnowT = performance.now();
+    function drawSnow(ctx, view) {
+        const now = performance.now();
+        const dt = Math.min(0.05, (now - lastSnowT) / 1000);
+        lastSnowT = now;
+        const W = view.w, H = view.h;
+        const want = Math.floor(p.snow * 190 * (W * H) / (1280 * 800));
+        while (flakes.length < want) {
+            flakes.push({ x: rand(-40, W), y: rand(-H, 0), vy: rand(28, 60), ph: rand(0, 6), s: Math.random() < 0.3 ? 3 : 2, gy: rand(H * 0.2, H) });
+        }
+        if (flakes.length > want) flakes.length = want;
+        if (!flakes.length) return;
+        const drift = 10 + p.wind * 30;
+        flakes.forEach(f => {
+            f.y += f.vy * dt;
+            f.x += (drift + Math.sin(now / 700 + f.ph) * 14) * dt;
+            if (f.y > f.gy || f.x > W + 10) { f.x = rand(-40, W); f.y = rand(-40, -5); f.gy = rand(H * 0.2, H); }
+            const fade = clamp((f.gy - f.y) / 30, 0, 1); // melt into the ground
+            ctx.fillStyle = `rgba(245, 248, 255, ${(0.85 * fade).toFixed(3)})`;
+            ctx.fillRect(Math.round(f.x), Math.round(f.y), f.s, f.s);
+        });
+    }
+
     // ---------- public ----------
     function onMapChanged() {
         buildMask();
@@ -642,13 +686,14 @@ const Atmosphere = (() => {
         enabled = on;
         Settings.set('fxOn', on);
         if (!on) {
-            birds = []; butterflies = []; fireflies = []; leaves = []; drops = []; splashes = [];
+            birds = []; butterflies = []; fireflies = []; leaves = []; drops = []; splashes = []; flakes = [];
             flash = 0;
         }
     }
 
     function getSkyIcon() {
         if (enabled && weather === 'rain') return 'rain';
+        if (enabled && weather === 'snow') return 'snow';
         if (enabled && weather === 'fog') return 'fog';
         if (night > 0.55) return 'moon';
         if (enabled && weather === 'cloudy') return 'cloud';

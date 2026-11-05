@@ -24,6 +24,7 @@
         onNotification: (msg, type) => UI.showNotification(msg, type),
         onGameOver: () => UI.showGameOver(),
         onMilestone: (m) => UI.showMilestone(m),
+        onSeasonChange: (season) => UI.showSeason(season),
         onProduce: (b, res, amount) => {
             if (amount <= 0) return;
             const shown = Math.round(amount * 10) / 10;

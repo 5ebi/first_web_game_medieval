@@ -17,6 +17,7 @@ Turn your sound on: music, ambience and effects are all synthesized in the brows
 - Every building has a **hotkey** (shown in the menu)
 - Click a placed building for details or to **demolish** it (50% refund, **Del** key)
 - Progress is **saved automatically**; use *Continue* on the title screen
+- **Seasons**: a year has 46 days. Summer (+25%) and autumn (+50%) bring richer harvests; in winter fields and orchards rest and chickens lay less, so stock up in autumn. A warning six days before winter tells you how much food to store.
 - **Weather** changes every few days: clear, cloudy, rain with thunder, or fog. The sun icon in the top bar shows the current sky.
 - **Settings** (gear icon or **O**): language (English / Deutsch), music on/off, sound effects on/off, weather & atmosphere on/off. The language follows your browser the first time and is remembered afterwards.
 
@@ -24,8 +25,8 @@ Turn your sound on: music, ambience and effects are all synthesized in the brows
 
 | Building | Cost | Workers | Effect |
 |---|---|---|---|
-| Castle | Free | — | +10 villagers |
-| Warehouse | Free (limit 1) | — | +300 storage |
+| Castle | Free | — | +10 villagers, +2 wood and +1 stone/day |
+| Warehouse | First free, then 30 wood, 20 stone | — | +300 storage |
 | House | 15 wood, 10 stone | — | +5 villagers |
 | Tavern | 20 wood, 10 stone, 5 iron | — | +8 villagers |
 | Lumberjack | 10 wood | 2 | +6 wood/day (near forest) |

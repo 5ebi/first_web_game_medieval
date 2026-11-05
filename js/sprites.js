@@ -375,6 +375,35 @@ const Sprites = (() => {
                 R(3, 7, 1, 3, '#e8b890'); R(12, 7, 1, 3, '#e8b890');
                 R(4, 12, 8, 1, '#2a4f80');
                 break;
+            case 'spring':
+                R(7, 9, 2, 6, '#4f8a3c'); R(9, 11, 3, 2, '#4f8a3c');
+                R(6, 2, 4, 3, '#f28ab4'); R(6, 8, 4, 2, '#f28ab4');
+                R(3, 4, 3, 4, '#f28ab4'); R(10, 4, 3, 4, '#f28ab4');
+                R(6, 5, 4, 3, '#ffd84a'); P(7, 5, '#fff2a0');
+                P(4, 4, '#ffc0d8'); P(7, 2, '#ffc0d8');
+                break;
+            case 'autumn':
+                R(6, 3, 4, 2, '#e0902a'); R(4, 5, 8, 2, '#d8742a'); R(3, 7, 10, 2, '#c85a22');
+                R(4, 9, 8, 2, '#b8481e'); R(6, 11, 4, 1, '#a83e1a');
+                R(8, 4, 1, 8, '#7a2e10'); R(8, 12, 1, 3, '#6b4226');
+                P(6, 7, '#7a2e10'); P(10, 6, '#7a2e10'); P(5, 9, '#7a2e10'); P(11, 9, '#7a2e10');
+                P(5, 5, '#f0c060');
+                break;
+            case 'winter':
+                R(7, 1, 2, 14, '#e8f2ff'); R(1, 7, 14, 2, '#e8f2ff');
+                for (let i = 0; i < 4; i++) { P(3 + i, 3 + i, '#bcd8f4'); P(12 - i, 3 + i, '#bcd8f4'); P(3 + i, 12 - i, '#bcd8f4'); P(12 - i, 12 - i, '#bcd8f4'); }
+                P(6, 2, '#bcd8f4'); P(9, 2, '#bcd8f4'); P(6, 13, '#bcd8f4'); P(9, 13, '#bcd8f4');
+                P(2, 6, '#bcd8f4'); P(2, 9, '#bcd8f4'); P(13, 6, '#bcd8f4'); P(13, 9, '#bcd8f4');
+                R(7, 7, 2, 2, '#ffffff');
+                break;
+            case 'snow':
+                R(3, 4, 10, 4, '#d8e0ec');
+                R(5, 2, 4, 2, '#d8e0ec'); R(8, 2, 3, 2, '#e8eef6');
+                R(3, 7, 10, 1, '#a8b4c8');
+                P(4, 10, '#ffffff'); P(8, 9, '#ffffff'); P(11, 11, '#ffffff'); P(6, 13, '#ffffff'); P(10, 14, '#ffffff');
+                P(3, 13, '#dfe9f8'); P(12, 13, '#dfe9f8');
+                break;
+            case 'summer':
             case 'day':
                 // sun
                 R(5, 5, 6, 6, '#f6c431');
@@ -589,7 +618,10 @@ const Sprites = (() => {
         ctx.fill();
         // roof shingle lines
         ctx.fillStyle = 'rgba(0,0,0,0.15)';
-        for (let y = 10; y < 22; y += 4) ctx.fillRect(4 + (22 - y) * 0 + (y - 4), y, w - 8 - 2 * (y - 4), 1);
+        for (let y = 10; y < 22; y += 4) {
+            const hw = Math.floor((y - 4) / 18 * (w / 2 - 4)) - 1;
+            ctx.fillRect(w / 2 - hw, y, hw * 2, 1);
+        }
         // roof edge
         ctx.fillStyle = '#5a2e0c';
         ctx.fillRect(4, 21, w - 8, 2);
@@ -1132,6 +1164,184 @@ const Sprites = (() => {
         }
     }
 
+    // ============================================
+    // SEASONS
+    // ============================================
+    const customArt = new Set(); // cache keys replaced by files in assets/
+
+    function hash2(x, y, s) {
+        let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(s, 1274126177)) | 0;
+        h = Math.imul(h ^ (h >>> 13), 1274126177);
+        return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    }
+
+    // Terrain tile for a season, derived from the base tile (so custom tiles get seasons too)
+    function getSeasonalTile(type, variant, season) {
+        if (!season || season === 'spring') return drawTile(type, variant);
+        const key = `stile_${type}_${variant}_${season}`;
+        if (cache[key]) return cache[key];
+        const T = TILE_SIZE;
+        const c = createCanvas(T, T);
+        const ctx = c.getContext('2d');
+        ctx.drawImage(drawTile(type, variant), 0, 0);
+        const green = type === TERRAIN.GRASS || type === TERRAIN.GRASS_DARK || type === TERRAIN.FOREST || type === TERRAIN.FLOWERS;
+
+        if (season === 'summer' && green) {
+            ctx.fillStyle = 'rgba(255, 225, 110, 0.10)';
+            ctx.fillRect(0, 0, T, T);
+        } else if (season === 'autumn' && green) {
+            ctx.fillStyle = 'rgba(190, 120, 30, 0.28)';
+            ctx.fillRect(0, 0, T, T);
+            const leaf = ['#c8781e', '#b8521e', '#e0b040', '#a8441a'];
+            for (let i = 0; i < 7; i++) {
+                const x = Math.floor(hash2(i, variant, type + 3) * (T - 2));
+                const y = Math.floor(hash2(variant, i, type + 5) * (T - 1));
+                ctx.fillStyle = leaf[i % leaf.length];
+                ctx.fillRect(x, y, 2, 1);
+            }
+        } else if (season === 'winter') {
+            if (type === TERRAIN.WATER) {
+                // Frozen lake: pale ice with highlights and cracks
+                ctx.fillStyle = '#a9cbe6';
+                ctx.fillRect(0, 0, T, T);
+                for (let i = 0; i < 5; i++) {
+                    const x = Math.floor(hash2(i, variant, 41) * (T - 6)), y = Math.floor(hash2(variant, i, 43) * (T - 2));
+                    ctx.fillStyle = '#d6e9f7';
+                    ctx.fillRect(x, y, 5, 1);
+                }
+                for (let i = 0; i < 3; i++) {
+                    let x = Math.floor(hash2(i, variant, 47) * (T - 4)), y = Math.floor(hash2(variant, i, 53) * (T - 6));
+                    ctx.fillStyle = '#86aed0';
+                    for (let k = 0; k < 4; k++) { ctx.fillRect(x, y, 1, 2); x += hash2(k, i, variant) > 0.5 ? 1 : -1; y += 2; }
+                }
+            } else {
+                // Snow blanket in 2px cells; only a few small patches of ground peek through
+                const patches = { [TERRAIN.STONE_DEPOSIT]: 4, [TERRAIN.SAND]: 2, [TERRAIN.DIRT]: 2, [TERRAIN.FOREST]: 2 }[type] ?? 1;
+                const holes = [];
+                for (let i = 0; i < patches; i++) {
+                    if (hash2(i, variant, type + 61) < 0.35 && type !== TERRAIN.STONE_DEPOSIT) continue;
+                    const big = type === TERRAIN.STONE_DEPOSIT;
+                    holes.push({
+                        x: Math.floor(hash2(i, variant, type + 71) * 13) * 2, y: Math.floor(hash2(variant, i, type + 73) * 14) * 2,
+                        w: big ? 8 : 4, h: big ? 4 : 2,
+                    });
+                }
+                for (let y = 0; y < T; y += 2) {
+                    for (let x = 0; x < T; x += 2) {
+                        if (holes.some(o => x >= o.x && x < o.x + o.w && y >= o.y && y < o.y + o.h)) continue;
+                        const m = hash2(x, y, 11 + variant + type * 3);
+                        ctx.fillStyle = m < 0.06 ? '#d3dce8' : m > 0.93 ? '#f9fbfd' : '#e8eef5';
+                        ctx.fillRect(x, y, 2, 2);
+                    }
+                }
+                // soft blue shadow at the lower edge of each hole (depth)
+                ctx.fillStyle = '#c9d4e2';
+                holes.forEach(o => ctx.fillRect(o.x, o.y + o.h, o.w, 1));
+            }
+        }
+        cache[key] = c;
+        return c;
+    }
+
+    // Puts a 2px layer of snow on every upward-facing edge of a sprite
+    function snowCap(src) {
+        const c = createCanvas(src.width, src.height);
+        const ctx = c.getContext('2d');
+        ctx.drawImage(src, 0, 0);
+        let data;
+        try {
+            data = ctx.getImageData(0, 0, c.width, c.height).data;
+        } catch (e) {
+            return src; // tainted canvas (custom art opened via file://): skip the snow
+        }
+        const w = c.width, h = c.height;
+        const solid = (x, y) => x >= 0 && y >= 0 && x < w && y < h && data[(y * w + x) * 4 + 3] > 40;
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                if (!solid(x, y) || solid(x, y - 1)) continue;
+                // up to 3px of snow on every upward-facing edge, shaded at the bottom
+                const depth = (solid(x - 1, y) && solid(x + 1, y)) ? 3 : 2;
+                for (let k = 0; k < depth && solid(x, y + k); k++) {
+                    ctx.fillStyle = k === depth - 1 ? '#cdd8e6' : (k === 0 ? '#ffffff' : '#eef3f9');
+                    ctx.fillRect(x, y + k, 1, 1);
+                }
+            }
+        }
+        return c;
+    }
+
+    function drawOak(leafColors, dark, highlight) {
+        const scale = 2;
+        const c = createCanvas(16 * scale, 24 * scale);
+        const ctx = c.getContext('2d');
+        for (let y = 14; y < 24; y++) for (let x = 6; x < 10; x++) px(ctx, x, y, y % 3 === 0 ? '#5a3418' : '#6b4226', scale);
+        for (let y = 2; y < 15; y++) {
+            for (let x = 2; x < 14; x++) {
+                const dx = x - 8, dy = y - 8;
+                if (Math.sqrt(dx * dx + dy * dy) < 6.5) {
+                    px(ctx, x, y, (dx + dy > 5) ? dark : leafColors[(x * 3 + y * 7) % leafColors.length], scale);
+                }
+            }
+        }
+        [[5, 5], [6, 4], [4, 6]].forEach(([x, y]) => px(ctx, x, y, highlight, scale));
+        return c;
+    }
+
+    function drawBareOak() {
+        const scale = 2;
+        const c = createCanvas(16 * scale, 24 * scale);
+        const ctx = c.getContext('2d');
+        const bark = '#5a3418', bark2 = '#6b4226';
+        for (let y = 12; y < 24; y++) for (let x = 7; x < 9; x++) px(ctx, x, y, y % 3 === 0 ? bark : bark2, scale);
+        px(ctx, 6, 22, bark, scale); px(ctx, 9, 23, bark, scale);
+        const branches = [
+            [[7, 12], [6, 11], [5, 10], [4, 9], [3, 8], [3, 7]],
+            [[8, 12], [9, 11], [10, 10], [11, 9], [12, 8], [12, 7]],
+            [[7, 11], [7, 10], [7, 9], [6, 8], [6, 7], [5, 6], [5, 5]],
+            [[8, 10], [9, 9], [9, 8], [10, 7], [10, 6], [11, 5]],
+            [[7, 9], [8, 8], [8, 7], [8, 6], [8, 5], [8, 4], [7, 3]],
+            [[5, 10], [4, 10], [3, 11]],
+            [[10, 10], [11, 11], [12, 11]],
+        ];
+        branches.forEach(br => br.forEach(([x, y]) => px(ctx, x, y, bark, scale)));
+        // snow resting on top of the branches
+        branches.forEach(br => br.forEach(([x, y], i) => { if (i % 2 === 0) px(ctx, x, y - 1, '#eef3f8', scale); }));
+        return c;
+    }
+
+    // Tree sprite for a season ('oak' or 'pine'); custom tree art is used unchanged
+    function getTree(kind, season) {
+        const base = kind === 'pine' ? drawPineTree() : drawTree();
+        const baseKey = kind === 'pine' ? 'pine_2' : 'tree_2';
+        if (!season || season === 'spring' || season === 'summer' || customArt.has(baseKey)) return base;
+        if (kind === 'pine' && season === 'autumn') return base;
+        const key = `stree_${kind}_${season}`;
+        if (cache[key]) return cache[key];
+        let c;
+        if (kind === 'oak' && season === 'autumn') c = drawOak(['#c8781e', '#d89a2a', '#b8521e', '#e0b040', '#a8441a'], '#7a2e10', '#f0c860');
+        else if (kind === 'oak') c = drawBareOak();
+        else c = snowCap(base);
+        cache[key] = c;
+        return c;
+    }
+
+    function getStonePile(season) {
+        if (season !== 'winter') return drawStonePile();
+        if (!cache.stone_winter) cache.stone_winter = snowCap(drawStonePile());
+        return cache.stone_winter;
+    }
+
+    // Building sprite for a season: snow on the roofs in winter
+    function getBuildingSeasonal(type, extra, season) {
+        if (season !== 'winter') return getBuilding(type, extra);
+        // fields and orchards rest in winter: show stubble / bare saplings under the snow
+        const dormant = GROWTH_TYPES.includes(type);
+        const grown = dormant ? false : extra?.grown !== false;
+        const key = `sbld_${type}_${grown}_winter`;
+        if (!cache[key]) cache[key] = snowCap(getBuilding(type, { grown }));
+        return cache[key];
+    }
+
     // Black silhouette of a building sprite, used as a soft drop shadow
     function getBuildingShadow(type, extra) {
         const grown = extra?.grown !== false;
@@ -1241,6 +1451,7 @@ const Sprites = (() => {
             jobs.push(load(`nature/${file}.png`).then(img => {
                 if (!img) return;
                 cache[key] = imageToCanvas(img, 0, 0, img.width, img.height);
+                customArt.add(key);
                 replaced.push(file);
             }));
         });
@@ -1257,7 +1468,7 @@ const Sprites = (() => {
         await Promise.all(jobs);
         // Derived caches must be rebuilt from the new art
         Object.keys(cache).forEach(k => {
-            if (k.startsWith('thumb_') || k.startsWith('shadow_')) delete cache[k];
+            if (/^(thumb_|shadow_|stile_|stree_|sbld_|stone_winter)/.test(k)) delete cache[k];
         });
         return replaced;
     }
@@ -1293,6 +1504,10 @@ const Sprites = (() => {
         drawIcon,
         getBuilding,
         getBuildingShadow,
+        getBuildingSeasonal,
+        getSeasonalTile,
+        getTree,
+        getStonePile,
         getBuildingThumb,
         loadAssets,
         mulberry32,

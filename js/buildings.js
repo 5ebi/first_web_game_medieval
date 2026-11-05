@@ -77,6 +77,7 @@ const BuildingManager = (() => {
             dayPlaced: b.dayPlaced,
             grown: b.grown,
             growthProgress: b.growthProgress,
+            paid: b.paid,
         }));
     }
 
@@ -93,6 +94,7 @@ const BuildingManager = (() => {
             b.grown = s.grown ?? b.grown;
             b.growthProgress = s.growthProgress ?? 0;
             b.buildStart = 0; // loaded buildings are already finished
+            if (s.paid) b.paid = s.paid;
             nextId = Math.max(nextId, b.id + 1);
         });
     }
