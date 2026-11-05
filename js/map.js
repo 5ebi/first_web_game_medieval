@@ -155,6 +155,32 @@ const GameMap = (() => {
         }
     }
 
+    // Clear trees, stone piles and flowers under a building footprint.
+    // Returns true when terrain tiles changed (terrain cache must be rebuilt).
+    function clearArea(tileX, tileY, w, h) {
+        let changed = false;
+        for (let dy = 0; dy < h; dy++) {
+            for (let dx = 0; dx < w; dx++) {
+                const tx = tileX + dx, ty = tileY + dy;
+                if (tx < 0 || ty < 0 || tx >= MAP_WIDTH || ty >= MAP_HEIGHT) continue;
+                const t = terrain[ty][tx];
+                if (t === TERRAIN.FOREST || t === TERRAIN.STONE_DEPOSIT || t === TERRAIN.FLOWERS) {
+                    terrain[ty][tx] = TERRAIN.GRASS;
+                    changed = true;
+                }
+            }
+        }
+        const x0 = tileX * TILE_SIZE, y0 = tileY * TILE_SIZE;
+        const x1 = x0 + w * TILE_SIZE, y1 = y0 + h * TILE_SIZE;
+        const nTrees = treeMap.length, nStones = stoneMap.length;
+        treeMap = treeMap.filter(t => !(t.x >= x0 - 6 && t.x < x1 + 6 && t.y + 16 >= y0 && t.y + 16 < y1 + 10));
+        stoneMap = stoneMap.filter(s => !(s.x + 32 > x0 + 4 && s.x < x1 - 4 && s.y + 24 > y0 + 4 && s.y < y1));
+        const nDec = decorations.length;
+        decorations = decorations.filter(d => !(d.x >= tileX && d.x < tileX + w && d.y >= tileY && d.y < tileY + h));
+        if (decorations.length !== nDec) changed = true;
+        return changed || treeMap.length !== nTrees || stoneMap.length !== nStones;
+    }
+
     function getTerrain(x, y) {
         if (x < 0 || x >= MAP_WIDTH || y < 0 || y >= MAP_HEIGHT) return TERRAIN.WATER;
         return terrain[y][x];
@@ -216,6 +242,7 @@ const GameMap = (() => {
         getStones,
         getDecorations,
         isBuildable,
+        clearArea,
         hasNearbyResource,
     };
 })();

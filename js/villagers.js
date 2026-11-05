@@ -16,7 +16,7 @@ const Villagers = (() => {
     function sync(buildings) {
         const wanted = new Map(); // buildingId -> count
         buildings.forEach(b => {
-            if (b.workers > 0 && b.active) wanted.set(b.id, b.workers);
+            if (b.workers > 0 && b.active && !b.buildStart) wanted.set(b.id, b.workers);
         });
 
         // Remove villagers of missing buildings

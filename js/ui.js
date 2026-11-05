@@ -8,6 +8,10 @@ const UI = (() => {
     let hoveredBuilding = null;
     let placementPreview = null;
     let pointerOverCanvas = false;
+    let justPlaced = null;      // building placed last; no ghost while the cursor is still on it
+    let pendingTouch = null;    // touch: ghost position waiting for a confirming second tap
+    let lastInputTouch = false;
+    let wheelAcc = 0, wheelT = 0;
     let lastPointer = { x: 0, y: 0 };
     const keys = new Set();
 
@@ -66,6 +70,10 @@ const UI = (() => {
             zoomOut: $('zoom-out'),
             zoomLabel: $('zoom-label'),
             resourceBar: $('resource-bar'),
+            placeBanner: $('place-banner'),
+            placeText: $('place-text'),
+            placeHint: $('place-hint'),
+            placeCancel: $('place-cancel'),
         };
 
         buildResourceIcons();
@@ -79,6 +87,7 @@ const UI = (() => {
         window.addEventListener('resize', updateInsets);
 
         els.infoClose.addEventListener('click', () => hideInfo());
+        els.placeCancel.addEventListener('click', () => deselectBuilding());
         els.helpClose.addEventListener('click', () => { els.helpScreen.classList.add('hidden'); AudioSys.play('click'); });
 
         Lang.onChange(onLanguageChanged);
@@ -115,6 +124,7 @@ const UI = (() => {
         if (!els.welcome.classList.contains('hidden')) showWelcome();
         syncSettingsUI();
         hideTooltip();
+        updatePlaceBanner();
     }
 
     // ---------- resource bar ----------
@@ -225,10 +235,14 @@ const UI = (() => {
 
     function selectBuilding(type) {
         if (selectedBuilding === type) {
-            deselectBuilding();
+            // Clicking the already selected building just confirms the choice (no surprise toggle)
+            AudioSys.play('select');
             return;
         }
         selectedBuilding = type;
+        justPlaced = null;
+        pendingTouch = null;
+        updatePlaceBanner();
         els.canvas.classList.add('placing');
         AudioSys.play('select');
         updateBuildingButtons();
@@ -240,8 +254,21 @@ const UI = (() => {
         if (selectedBuilding && !silent) AudioSys.play('deselect');
         selectedBuilding = null;
         placementPreview = null;
+        justPlaced = null;
+        pendingTouch = null;
         els.canvas.classList.remove('placing');
         updateBuildingButtons();
+        updatePlaceBanner();
+    }
+
+    function updatePlaceBanner() {
+        if (!els.placeBanner) return;
+        if (!selectedBuilding) { els.placeBanner.classList.add('hidden'); return; }
+        const touch = lastInputTouch || window.matchMedia('(pointer: coarse)').matches;
+        els.placeText.textContent = t('pl.placing', { name: bName(selectedBuilding) });
+        els.placeHint.textContent = touch ? t('pl.hint.touch') : t('pl.hint.mouse');
+        els.placeCancel.title = t('pl.cancel');
+        els.placeBanner.classList.remove('hidden');
     }
 
     function updateBuildingButtons() {
@@ -388,9 +415,33 @@ const UI = (() => {
     }
 
     function refreshPreview() {
-        if (!selectedBuilding || !pointerOverCanvas) { placementPreview = null; return; }
-        const tile = Renderer.screenToTile(lastPointer.x, lastPointer.y);
+        if (!selectedBuilding) { placementPreview = null; return; }
         const def = BUILDINGS[selectedBuilding];
+
+        // Touch: the ghost stays where it was tapped until confirmed or moved
+        if (pendingTouch) {
+            const check = Game.canPlace(selectedBuilding, pendingTouch.tileX, pendingTouch.tileY);
+            const s = Renderer.worldToScreen((pendingTouch.tileX + def.width) * TILE_SIZE, (pendingTouch.tileY + def.height) * TILE_SIZE);
+            placementPreview = {
+                type: selectedBuilding, tileX: pendingTouch.tileX, tileY: pendingTouch.tileY,
+                valid: check.ok, reason: check.ok ? null : check.reason,
+                hint: check.ok ? t('cv.tap', { name: bName(def) }) : null,
+                screenX: s.x - 10, screenY: s.y - 14,
+            };
+            return;
+        }
+        if (!pointerOverCanvas || lastInputTouch) { placementPreview = null; return; }
+
+        const tile = Renderer.screenToTile(lastPointer.x, lastPointer.y);
+        // Right after building, keep quiet while the cursor is still on the new building
+        if (justPlaced) {
+            const b = justPlaced;
+            if (tile.x >= b.tileX && tile.x < b.tileX + b.def.width && tile.y >= b.tileY && tile.y < b.tileY + b.def.height) {
+                placementPreview = null;
+                return;
+            }
+            justPlaced = null;
+        }
         const tx = tile.x - Math.floor((def.width - 1) / 2);
         const ty = tile.y - Math.floor((def.height - 1) / 2);
         const check = Game.canPlace(selectedBuilding, tx, ty);
@@ -425,6 +476,9 @@ const UI = (() => {
                 return;
             }
             const p = getPointerPos(e);
+            const wasTouch = lastInputTouch;
+            lastInputTouch = !!e.touches;
+            if (wasTouch !== lastInputTouch) updatePlaceBanner();
             isDragging = true;
             dragStart = p;
             dragDistance = 0;
@@ -452,6 +506,10 @@ const UI = (() => {
             const p = getPointerPos(e);
             lastPointer = p;
             pointerOverCanvas = e.target === els.canvas || isDragging;
+            if (!e.touches && e.target === els.canvas && lastInputTouch && !isDragging) {
+                lastInputTouch = false; // a real mouse is being used again
+                updatePlaceBanner();
+            }
 
             if (isDragging) {
                 const dx = dragStart.x - p.x;
@@ -487,11 +545,26 @@ const UI = (() => {
                 const tile = Renderer.screenToTile(p.x, p.y);
 
                 if (selectedBuilding) {
+                    const def0 = BUILDINGS[selectedBuilding];
+                    if (e.changedTouches) {
+                        // Touch: first tap positions the ghost, a tap on the ghost builds it
+                        const pend = pendingTouch;
+                        const onGhost = pend && tile.x >= pend.tileX && tile.x < pend.tileX + def0.width &&
+                            tile.y >= pend.tileY && tile.y < pend.tileY + def0.height;
+                        if (!onGhost) {
+                            pendingTouch = { tileX: tile.x - Math.floor((def0.width - 1) / 2), tileY: tile.y - Math.floor((def0.height - 1) / 2) };
+                            refreshPreview();
+                            AudioSys.play('click');
+                            return;
+                        }
+                    }
                     const pp = placementPreview;
                     const result = Game.placeBuilding(selectedBuilding, pp ? pp.tileX : tile.x, pp ? pp.tileY : tile.y);
                     if (result) {
-                        AudioSys.play('place');
+                        AudioSys.play('buildStart');
                         Effects.dust(result.pixelX, result.pixelY, result.width, result.height);
+                        justPlaced = result;
+                        pendingTouch = null;
                         const def = BUILDINGS[selectedBuilding];
                         if ((def.limit !== null && BuildingManager.countByType(selectedBuilding) >= def.limit) ||
                             !Game.isBuildingAvailable(selectedBuilding)) {
@@ -528,7 +601,22 @@ const UI = (() => {
         els.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             const p = getPointerPos(e);
-            Renderer.zoomStep(e.deltaY < 0 ? 1 : -1, p.x, p.y);
+            let d = e.deltaY;
+            if (e.deltaMode === 1) d *= 33;
+            else if (e.deltaMode === 2) d *= 400;
+            if (e.ctrlKey) {
+                // Trackpad pinch arrives as ctrl+wheel: zoom smoothly
+                Renderer.setZoom(Renderer.getZoom() * Math.exp(-d * 0.01), p.x, p.y);
+            } else {
+                // Collect small trackpad deltas; one mouse-wheel notch (~100) is one zoom step
+                const now = performance.now();
+                if (now - wheelT > 300) wheelAcc = 0;
+                wheelT = now;
+                wheelAcc += d;
+                if (Math.abs(wheelAcc) < 60) return;
+                Renderer.zoomStep(wheelAcc < 0 ? 1 : -1, p.x, p.y);
+                wheelAcc = 0;
+            }
             updateZoomLabel();
             refreshPreview();
         }, { passive: false });
@@ -592,10 +680,11 @@ const UI = (() => {
     // Called every frame: keyboard panning, minimap, day bar
     function tick(dtSec) {
         let dx = 0, dy = 0;
-        if (keys.has('arrowleft')) dx -= 1;
-        if (keys.has('arrowright')) dx += 1;
-        if (keys.has('arrowup')) dy -= 1;
-        if (keys.has('arrowdown')) dy += 1;
+        if (keys.has('arrowleft') || keys.has('a')) dx -= 1;
+        if (keys.has('arrowright') || keys.has('d')) dx += 1;
+        if (keys.has('arrowup') || keys.has('w')) dy -= 1;
+        if (keys.has('arrowdown') || keys.has('s')) dy += 1;
+        dx = Math.sign(dx); dy = Math.sign(dy);
         if (dx || dy) {
             const speed = 600 * dtSec;
             Renderer.moveCamera(dx * speed, dy * speed);
@@ -763,7 +852,8 @@ const UI = (() => {
         div.dataset.msg = message;
         div.textContent = message;
         els.notifications.appendChild(div);
-        while (els.notifications.children.length > 4) els.notifications.firstChild.remove();
+        const maxNotes = isCompact() ? 2 : 4;
+        while (els.notifications.children.length > maxNotes) els.notifications.firstChild.remove();
         const life = type === 'danger' ? 4500 : 3200;
         div.style.animationDuration = `0.3s, 0.5s`;
         div.style.animationDelay = `0s, ${(life - 500) / 1000}s`;

@@ -226,6 +226,7 @@ const Renderer = (() => {
         timeSec += dt;
 
         // Update cosmetic systems
+        updateConstruction(nowT);
         Villagers.sync(BuildingManager.getAll());
         Villagers.update(simDt);
         Effects.update(simRunning ? simDt : dt * 0.3);
@@ -313,7 +314,7 @@ const Renderer = (() => {
                 draw: () => drawBuilding(b, nowT, night, hoverInfo),
             });
             // Smoke
-            if (b.def.chimney && (b.active || b.maxWorkers === 0) && simRunning) {
+            if (b.def.chimney && !b.buildStart && (b.active || b.maxWorkers === 0) && simRunning) {
                 b._smokeT = (b._smokeT || 0) - simDt;
                 if (b._smokeT <= 0) {
                     b._smokeT = 0.35 + Math.random() * 0.3;
@@ -323,7 +324,7 @@ const Renderer = (() => {
                     Effects.smoke(sx0 + b.def.chimney[0], sy0 + b.def.chimney[1]);
                 }
             }
-            if (b.type === 'blacksmith' && b.active && simRunning && Math.random() < simDt * 1.5) {
+            if (b.type === 'blacksmith' && !b.buildStart && b.active && simRunning && Math.random() < simDt * 1.5) {
                 Effects.sparks(b.pixelX + 32, b.pixelY + 40);
             }
         });
@@ -393,7 +394,7 @@ const Renderer = (() => {
             drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, placementPreview.reason, '#ffb0a0');
         } else if (placementPreview && placementPreview.valid && placementPreview.screenX !== undefined) {
             const def = BUILDINGS[placementPreview.type];
-            drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, t('cv.click', { name: bName(def) }), '#c8ffc0');
+            drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, placementPreview.hint || t('cv.click', { name: bName(def) }), '#c8ffc0');
         }
     }
 
@@ -405,6 +406,12 @@ const Renderer = (() => {
         const ox = b.pixelX + Math.round((b.width - sprite.width) / 2);
         const oy = b.pixelY + b.height - sprite.height;
 
+        // Under construction: foundation, rising building, scaffold, builder
+        if (b.buildStart) {
+            drawConstruction(b, sprite, ox, oy, nowT);
+            return;
+        }
+
         // Soft drop shadow (silhouette offset to the lower right)
         const shadow = Sprites.getBuildingShadow(b.type, { grown: b.grown });
         if (shadow) {
@@ -413,23 +420,15 @@ const Renderer = (() => {
             ctx.globalAlpha = 1;
         }
 
-        // Pop-in animation on placement
-        let scale = 1;
-        if (b.placedAt) {
-            const age = (nowT - b.placedAt) / 1000;
-            if (age < 0.35) {
-                const k = age / 0.35;
-                scale = 1.25 - 0.25 * (1 - Math.pow(1 - k, 2));
-            } else {
-                b.placedAt = 0;
-            }
+        // Small "settle" bounce right after completion (in whole pixels)
+        let lift = 0;
+        if (b._doneAt) {
+            const age = (nowT - b._doneAt) / 1000;
+            if (age < 0.3) lift = -Math.round(Math.sin(age / 0.3 * Math.PI) * 3);
+            else b._doneAt = 0;
         }
-        if (scale !== 1) {
-            const dw = sprite.width * scale, dh = sprite.height * scale;
-            ctx.drawImage(sprite, ox + (sprite.width - dw) / 2, oy + (sprite.height - dh), dw, dh);
-        } else {
-            ctx.drawImage(sprite, ox, oy);
-        }
+        ctx.drawImage(sprite, ox, oy + lift);
+        const scale = 1;
 
         // Night window glow (positions are relative to the sprite's top-left)
         if (night > 0.15 && b.def.lights && scale === 1) {
@@ -461,6 +460,131 @@ const Renderer = (() => {
             ctx.font = '7px monospace';
             ctx.fillText(t('cv.growing'), bx + 2, by - 2);
         }
+    }
+
+    // ---------- Construction ----------
+    function buildInfo(b) {
+        return BUILD_ANIM[b.type] || { ms: 1500, material: 'wood' };
+    }
+
+    function constructionProgress(b, nowT) {
+        return Math.min(1, (nowT - b.buildStart) / buildInfo(b).ms);
+    }
+
+    // Reveal height in whole 2px steps so the building rises pixel by pixel
+    function revealHeight(spriteH, prog) {
+        const k = Math.min(1, Math.max(0, (prog - 0.12) / 0.8));
+        const eased = 1 - Math.pow(1 - k, 2);
+        return Math.round(spriteH * eased / 2) * 2;
+    }
+
+    const CHIP_COLORS = { wood: '196,140,70', stone: '190,190,190', soil: '150,110,60' };
+
+    function updateConstruction(nowT) {
+        BuildingManager.getAll().forEach(b => {
+            if (!b.buildStart) return;
+            const info = buildInfo(b);
+            const prog = constructionProgress(b, nowT);
+            if (prog >= 1) {
+                b.buildStart = 0;
+                b._doneAt = nowT;
+                onConstructionDone(b);
+                return;
+            }
+            // Hammer blows while the walls go up
+            if (prog > 0.1 && prog < 0.95 && nowT >= (b._nextHammer || 0)) {
+                b._nextHammer = nowT + 190 + Math.random() * 90;
+                AudioSys.play('hammer', { material: info.material });
+                const spr = Sprites.getBuilding(b.type, { grown: b.grown });
+                const h = revealHeight(spr.height, prog);
+                const lineY = b.pixelY + b.height - h;
+                Effects.chips(b.pixelX + 6 + Math.random() * (b.width - 12), lineY, CHIP_COLORS[info.material]);
+            }
+        });
+    }
+
+    function onConstructionDone(b) {
+        AudioSys.play('buildDone');
+        Effects.ring(b.pixelX, b.pixelY, b.width, b.height);
+        Effects.stars(b.pixelX, b.pixelY, b.width, b.height);
+        const d = b.def;
+        let text = null;
+        if (d.provides.populationCap) text = t('menu.villagers', { n: d.provides.populationCap });
+        else if (d.provides.storage) text = t('menu.storage', { n: d.provides.storage });
+        else if (d.provides.productionBonus) text = t('menu.bonus', { n: Math.round(d.provides.productionBonus * 100) });
+        else if (d.production) text = t('menu.prod', { n: d.production.amount, res: resName(d.production.resource) }) +
+            (d.production.growthDays ? ' · ' + t('menu.after', { n: d.production.growthDays }) : '');
+        if (text) Effects.floatText(b.pixelX + b.width / 2, b.pixelY - 6, text, '#ffe08a');
+    }
+
+    function drawConstruction(b, sprite, ox, oy, nowT) {
+        const prog = constructionProgress(b, nowT);
+        const info = buildInfo(b);
+        const fx = b.pixelX, fy = b.pixelY, fw = b.width, fh = b.height;
+
+        // Foundation: dug earth with a darker rim and a few stones
+        const fa = Math.min(1, prog / 0.12);
+        ctx.globalAlpha = fa;
+        ctx.fillStyle = info.material === 'soil' ? '#7a5a32' : '#8a6a40';
+        ctx.fillRect(fx + 2, fy + 2, fw - 4, fh - 4);
+        ctx.fillStyle = '#5e4426';
+        ctx.fillRect(fx + 2, fy + 2, fw - 4, 2);
+        ctx.fillRect(fx + 2, fy + fh - 4, fw - 4, 2);
+        ctx.fillRect(fx + 2, fy + 2, 2, fh - 4);
+        ctx.fillRect(fx + fw - 4, fy + 2, 2, fh - 4);
+        ctx.fillStyle = '#a08a6a';
+        for (let i = 0; i < 5; i++) ctx.fillRect(fx + 6 + ((i * 37 + b.id * 11) % (fw - 14)), fy + 6 + ((i * 23 + b.id * 7) % (fh - 12)), 3, 2);
+        // Corner stakes with string
+        ctx.fillStyle = '#c49a5c';
+        [[fx + 1, fy + 1], [fx + fw - 3, fy + 1], [fx + 1, fy + fh - 3], [fx + fw - 3, fy + fh - 3]].forEach(([x, y]) => ctx.fillRect(x, y - 4, 2, 6));
+        ctx.globalAlpha = 1;
+
+        // Faint blueprint of the finished building
+        ctx.globalAlpha = 0.18 * fa;
+        ctx.drawImage(sprite, ox, oy);
+        ctx.globalAlpha = 1;
+
+        // The part that is already built, rising from the ground
+        const h = revealHeight(sprite.height, prog);
+        if (h > 0) {
+            ctx.drawImage(sprite, 0, sprite.height - h, sprite.width, h, ox, oy + sprite.height - h, sprite.width, h);
+        }
+
+        // Scaffold that grows just ahead of the walls
+        if (prog > 0.08) {
+            const top = oy + sprite.height - Math.min(sprite.height, h + 8);
+            const bottom = oy + sprite.height;
+            const left = ox + 2, right = ox + sprite.width - 4;
+            ctx.fillStyle = '#8a5a2a';
+            ctx.fillRect(left, top, 2, bottom - top);
+            ctx.fillRect(right, top, 2, bottom - top);
+            if (sprite.width > 70) ctx.fillRect(ox + Math.round(sprite.width / 2) - 1, top, 2, bottom - top);
+            ctx.fillStyle = '#6b4226';
+            for (let y = bottom - 10; y > top; y -= 12) ctx.fillRect(left, y, right - left + 2, 2);
+            // Planks on the current working level
+            ctx.fillStyle = '#c49a5c';
+            ctx.fillRect(left - 2, top, right - left + 6, 2);
+        }
+
+        // Builder hammering next to the site
+        const swing = Math.floor(nowT / 110) % 2;
+        const bx = fx - 6, by = fy + fh;
+        const villager = Sprites.drawVillager(swing, (b.id + 2) % 6, false);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';
+        ctx.fillRect(Math.round(bx - 5), Math.round(by - 1), 10, 2);
+        ctx.drawImage(villager, Math.round(bx - villager.width / 2), Math.round(by - villager.height));
+        ctx.fillStyle = '#6b4226';
+        ctx.fillRect(Math.round(bx + 5), Math.round(by - 15 + swing * 3), 2, 6);
+        ctx.fillStyle = '#b8b8c0';
+        ctx.fillRect(Math.round(bx + 4), Math.round(by - 17 + swing * 3), 5, 3);
+
+        // Thin progress bar above the site
+        const bw = Math.min(fw - 8, 48);
+        const pbx = fx + (fw - bw) / 2, pby = fy - 8;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(pbx, pby, bw, 4);
+        ctx.fillStyle = '#ffd24a';
+        ctx.fillRect(pbx + 1, pby + 1, Math.round((bw - 2) * prog), 2);
     }
 
     function drawPlacementPreview(pp) {

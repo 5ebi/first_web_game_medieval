@@ -31,7 +31,7 @@ const BuildingManager = (() => {
             dayPlaced: 0,
             grown: def.production?.growthDays ? false : true,
             growthProgress: 0,
-            placedAt: performance.now(), // for the pop-in animation
+            buildStart: performance.now(), // construction animation (cosmetic)
         };
 
         placedBuildings.push(building);
@@ -92,7 +92,7 @@ const BuildingManager = (() => {
             b.dayPlaced = s.dayPlaced ?? 1;
             b.grown = s.grown ?? b.grown;
             b.growthProgress = s.growthProgress ?? 0;
-            b.placedAt = 0; // no pop-in for loaded buildings
+            b.buildStart = 0; // loaded buildings are already finished
             nextId = Math.max(nextId, b.id + 1);
         });
     }

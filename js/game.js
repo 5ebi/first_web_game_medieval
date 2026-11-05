@@ -183,6 +183,9 @@ const Game = (() => {
 
         const building = BuildingManager.place(type, tileX, tileY);
         building.dayPlaced = state.day;
+        if (GameMap.clearArea(tileX, tileY, def.width, def.height) && typeof Renderer !== 'undefined') {
+            Renderer.invalidateTerrainCache();
+        }
 
         if (def.workers > 0) {
             building.workers = def.workers;
@@ -407,6 +410,7 @@ const Game = (() => {
             state.gameOver = false;
             state.started = true;
             BuildingManager.deserialize(data.buildings);
+            BuildingManager.getAll().forEach(b => GameMap.clearArea(b.tileX, b.tileY, b.def.width, b.def.height));
             return true;
         } catch (e) {
             return false;

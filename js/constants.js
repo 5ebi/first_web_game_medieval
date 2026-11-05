@@ -69,7 +69,7 @@ const BUILDINGS = {
         production: null,
         limit: 1,
         category: 'core',
-        hotkey: 'W',
+        hotkey: 'E',
     },
     house: {
         name: 'House',
@@ -84,7 +84,7 @@ const BUILDINGS = {
         category: 'housing',
         chimney: [46, 12],
         lights: [[12, 26, 8, 8]],
-        hotkey: 'E',
+        hotkey: 'R',
     },
     lumberjack: {
         name: 'Lumberjack',
@@ -97,7 +97,7 @@ const BUILDINGS = {
         production: { resource: 'wood', amount: 6, requires: 'FOREST' },
         limit: null,
         category: 'production',
-        hotkey: 'R',
+        hotkey: 'F',
     },
     quarry: {
         name: 'Stone Quarry',
@@ -110,7 +110,7 @@ const BUILDINGS = {
         production: { resource: 'stone', amount: 4, requires: 'STONE_DEPOSIT' },
         limit: null,
         category: 'production',
-        hotkey: 'T',
+        hotkey: 'G',
     },
     iron_mine: {
         name: 'Iron Mine',
@@ -123,7 +123,7 @@ const BUILDINGS = {
         production: { resource: 'iron', amount: 2, requires: 'STONE_DEPOSIT' },
         limit: null,
         category: 'production',
-        hotkey: 'Y',
+        hotkey: 'V',
     },
     chicken_hut: {
         name: 'Chicken Hut',
@@ -136,7 +136,7 @@ const BUILDINGS = {
         production: { resource: 'food', amount: 3 },
         limit: null,
         category: 'food',
-        hotkey: 'A',
+        hotkey: 'X',
     },
     apple_orchard: {
         name: 'Apple Orchard',
@@ -149,7 +149,7 @@ const BUILDINGS = {
         production: { resource: 'food', amount: 6, growthDays: 6 },
         limit: null,
         category: 'food',
-        hotkey: 'S',
+        hotkey: 'N',
     },
     farm: {
         name: 'Wheat Farm',
@@ -162,7 +162,7 @@ const BUILDINGS = {
         production: { resource: 'food', amount: 10, growthDays: 4 },
         limit: null,
         category: 'food',
-        hotkey: 'D',
+        hotkey: 'K',
     },
     blacksmith: {
         name: 'Blacksmith',
@@ -177,7 +177,7 @@ const BUILDINGS = {
         category: 'production',
         chimney: [50, 8],
         lights: [[24, 30, 16, 12]],
-        hotkey: 'F',
+        hotkey: 'B',
     },
     tavern: {
         name: 'Tavern',
@@ -192,8 +192,23 @@ const BUILDINGS = {
         category: 'housing',
         chimney: [14, 10],
         lights: [[26, 28, 8, 8], [42, 28, 8, 8]],
-        hotkey: 'G',
+        hotkey: 'T',
     },
+};
+
+// Construction animation length (ms of real time) and the sound material used while building
+const BUILD_ANIM = {
+    castle: { ms: 2600, material: 'stone' },
+    warehouse: { ms: 1600, material: 'wood' },
+    house: { ms: 1500, material: 'wood' },
+    tavern: { ms: 1700, material: 'wood' },
+    lumberjack: { ms: 1400, material: 'wood' },
+    quarry: { ms: 1500, material: 'stone' },
+    iron_mine: { ms: 1600, material: 'stone' },
+    blacksmith: { ms: 1700, material: 'stone' },
+    chicken_hut: { ms: 1300, material: 'wood' },
+    apple_orchard: { ms: 1200, material: 'soil' },
+    farm: { ms: 1300, material: 'soil' },
 };
 
 // Give every definition its own key so translations can be looked up from a def

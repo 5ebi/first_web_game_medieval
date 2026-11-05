@@ -60,6 +60,64 @@ const Effects = (() => {
         }
     }
 
+    // Wood or stone chips flying off during construction
+    function chips(x, y, color) {
+        for (let i = 0; i < 3; i++) {
+            particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 50,
+                vy: -25 - Math.random() * 30,
+                gravity: 140,
+                life: 0.35 + Math.random() * 0.25,
+                age: 0,
+                size: 2,
+                grow: 0,
+                color,
+                alpha: 1,
+            });
+        }
+    }
+
+    // Twinkling pixel stars when a building is finished
+    function stars(x, y, w, h) {
+        for (let i = 0; i < 9; i++) {
+            particles.push({
+                x: x + Math.random() * w,
+                y: y + Math.random() * h * 0.7,
+                vx: (Math.random() - 0.5) * 10,
+                vy: -14 - Math.random() * 16,
+                life: 0.8 + Math.random() * 0.6,
+                age: 0,
+                size: 1,
+                grow: 0,
+                color: Math.random() < 0.5 ? '255,246,190' : '255,255,255',
+                alpha: 1,
+                star: true,
+                ph: Math.random() * 6,
+            });
+        }
+    }
+
+    // Expanding ring of dust around the footprint
+    function ring(x, y, w, h) {
+        const cx = x + w / 2, cy = y + h - 4;
+        for (let i = 0; i < 22; i++) {
+            const a = (i / 22) * Math.PI * 2;
+            particles.push({
+                x: cx + Math.cos(a) * w * 0.45,
+                y: cy + Math.sin(a) * h * 0.18,
+                vx: Math.cos(a) * 45,
+                vy: Math.sin(a) * 16 - 6,
+                life: 0.45 + Math.random() * 0.2,
+                age: 0,
+                size: 3 + Math.random() * 2,
+                grow: 4,
+                color: '205,185,145',
+                alpha: 0.75,
+            });
+        }
+    }
+
     function floatText(x, y, text, color = '#fff') {
         texts.push({ x, y, text, color, age: 0, life: 1.3 });
     }
@@ -83,6 +141,15 @@ const Effects = (() => {
     function draw(ctx) {
         particles.forEach(p => {
             const k = 1 - p.age / p.life;
+            if (p.star) {
+                const tw = 0.5 + 0.5 * Math.sin(p.age * 18 + p.ph);
+                ctx.fillStyle = `rgba(${p.color},${(k * tw).toFixed(3)})`;
+                const x = Math.round(p.x), y = Math.round(p.y);
+                ctx.fillRect(x - 1, y, 3, 1);
+                ctx.fillRect(x, y - 1, 1, 3);
+                if (tw > 0.7) { ctx.fillRect(x - 2, y, 1, 1); ctx.fillRect(x + 2, y, 1, 1); ctx.fillRect(x, y - 2, 1, 1); ctx.fillRect(x, y + 2, 1, 1); }
+                return;
+            }
             ctx.fillStyle = `rgba(${p.color},${(p.alpha * k).toFixed(3)})`;
             const s = Math.round(p.size);
             ctx.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
@@ -103,5 +170,5 @@ const Effects = (() => {
         }
     }
 
-    return { reset, smoke, dust, sparks, floatText, update, draw };
+    return { reset, smoke, dust, sparks, chips, stars, ring, floatText, update, draw };
 })();

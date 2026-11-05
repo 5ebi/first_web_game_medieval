@@ -549,6 +549,7 @@ const Atmosphere = (() => {
         ctx.globalCompositeOperation = 'lighter';
         const lightK = clamp((night - 0.15) * 2, 0, 1);
         BuildingManager.getAll().forEach(b => {
+            if (b.buildStart) return;
             const forge = b.type === 'blacksmith' && b.active;
             if (!(lightK > 0 && b.def.lights) && !forge) return;
             if (b.pixelX + b.width + 40 < view.x0 || b.pixelX - 40 > view.x1 || b.pixelY + b.height + 40 < view.y0 || b.pixelY - 60 > view.y1) return;

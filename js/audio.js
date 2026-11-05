@@ -182,6 +182,36 @@ const AudioSys = (() => {
                 tone({ freq: f, type: 'sawtooth', dur: 0.45, vol: 0.1, t: t0 + i * 0.35 }));
             tone({ freq: 65, type: 'sine', dur: 1.8, vol: 0.25, t: t0 + 1.2 });
         },
+        buildStart() {
+            const t0 = now();
+            tone({ freq: 120, type: 'sine', dur: 0.28, vol: 0.55, slideTo: 48, t: t0 });
+            noise({ dur: 0.3, vol: 0.4, filterFreq: 500, t: t0 });
+            noise({ dur: 0.18, vol: 0.18, filterFreq: 1600, type: 'bandpass', q: 1.5, t: t0 + 0.08 }); // shovel scrape
+        },
+        hammer(o = {}) {
+            const t0 = now();
+            const v = 0.85 + Math.random() * 0.3; // pitch variation so it never sounds like a machine gun
+            if (o.material === 'stone') {
+                noise({ dur: 0.035, vol: 0.32, filterFreq: 3400 * v, type: 'bandpass', q: 4, t: t0 });
+                tone({ freq: 1350 * v, type: 'square', dur: 0.04, vol: 0.06, t: t0 });
+                tone({ freq: 2050 * v, type: 'sine', dur: 0.09, vol: 0.05, t: t0 });
+            } else if (o.material === 'soil') {
+                noise({ dur: 0.09, vol: 0.32, filterFreq: 650 * v, t: t0 });
+                tone({ freq: 130 * v, type: 'sine', dur: 0.1, vol: 0.22, slideTo: 70, t: t0 });
+            } else {
+                noise({ dur: 0.045, vol: 0.38, filterFreq: 1700 * v, type: 'bandpass', q: 3, t: t0 });
+                tone({ freq: 290 * v, type: 'triangle', dur: 0.07, vol: 0.22, slideTo: 220 * v, t: t0 });
+            }
+        },
+        buildDone() {
+            const t0 = now();
+            tone({ freq: 95, type: 'sine', dur: 0.22, vol: 0.4, slideTo: 55, t: t0 });
+            [783.99, 987.77, 1174.66, 1567.98].forEach((f, i) => {
+                tone({ freq: f, type: 'triangle', dur: i === 3 ? 0.45 : 0.18, vol: 0.12, t: t0 + 0.05 + i * 0.065 });
+                tone({ freq: f * 2.01, type: 'sine', dur: i === 3 ? 0.5 : 0.15, vol: 0.035, t: t0 + 0.05 + i * 0.065 });
+            });
+            [2637, 3136, 2794].forEach((f, i) => tone({ freq: f, type: 'sine', dur: 0.05, vol: 0.035, t: t0 + 0.38 + i * 0.07 }));
+        },
         tick() {
             tone({ freq: 1200, type: 'sine', dur: 0.03, vol: 0.04 });
         },
@@ -198,11 +228,11 @@ const AudioSys = (() => {
         },
     };
 
-    function play(name) {
+    function play(name, opts) {
         if (!ctx || muted || !sfxOn) return;
         if (ctx.state === 'suspended') ctx.resume();
         const fn = sfx[name];
-        if (fn) fn();
+        if (fn) fn(opts);
     }
 
     // ---------- ambient (wind + birds) ----------

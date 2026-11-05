@@ -10,8 +10,9 @@ Turn your sound on: music, ambience and effects are all synthesized in the brows
 ## How to Play
 
 - **Place your Castle** first (it is pre-selected, just click the map). The calendar starts once it stands.
-- **Drag** the map to scroll, **mouse wheel** / **+** / **-** to zoom, **arrow keys** to pan, click the **minimap** to jump
-- **Right-click** or **Escape** to cancel placement
+- **Drag** the map to scroll, **mouse wheel** / trackpad pinch / **+** / **-** to zoom, **WASD** or **arrow keys** to pan, click the **minimap** to jump
+- On touch screens: tap the map to position the building, tap it again to build; the bar above the menu cancels
+- **Right-click**, **Escape** or the ✕ in the placement bar cancels placement
 - **Space** to pause/unpause, **1/2/3** for speed, **M** mute, **H** help, **C** center on the Castle
 - Every building has a **hotkey** (shown in the menu)
 - Click a placed building for details or to **demolish** it (50% refund, **Del** key)
