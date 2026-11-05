@@ -46,6 +46,7 @@ const Villagers = (() => {
             ty: cy,
             speed: 18 + Math.random() * 10, // px per second
             palette: (b.id * 3 + index) % 6,
+            tool: { lumberjack: 'axe', quarry: 'pick', iron_mine: 'pick', hunter: 'bow', blacksmith: 'hammer' }[b.type] || null,
             frame: 0,
             animT: Math.random(),
             waitT: Math.random() * 2,

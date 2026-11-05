@@ -1279,3 +1279,21 @@ kbd {
     .notification.season .s-name { font-size: 16px; }
     .notification.season .s-icon canvas { width: 30px; height: 30px; }
 }
+
+/* Toasts always start below the (possibly two-row) top bar */
+#notifications {
+    top: calc(var(--bar-bottom, var(--topbar-h)) + 8px);
+}
+@media (max-width: 760px) {
+    #notifications { top: calc(var(--bar-bottom, var(--topbar-h)) + 6px); }
+}
+
+@media (max-width: 760px) {
+    /* day + clock share the second row with the controls */
+    #topbar-right {
+        width: auto;
+        flex: 1 1 auto;
+        margin-left: auto;
+    }
+    .resource.day { order: 0; }
+}

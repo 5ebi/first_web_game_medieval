@@ -8,20 +8,21 @@ const MAP_HEIGHT = 60;  // tiles
 const MAP_PIXEL_W = MAP_WIDTH * TILE_SIZE;
 const MAP_PIXEL_H = MAP_HEIGHT * TILE_SIZE;
 
-// Time: 1 game day = 3 real seconds at 1x speed
-const BASE_DAY_DURATION = 3000; // ms per day at 1x
+// ---- Time ----
+// One day (a full day/night cycle) lasts 6 real minutes at 1x speed.
+// The clock only starts once the castle AND the first warehouse stand.
+const DAY_SECONDS = 360;
+const START_HOUR = 8;          // the first day starts in the morning
 
-// A full day/night cycle spans this many game days (slow, atmospheric)
-const DAY_NIGHT_CYCLE_DAYS = 24;
-
-// Starvation tolerance
-const STARVATION_LIMIT = 3;
-
-// Storage
-const BASE_STORAGE = 150;
+// ---- Economy (all rates at 1x speed) ----
+const FOOD_PER_WORKER_PER_MIN = 0.5;   // only working villagers eat
+const STARVATION_GRACE = 60;            // seconds without meat before the people leave
+const BASE_STORAGE = 100;
+// What the first warehouse brings with it
+const WAREHOUSE_STOCK = { wood: 50, stone: 20, iron: 0, food: 20 };
 
 // Save game key (localStorage)
-const SAVE_KEY = 'lotk_save_v2';
+const SAVE_KEY = 'lotk_save_v3';
 const SETTINGS_KEY = 'lotk_settings_v1';
 
 // Zoom levels for the camera
@@ -40,162 +41,104 @@ const TERRAIN = {
 };
 
 // Building definitions
+//  - production: { resource, amount (per delivery), cycle (seconds per delivery at 1x), requires? }
+//    requires: terrain that must be within 5 tiles
+//  - onStone:  fraction of the footprint that must stand on stone deposits
 //  - chimney: [x, y] in sprite pixels where smoke is emitted
 //  - lights:  [[x, y, w, h], ...] windows that glow at night
 const BUILDINGS = {
     castle: {
-        name: 'Castle',
-        description: 'Your seat of power. Provides 10 villagers.',
-        width: 4,
-        height: 4,
+        width: 4, height: 4,
         cost: { wood: 0, stone: 0, iron: 0 },
         workers: 0,
-        // Servants gather a little wood and stone, so a settlement can never get stuck at zero
-        provides: { populationCap: 10, trickle: { wood: 2, stone: 1 } },
+        provides: { populationCap: 10 },
         production: null,
         limit: 1,
-        category: 'core',
         chimney: [64, -6],
         lights: [[54, 20, 6, 10], [68, 20, 6, 10]],
         hotkey: 'Q',
     },
     warehouse: {
-        name: 'Warehouse',
-        description: 'Stores your resources. Increases storage by 300.',
-        width: 3,
-        height: 2,
+        width: 3, height: 2,
         cost: { wood: 0, stone: 0, iron: 0 },
-        // The first warehouse is free, every further one costs this
+        // The first warehouse is free (and brings the starting supplies), every further one costs this
         extraCost: { wood: 30, stone: 20, iron: 0 },
         workers: 0,
         provides: { storage: 300 },
         production: null,
         limit: null,
-        category: 'core',
         hotkey: 'E',
     },
     house: {
-        name: 'House',
-        description: 'Houses 5 villagers.',
-        width: 2,
-        height: 2,
+        width: 2, height: 2,
         cost: { wood: 15, stone: 10, iron: 0 },
         workers: 0,
         provides: { populationCap: 5 },
         production: null,
         limit: null,
-        category: 'housing',
         chimney: [46, 12],
         lights: [[12, 26, 8, 8]],
         hotkey: 'R',
     },
-    lumberjack: {
-        name: 'Lumberjack',
-        description: 'Harvests wood from nearby trees. Trees are not removed.',
-        width: 2,
-        height: 2,
-        cost: { wood: 10, stone: 0, iron: 0 },
-        workers: 2,
-        provides: {},
-        production: { resource: 'wood', amount: 6, requires: 'FOREST' },
-        limit: null,
-        category: 'production',
-        hotkey: 'F',
-    },
-    quarry: {
-        name: 'Stone Quarry',
-        description: 'Extracts stone from nearby deposits.',
-        width: 2,
-        height: 2,
-        cost: { wood: 10, stone: 0, iron: 0 },
-        workers: 2,
-        provides: {},
-        production: { resource: 'stone', amount: 4, requires: 'STONE_DEPOSIT' },
-        limit: null,
-        category: 'production',
-        hotkey: 'G',
-    },
-    iron_mine: {
-        name: 'Iron Mine',
-        description: 'Mines iron ore. Must be near stone deposits.',
-        width: 2,
-        height: 2,
-        cost: { wood: 15, stone: 10, iron: 0 },
-        workers: 2,
-        provides: {},
-        production: { resource: 'iron', amount: 2, requires: 'STONE_DEPOSIT' },
-        limit: null,
-        category: 'production',
-        hotkey: 'V',
-    },
-    chicken_hut: {
-        name: 'Chicken Hut',
-        description: 'Raises chickens for food. Produces 3 food/day right away.',
-        width: 2,
-        height: 2,
-        cost: { wood: 10, stone: 5, iron: 0 },
-        workers: 1,
-        provides: {},
-        production: { resource: 'food', amount: 3 },
-        limit: null,
-        category: 'food',
-        hotkey: 'X',
-    },
-    apple_orchard: {
-        name: 'Apple Orchard',
-        description: 'Grows apples. Produces 6 food/day once the trees have grown (6 days).',
-        width: 3,
-        height: 2,
-        cost: { wood: 15, stone: 0, iron: 0 },
-        workers: 1,
-        provides: {},
-        production: { resource: 'food', amount: 6, growthDays: 6 },
-        limit: null,
-        category: 'food',
-        hotkey: 'N',
-    },
-    farm: {
-        name: 'Wheat Farm',
-        description: 'A large field of wheat. Produces 10 food/day after the first harvest (4 days).',
-        width: 3,
-        height: 3,
-        cost: { wood: 20, stone: 10, iron: 0 },
-        workers: 2,
-        provides: {},
-        production: { resource: 'food', amount: 10, growthDays: 4 },
-        limit: null,
-        category: 'food',
-        hotkey: 'K',
-    },
-    blacksmith: {
-        name: 'Blacksmith',
-        description: 'Forges better tools. All wood, stone and iron production +25%.',
-        width: 2,
-        height: 2,
-        cost: { wood: 20, stone: 15, iron: 10 },
-        workers: 1,
-        provides: { productionBonus: 0.25 },
-        production: null,
-        limit: 1,
-        category: 'production',
-        chimney: [50, 8],
-        lights: [[24, 30, 16, 12]],
-        hotkey: 'B',
-    },
     tavern: {
-        name: 'Tavern',
-        description: 'A warm place to rest. Houses 8 villagers.',
-        width: 2,
-        height: 2,
-        cost: { wood: 20, stone: 10, iron: 5 },
+        width: 2, height: 2,
+        cost: { wood: 25, stone: 15, iron: 5 },
         workers: 0,
         provides: { populationCap: 8 },
         production: null,
         limit: null,
-        category: 'housing',
         chimney: [14, 10],
         lights: [[26, 28, 8, 8], [42, 28, 8, 8]],
         hotkey: 'T',
+    },
+    lumberjack: {
+        width: 2, height: 2,
+        cost: { wood: 0, stone: 0, iron: 0 },   // always buildable, so wood can never run out for good
+        workers: 2,
+        provides: {},
+        production: { resource: 'wood', amount: 4, cycle: 20, requires: 'FOREST' },
+        limit: null,
+        hotkey: 'F',
+    },
+    hunter: {
+        width: 2, height: 2,
+        cost: { wood: 15, stone: 0, iron: 0 },
+        workers: 2,
+        provides: {},
+        production: { resource: 'food', amount: 4, cycle: 30, requires: 'FOREST' },
+        limit: null,
+        chimney: [16, 6],
+        hotkey: 'X',
+    },
+    quarry: {
+        width: 2, height: 2,
+        cost: { wood: 20, stone: 0, iron: 0 },
+        workers: 3,
+        provides: {},
+        production: { resource: 'stone', amount: 4, cycle: 30 },
+        onStone: 0.5,
+        limit: null,
+        hotkey: 'G',
+    },
+    iron_mine: {
+        width: 2, height: 2,
+        cost: { wood: 30, stone: 15, iron: 0 },
+        workers: 3,
+        provides: {},
+        production: { resource: 'iron', amount: 3, cycle: 40, requires: 'STONE_DEPOSIT' },
+        limit: null,
+        hotkey: 'V',
+    },
+    blacksmith: {
+        width: 2, height: 2,
+        cost: { wood: 30, stone: 20, iron: 10 },
+        workers: 1,
+        provides: { productionBonus: 0.25 },
+        production: null,
+        limit: 1,
+        chimney: [50, 8],
+        lights: [[24, 30, 16, 12]],
+        hotkey: 'B',
     },
 };
 
@@ -206,12 +149,10 @@ const BUILD_ANIM = {
     house: { ms: 1500, material: 'wood' },
     tavern: { ms: 1700, material: 'wood' },
     lumberjack: { ms: 1400, material: 'wood' },
+    hunter: { ms: 1400, material: 'wood' },
     quarry: { ms: 1500, material: 'stone' },
     iron_mine: { ms: 1600, material: 'stone' },
     blacksmith: { ms: 1700, material: 'stone' },
-    chicken_hut: { ms: 1300, material: 'wood' },
-    apple_orchard: { ms: 1200, material: 'soil' },
-    farm: { ms: 1300, material: 'soil' },
 };
 
 // Give every definition its own key so translations can be looked up from a def
@@ -219,40 +160,39 @@ Object.keys(BUILDINGS).forEach(k => { BUILDINGS[k].key = k; });
 
 // Build order (for menu display)
 const BUILD_ORDER = [
-    'castle', 'warehouse', 'house', 'tavern',
-    'lumberjack', 'quarry', 'iron_mine', 'blacksmith',
-    'chicken_hut', 'apple_orchard', 'farm',
+    'castle', 'warehouse', 'lumberjack', 'hunter', 'quarry',
+    'house', 'tavern', 'iron_mine', 'blacksmith',
 ];
 
-// Seasons: a year has 46 days. Food buildings yield more in summer and autumn,
-// and rest in winter (chickens still lay a little). Saplings and fields do not grow in winter.
+// Seasons: each season lasts one day (6 minutes at 1x), so a year is 24 minutes.
+// Hunting yields more in summer and autumn and only half in winter.
 const SEASONS = [
-    { id: 'spring', days: 12, food: { farm: 1,    apple_orchard: 1,    chicken_hut: 1 },    growth: true },
-    { id: 'summer', days: 12, food: { farm: 1.25, apple_orchard: 1.25, chicken_hut: 1 },    growth: true },
-    { id: 'autumn', days: 12, food: { farm: 1.5,  apple_orchard: 1.5,  chicken_hut: 1 },    growth: true },
-    { id: 'winter', days: 10, food: { farm: 0,    apple_orchard: 0,    chicken_hut: 0.75 }, growth: false },
+    { id: 'spring', days: 1, food: { hunter: 1 } },
+    { id: 'summer', days: 1, food: { hunter: 1.25 } },
+    { id: 'autumn', days: 1, food: { hunter: 1.25 } },
+    { id: 'winter', days: 1, food: { hunter: 0.5 } },
 ];
 const YEAR_DAYS = SEASONS.reduce((a, s) => a + s.days, 0);
-const WINTER_WARNING_DAYS = 6;
+const WINTER_WARNING_SECONDS = 120;     // warn this long before winter starts
 
 // Fraction of the build cost refunded when demolishing
 const DEMOLISH_REFUND = 0.5;
 
-// Milestones - small goals that give the player direction
+// Milestones - small goals that guide the player (texts live in i18n.js as ms.<id>)
 const MILESTONES = [
-    { id: 'castle',   text: 'Found your settlement: place the Castle',  check: (s, bm) => bm.countByType('castle') > 0 },
-    { id: 'food',     text: 'Secure food: build 2 food buildings',       check: (s, bm) => bm.getAll().filter(b => b.def.production?.resource === 'food').length >= 2 },
-    { id: 'workers5', text: 'Put 5 villagers to work',                   check: (s) => s.populationUsed >= 5 },
-    { id: 'day20',    text: 'Survive 20 days',                           check: (s) => s.day >= 20 },
-    { id: 'bld8',     text: 'Build 8 buildings',                         check: (s, bm) => bm.getAll().length >= 8 },
-    { id: 'iron20',   text: 'Stockpile 20 iron',                         check: (s) => s.resources.iron >= 20 },
-    { id: 'smith',    text: 'Build a Blacksmith',                        check: (s, bm) => bm.countByType('blacksmith') > 0 },
-    { id: 'pop20',    text: 'Grow to 20 working villagers',              check: (s) => s.populationUsed >= 20 },
-    { id: 'winter1',  text: 'Survive your first winter',                 check: (s) => s.day > YEAR_DAYS },
-    { id: 'day50',    text: 'Rule for 50 days',                          check: (s) => s.day >= 50 },
-    { id: 'food150',  text: 'Store 150 food',                            check: (s) => s.resources.food >= 150 },
-    { id: 'bld20',    text: 'Build 20 buildings',                        check: (s, bm) => bm.getAll().length >= 20 },
-    { id: 'day100',   text: 'A century of rule: reach day 100',          check: (s) => s.day >= 100 },
+    { id: 'castle',     check: (s, bm) => bm.countByType('castle') > 0 },
+    { id: 'warehouse',  check: (s, bm) => bm.countByType('warehouse') > 0 },
+    { id: 'lumberjack', check: (s, bm) => bm.countByType('lumberjack') > 0 },
+    { id: 'hunter',     check: (s, bm) => bm.countByType('hunter') > 0 },
+    { id: 'quarry',     check: (s, bm) => bm.countByType('quarry') > 0 },
+    { id: 'houses2',    check: (s, bm) => bm.countByType('house') >= 2 },
+    { id: 'workers15',  check: (s) => s.populationUsed >= 15 },
+    { id: 'winter1',    check: (s) => s.day > YEAR_DAYS },
+    { id: 'iron20',     check: (s) => s.resources.iron >= 20 },
+    { id: 'smith',      check: (s, bm) => bm.countByType('blacksmith') > 0 },
+    { id: 'pop30',      check: (s) => s.populationUsed >= 30 },
+    { id: 'bld20',      check: (s, bm) => bm.getAll().length >= 20 },
+    { id: 'year3',      check: (s) => s.day > YEAR_DAYS * 2 },
 ];
 
 // Colors palette

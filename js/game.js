@@ -1,5 +1,7 @@
 // ============================================
 // Game State & Logic
+// Real-time economy: production buildings deliver batches when their work
+// cycle completes, workers eat continuously. Rates are "per minute" at 1x.
 // ============================================
 
 const Game = (() => {
@@ -9,26 +11,27 @@ const Game = (() => {
             paused: false,
             speed: 1,
             lastSpeed: 1,
+            clockStarted: false,  // true once the first warehouse stands
+            time: 0,              // game seconds since the clock started
             day: 1,
-            dayProgress: 0,  // 0 to 1
-            resources: {
-                wood: 60,
-                stone: 30,
-                iron: 0,
-                food: 40,
-            },
+            dayProgress: 0,       // 0 to 1
+            resources: { wood: 0, stone: 0, iron: 0, food: 0 },
             maxStorage: BASE_STORAGE,
             populationCap: 0,
             populationUsed: 0,
-            starvationDays: 0,
+            starving: 0,          // seconds without meat
             gameOver: false,
-            milestones: [],       // ids of achieved milestones
-            storageWarned: {},    // resource -> true once "storage full" was shown
+            milestones: [],
+            storageWarned: {},
+            warnedWinterYear: 0,
+            lastFoodWarn: -999,
+            lastStarveWarn: -999,
             stats: { built: 0, demolished: 0, maxPop: 0 },
         };
     }
 
     let state = freshState();
+    let uiTimer = 0, saveTimer = 0, milestoneTimer = 0;
 
     let callbacks = {
         onDayTick: null,
@@ -38,6 +41,8 @@ const Game = (() => {
         onMilestone: null,
         onProduce: null,
         onBuildingsChanged: null,
+        onSeasonChange: null,
+        onClockStart: null,
     };
 
     function reset() {
@@ -45,13 +50,9 @@ const Game = (() => {
         BuildingManager.reset();
     }
 
-    function getState() {
-        return state;
-    }
+    function getState() { return state; }
 
-    function setCallbacks(cbs) {
-        Object.assign(callbacks, cbs);
-    }
+    function setCallbacks(cbs) { Object.assign(callbacks, cbs); }
 
     function notify(msg, type) {
         if (callbacks.onNotification) callbacks.onNotification(msg, type);
@@ -80,9 +81,14 @@ const Game = (() => {
         return state.paused;
     }
 
-    // ---- Economy helpers ----
-    function hasCastle() {
-        return BuildingManager.countByType('castle') > 0;
+    // ---- Basics ----
+    function hasCastle() { return BuildingManager.countByType('castle') > 0; }
+    function hasWarehouse() { return BuildingManager.countByType('warehouse') > 0; }
+    function isClockRunning() { return state.clockStarted; }
+
+    // Hour of the day (0-24), the clock starts at START_HOUR
+    function getHour() {
+        return (START_HOUR + state.dayProgress * 24) % 24;
     }
 
     function getProductionMultiplier(resource) {
@@ -98,20 +104,25 @@ const Game = (() => {
     function getSeason(day = state.day) {
         let d = (Math.max(1, day) - 1) % YEAR_DAYS;
         const year = Math.floor((Math.max(1, day) - 1) / YEAR_DAYS) + 1;
+        const progress = day === state.day ? state.dayProgress : 0;
         for (let i = 0; i < SEASONS.length; i++) {
             const s = SEASONS[i];
             if (d < s.days) {
-                // days until the next winter starts (0 while it is winter)
+                const daysLeft = s.days - d - progress;      // fractional days left in this season
                 let toWinter = 0;
                 if (s.id !== 'winter') {
-                    toWinter = s.days - d;
+                    toWinter = daysLeft;
                     for (let j = i + 1; j < SEASONS.length && SEASONS[j].id !== 'winter'; j++) toWinter += SEASONS[j].days;
                 }
-                return { ...s, index: i, dayInSeason: d + 1, daysLeft: s.days - d, toWinter, year };
+                return {
+                    ...s, index: i, year,
+                    secondsLeft: daysLeft * DAY_SECONDS,
+                    secondsToWinter: toWinter * DAY_SECONDS,
+                };
             }
             d -= s.days;
         }
-        return { ...SEASONS[0], index: 0, dayInSeason: 1, daysLeft: SEASONS[0].days, toWinter: 0, year };
+        return { ...SEASONS[0], index: 0, year, secondsLeft: DAY_SECONDS, secondsToWinter: 0 };
     }
 
     function getSeasonMultiplier(type, season = getSeason()) {
@@ -119,48 +130,41 @@ const Game = (() => {
         return m === undefined ? 1 : m;
     }
 
-    // Production per day for a single building (after bonuses)
+    // Speed factor of a building's work cycle (blacksmith bonus, season for hunters)
+    function getCycleFactor(b, season) {
+        const res = b.def.production.resource;
+        let f = getProductionMultiplier(res);
+        if (res === 'food') f *= getSeasonMultiplier(b.type, season || getSeason());
+        return f;
+    }
+
+    // Production of one building in units per minute
     function getBuildingOutput(b, season) {
         if (!b.def.production) return 0;
-        let out = b.def.production.amount * getProductionMultiplier(b.def.production.resource);
-        if (b.def.production.resource === 'food') out *= getSeasonMultiplier(b.type, season || getSeason());
-        return out;
+        const p = b.def.production;
+        return p.amount * 60 / p.cycle * getCycleFactor(b, season);
     }
 
-    // Food balance per day during a given season (production minus what workers eat)
-    function getFoodNetForSeason(seasonId) {
-        const season = SEASONS.find(s => s.id === seasonId) || SEASONS[0];
-        let prod = 0;
+    function getRates(season) {
+        const rates = { wood: 0, stone: 0, iron: 0, food: 0 };
         BuildingManager.getProductionBuildings().forEach(b => {
-            if (b.def.production.resource === 'food') prod += getBuildingOutput(b, season);
-        });
-        return prod - getFoodConsumption();
-    }
-
-    function getTrickle() {
-        const out = { wood: 0, stone: 0, iron: 0, food: 0 };
-        BuildingManager.getAll().forEach(b => {
-            const tr = b.def.provides?.trickle;
-            if (!tr) return;
-            Object.entries(tr).forEach(([r, a]) => { out[r] += a; });
-        });
-        return out;
-    }
-
-    function getRates() {
-        const rates = getTrickle();
-        BuildingManager.getProductionBuildings().forEach(b => {
-            rates[b.def.production.resource] += getBuildingOutput(b);
+            rates[b.def.production.resource] += getBuildingOutput(b, season);
         });
         return rates;
     }
 
+    // Meat eaten per minute (idle villagers feed themselves)
     function getFoodConsumption() {
-        // Working villagers eat 1 food per day. Idle villagers forage for themselves.
-        return state.populationUsed;
+        return state.populationUsed * FOOD_PER_WORKER_PER_MIN;
     }
 
-    // ---- Building placement logic ----
+    // Meat balance per minute during a given season
+    function getFoodNetForSeason(seasonId) {
+        const season = SEASONS.find(s => s.id === seasonId) || SEASONS[0];
+        return getRates(season).food - getFoodConsumption();
+    }
+
+    // ---- Placement ----
     // Current price of the next building of a type (the first warehouse is free)
     function getCost(type) {
         const def = BUILDINGS[type];
@@ -170,8 +174,6 @@ const Game = (() => {
     }
 
     function canAfford(type) {
-        const def = BUILDINGS[type];
-        if (!def) return false;
         const cost = getCost(type);
         return cost.wood <= state.resources.wood &&
                cost.stone <= state.resources.stone &&
@@ -186,6 +188,7 @@ const Game = (() => {
             return def.limit === 1 ? t('g.alreadybuilt') : t('g.limit', { n: def.limit });
         }
         if (type !== 'castle' && !hasCastle()) return t('g.castlefirst');
+        if (type !== 'castle' && type !== 'warehouse' && !hasWarehouse()) return t('g.warehousefirst');
         const missing = [];
         ['wood', 'stone', 'iron'].forEach(r => {
             const c = getCost(type)[r];
@@ -197,6 +200,16 @@ const Game = (() => {
         return null;
     }
 
+    function countStoneTiles(tileX, tileY, w, h) {
+        let n = 0;
+        for (let dy = 0; dy < h; dy++) {
+            for (let dx = 0; dx < w; dx++) {
+                if (GameMap.getTerrain(tileX + dx, tileY + dy) === TERRAIN.STONE_DEPOSIT) n++;
+            }
+        }
+        return n;
+    }
+
     function canPlace(type, tileX, tileY) {
         const def = BUILDINGS[type];
         if (!def) return { ok: false, reason: t('g.unknown') };
@@ -205,15 +218,20 @@ const Game = (() => {
         if (reason) return { ok: false, reason };
 
         if (!GameMap.isBuildable(tileX, tileY, def.width, def.height, BuildingManager.getAll())) {
-            // Distinguish water from overlap for a better hint
             let water = false;
             for (let dy = 0; dy < def.height && !water; dy++) {
                 for (let dx = 0; dx < def.width; dx++) {
-                    const t = GameMap.getTerrain(tileX + dx, tileY + dy);
-                    if (t === TERRAIN.WATER || t === TERRAIN.SAND) { water = true; break; }
+                    const tt = GameMap.getTerrain(tileX + dx, tileY + dy);
+                    if (tt === TERRAIN.WATER || tt === TERRAIN.SAND) { water = true; break; }
                 }
             }
             return { ok: false, reason: water ? t('g.water') : t('g.occupied') };
+        }
+
+        // Quarries must stand (at least partly) on a stone field
+        if (def.onStone) {
+            const need = Math.ceil(def.width * def.height * def.onStone);
+            if (countStoneTiles(tileX, tileY, def.width, def.height) < need) return { ok: false, reason: t('g.onstone') };
         }
 
         if (def.production?.requires) {
@@ -221,8 +239,11 @@ const Game = (() => {
                 return { ok: false, reason: def.production.requires === 'FOREST' ? t('g.nearforest') : t('g.nearstone') };
             }
         }
-
         return { ok: true };
+    }
+
+    function clearUnder(b) {
+        return GameMap.clearArea(b.tileX, b.tileY, b.def.width, b.def.height, { keepStone: !!b.def.onStone });
     }
 
     function placeBuilding(type, tileX, tileY) {
@@ -231,9 +252,7 @@ const Game = (() => {
             notify(check.reason, 'warning');
             return null;
         }
-
         const def = BUILDINGS[type];
-
         const cost = getCost(type);
         state.resources.wood -= cost.wood;
         state.resources.stone -= cost.stone;
@@ -242,28 +261,36 @@ const Game = (() => {
         const building = BuildingManager.place(type, tileX, tileY);
         building.dayPlaced = state.day;
         building.paid = { ...cost };
-        if (GameMap.clearArea(tileX, tileY, def.width, def.height) && typeof Renderer !== 'undefined') {
-            Renderer.invalidateTerrainCache();
-        }
+        building.progress = 0;
+        if (clearUnder(building) && typeof Renderer !== 'undefined') Renderer.invalidateTerrainCache();
 
         if (def.workers > 0) {
             building.workers = def.workers;
             building.active = true;
             state.populationUsed += def.workers;
         }
-
         if (def.provides.populationCap) state.populationCap += def.provides.populationCap;
         if (def.provides.storage) state.maxStorage += def.provides.storage;
 
         state.stats.built++;
         state.stats.maxPop = Math.max(state.stats.maxPop, state.populationUsed);
 
+        notify(t('g.built', { name: bName(def) }), 'success');
+
+        // The first warehouse brings the starting supplies and starts the clock
+        if (type === 'warehouse' && !state.clockStarted) {
+            Object.entries(WAREHOUSE_STOCK).forEach(([r, a]) => {
+                state.resources[r] = Math.min(state.maxStorage, state.resources[r] + a);
+            });
+            state.clockStarted = true;
+            notify(t('g.clockstart'), 'success');
+            if (callbacks.onClockStart) callbacks.onClockStart();
+        }
+
         if (callbacks.onResourceChange) callbacks.onResourceChange();
         if (callbacks.onBuildingsChanged) callbacks.onBuildingsChanged();
-        notify(t('g.built', { name: bName(def) }), 'success');
         checkMilestones();
         save();
-
         return building;
     }
 
@@ -271,7 +298,6 @@ const Game = (() => {
         if (!building) return { ok: false, reason: t('g.notavailable') };
         if (building.type === 'castle') return { ok: false, reason: t('g.castlenodemolish') };
         if (building.def.provides.populationCap) {
-            // Removing housing must not strand working villagers
             const capAfter = state.populationCap - building.def.provides.populationCap;
             if (capAfter < state.populationUsed) {
                 return { ok: false, reason: t('g.stillliving', { n: state.populationUsed - capAfter }) };
@@ -288,7 +314,6 @@ const Game = (() => {
             return false;
         }
         const def = b.def;
-        // Refund part of the cost
         const refund = {};
         ['wood', 'stone', 'iron'].forEach(r => {
             const amt = Math.floor((b.paid || def.cost)[r] * DEMOLISH_REFUND);
@@ -316,107 +341,111 @@ const Game = (() => {
         return true;
     }
 
-    // ---- Day tick logic ----
+    // ---- Simulation ----
     function update(deltaMs) {
-        if (!state.started || state.paused || state.gameOver) return;
-        // The calendar only starts once the castle stands
-        if (!hasCastle()) return;
-
-        const dayDuration = BASE_DAY_DURATION / state.speed;
-        state.dayProgress += deltaMs / dayDuration;
-
-        let ticks = 0;
-        while (state.dayProgress >= 1 && ticks < 10) {
-            state.dayProgress -= 1;
-            processDayTick();
-            ticks++;
+        if (!state.started || state.paused || state.gameOver || !state.clockStarted) return;
+        let dt = deltaMs / 1000 * state.speed;
+        // Simulate in steps of at most one second so long frames (or tests) stay accurate
+        while (dt > 0 && !state.gameOver) {
+            const step = Math.min(dt, 1);
+            simulate(step);
+            dt -= step;
         }
-        if (state.dayProgress >= 1) state.dayProgress = 0; // guard against huge deltas (tab was hidden)
     }
 
-    function processDayTick() {
-        const prevSeason = getSeason(state.day).id;
-        state.day++;
-        const season = getSeason(state.day);
-        if (season.id !== prevSeason && callbacks.onSeasonChange) callbacks.onSeasonChange(season);
+    function simulate(dt) {
+        const prevDay = state.day;
+        const prevSeason = getSeason(prevDay).id;
 
-        // Winter warning with a concrete stockpile target
-        if (season.id !== 'winter' && season.toWinter === WINTER_WARNING_DAYS) {
-            const winter = SEASONS.find(s => s.id === 'winter');
-            const need = Math.max(0, Math.ceil(-getFoodNetForSeason('winter') * winter.days));
-            if (need > state.maxStorage) notify(t('season.warn.storage', { n: WINTER_WARNING_DAYS, food: need, max: state.maxStorage }), 'danger');
-            else if (need > state.resources.food) notify(t('season.warn', { n: WINTER_WARNING_DAYS, food: need }), 'warning');
-            else notify(t('season.warn.ok', { n: WINTER_WARNING_DAYS }), 'info');
-        }
+        state.time += dt;
+        state.day = Math.floor(state.time / DAY_SECONDS) + 1;
+        state.dayProgress = (state.time % DAY_SECONDS) / DAY_SECONDS;
 
-        // Production
-        // Small base income from the castle
-        Object.entries(getTrickle()).forEach(([r, a]) => {
-            if (a > 0) state.resources[r] = Math.min(state.maxStorage, state.resources[r] + a);
-        });
+        let changed = false;
 
-        const producers = BuildingManager.getProductionBuildings();
-        producers.forEach(b => {
-            const res = b.def.production.resource;
-            const amount = getBuildingOutput(b);
-            const before = state.resources[res];
-            state.resources[res] = Math.min(before + amount, state.maxStorage);
-            const gained = state.resources[res] - before;
-            if (callbacks.onProduce) callbacks.onProduce(b, res, gained);
-            if (gained < amount - 0.001 && !state.storageWarned[res]) {
-                state.storageWarned[res] = true;
-                notify(t('g.storagefull', { res: resName(res) }), 'warning');
-            }
-            if (gained >= amount - 0.001 && state.resources[res] < state.maxStorage * 0.9) {
-                state.storageWarned[res] = false;
-            }
-        });
-
-        // Growth for orchards / farms (dormant in winter)
-        BuildingManager.getAll().forEach(b => {
-            if (season.growth && b.def.production?.growthDays && !b.grown) {
-                b.growthProgress++;
-                if (b.growthProgress >= b.def.production.growthDays) {
-                    b.grown = true;
-                    notify(t('g.producing', { name: bName(b.def) }), 'grown');
+        // Production: each building fills its work cycle and delivers a batch
+        const season = getSeason();
+        BuildingManager.getProductionBuildings().forEach(b => {
+            const p = b.def.production;
+            b.progress = (b.progress || 0) + dt * getCycleFactor(b, season) / p.cycle;
+            while (b.progress >= 1) {
+                b.progress -= 1;
+                const res = p.resource;
+                const before = state.resources[res];
+                state.resources[res] = Math.min(before + p.amount, state.maxStorage);
+                const gained = state.resources[res] - before;
+                changed = true;
+                if (callbacks.onProduce) callbacks.onProduce(b, res, gained);
+                if (gained < p.amount && !state.storageWarned[res]) {
+                    state.storageWarned[res] = true;
+                    notify(t('g.storagefull', { res: resName(res) }), 'warning');
+                } else if (state.resources[res] < state.maxStorage * 0.9) {
+                    state.storageWarned[res] = false;
                 }
             }
         });
 
-        // Food consumption
-        const foodNeeded = getFoodConsumption();
-        if (foodNeeded > 0) {
-            if (state.resources.food >= foodNeeded) {
-                state.resources.food -= foodNeeded;
-                if (state.starvationDays > 0) notify(t('g.fedagain'), 'success');
-                state.starvationDays = 0;
+        // Workers eat continuously
+        const eat = getFoodConsumption() / 60 * dt;
+        if (eat > 0) {
+            if (state.resources.food >= eat) {
+                state.resources.food -= eat;
+                if (state.starving > 0) notify(t('g.fedagain'), 'success');
+                state.starving = 0;
             } else {
                 state.resources.food = 0;
-                state.starvationDays++;
-                if (state.starvationDays >= STARVATION_LIMIT) {
+                state.starving += dt;
+                const left = Math.ceil(STARVATION_GRACE - state.starving);
+                if (state.time - state.lastStarveWarn >= 15) {
+                    state.lastStarveWarn = state.time;
+                    notify(t('g.starving', { s: Math.max(0, left) }), 'danger');
+                }
+                if (state.starving >= STARVATION_GRACE) {
                     state.gameOver = true;
                     clearSave();
                     if (callbacks.onGameOver) callbacks.onGameOver();
-                } else {
-                    notify(t('g.starving', { a: state.starvationDays, b: STARVATION_LIMIT }), 'danger');
+                    return;
                 }
             }
         }
 
-        // Low food warning (a few days ahead)
-        const rates = getRates();
-        const net = rates.food - foodNeeded;
-        if (net < 0 && state.resources.food > 0 && state.resources.food <= -net * 4 && state.day % 3 === 0) {
-            const daysLeft = Math.ceil(state.resources.food / -net);
-            notify(t('g.foodout', { n: daysLeft, unit: daysLeft === 1 ? t('day') : t('days') }), 'warning');
+        // Running low on meat: warn when less than ~1.5 minutes are left
+        const net = getRates().food - getFoodConsumption();
+        if (net < 0 && state.resources.food > 0 && state.resources.food < -net * 1.5 && state.time - state.lastFoodWarn > 45) {
+            state.lastFoodWarn = state.time;
+            notify(t('g.foodout', { n: Math.max(1, Math.round(state.resources.food / -net)) }), 'warning');
         }
 
-        checkMilestones();
+        // Winter warning with a concrete stockpile target
+        if (season.id !== 'winter' && season.secondsToWinter <= WINTER_WARNING_SECONDS && state.warnedWinterYear !== season.year) {
+            state.warnedWinterYear = season.year;
+            const winterMinutes = SEASONS.find(s => s.id === 'winter').days * DAY_SECONDS / 60;
+            const need = Math.max(0, Math.ceil(-getFoodNetForSeason('winter') * winterMinutes));
+            const n = Math.round(season.secondsToWinter / 60);
+            if (need > state.maxStorage) notify(t('season.warn.storage', { n, food: need, max: state.maxStorage }), 'danger');
+            else if (need > state.resources.food) notify(t('season.warn', { n, food: need }), 'warning');
+            else notify(t('season.warn.ok', { n }), 'info');
+        }
 
-        if (callbacks.onDayTick) callbacks.onDayTick();
-        if (callbacks.onResourceChange) callbacks.onResourceChange();
+        // New day / season
+        if (state.day !== prevDay) {
+            const s = getSeason();
+            if (s.id !== prevSeason && callbacks.onSeasonChange) callbacks.onSeasonChange(s);
+            if (callbacks.onDayTick) callbacks.onDayTick();
+            changed = true;
+        }
 
-        if (state.day % 5 === 0) save();
+        milestoneTimer += dt;
+        if (milestoneTimer >= 1) { milestoneTimer = 0; checkMilestones(); }
+
+        uiTimer += dt;
+        if (changed || uiTimer >= 0.5) {
+            uiTimer = 0;
+            if (callbacks.onResourceChange) callbacks.onResourceChange();
+        }
+
+        saveTimer += dt;
+        if (saveTimer >= 20) { saveTimer = 0; save(); }
     }
 
     // ---- Milestones ----
@@ -434,7 +463,6 @@ const Game = (() => {
         return MILESTONES.find(m => !state.milestones.includes(m.id)) || null;
     }
 
-    // Check if a building type's button should be enabled
     function isBuildingAvailable(type) {
         return getUnavailableReason(type) === null;
     }
@@ -448,7 +476,7 @@ const Game = (() => {
         if (!state.started || state.gameOver) return;
         try {
             const data = {
-                version: 2,
+                version: 3,
                 seed: GameMap.getSeed(),
                 state: Object.assign({}, state, { started: true }),
                 buildings: BuildingManager.serialize(),
@@ -459,9 +487,7 @@ const Game = (() => {
     }
 
     function hasSave() {
-        try {
-            return !!localStorage.getItem(SAVE_KEY);
-        } catch (e) { return false; }
+        try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; }
     }
 
     function getSaveInfo() {
@@ -478,7 +504,7 @@ const Game = (() => {
             const raw = localStorage.getItem(SAVE_KEY);
             if (!raw) return false;
             const data = JSON.parse(raw);
-            if (!data || data.version !== 2) return false;
+            if (!data || data.version !== 3) return false;
             GameMap.generate(data.seed);
             state = Object.assign(freshState(), data.state);
             state.paused = false;
@@ -486,7 +512,7 @@ const Game = (() => {
             state.gameOver = false;
             state.started = true;
             BuildingManager.deserialize(data.buildings);
-            BuildingManager.getAll().forEach(b => GameMap.clearArea(b.tileX, b.tileY, b.def.width, b.def.height));
+            BuildingManager.getAll().forEach(clearUnder);
             return true;
         } catch (e) {
             return false;
@@ -522,7 +548,10 @@ const Game = (() => {
         getFoodNetForSeason,
         getProductionMultiplier,
         getNextMilestone,
+        getHour,
         hasCastle,
+        hasWarehouse,
+        isClockRunning,
         save,
         load,
         hasSave,

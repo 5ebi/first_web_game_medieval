@@ -70,7 +70,7 @@ const Effects = (() => {
                 gravity: 140,
                 life: 0.35 + Math.random() * 0.25,
                 age: 0,
-                size: 2,
+                size: 1,
                 grow: 0,
                 color,
                 alpha: 1,

@@ -4,7 +4,7 @@
 // ============================================
 
 const Atmosphere = (() => {
-    const CLOUD_CELL = 4;   // world px per cloud pixel
+    const CLOUD_CELL = 2;   // world px per cloud pixel
     let FOG_CELL = 4;       // world px per fog pixel (8 when zoomed far out, to save work)
     const NOISE_N = 128;    // tileable noise texture size
     const CLOUD_MARGIN = 360;
@@ -12,11 +12,12 @@ const Atmosphere = (() => {
     const reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
     const WEATHERS = {
-        clear:  { cover: 0.18, fog: 0.0, rain: 0, wind: 0.3,  weight: 0.45, days: [3, 7] },
-        cloudy: { cover: 0.75, fog: 0.1, rain: 0, wind: 0.65, weight: 0.3,  days: [2, 5] },
-        rain:   { cover: 1.0,  fog: 0.3, rain: 1, wind: 0.9,  weight: 0.15, days: [2, 4] },
-        fog:    { cover: 0.35, fog: 1.0, rain: 0, wind: 0.1,  weight: 0.1,  days: [1.5, 3] },
-        snow:   { cover: 0.9,  fog: 0.2, rain: 0, snow: 1, wind: 0.5, weight: 0, days: [2, 4] },
+        // durations are in game minutes
+        clear:  { cover: 0.18, fog: 0.0, rain: 0, wind: 0.3,  weight: 0.45, mins: [3, 6] },
+        cloudy: { cover: 0.75, fog: 0.1, rain: 0, wind: 0.65, weight: 0.3,  mins: [2, 4] },
+        rain:   { cover: 1.0,  fog: 0.3, rain: 1, wind: 0.9,  weight: 0.15, mins: [1.5, 3] },
+        fog:    { cover: 0.35, fog: 1.0, rain: 0, wind: 0.1,  weight: 0.1,  mins: [1, 2] },
+        snow:   { cover: 0.9,  fog: 0.2, rain: 0, snow: 1, wind: 0.5, weight: 0, mins: [2, 4] },
     };
     // In winter precipitation falls as snow
     const WINTER_WEIGHTS = { clear: 0.35, cloudy: 0.3, snow: 0.25, fog: 0.1 };
@@ -27,7 +28,7 @@ const Atmosphere = (() => {
 
     let enabled = Settings.get('fxOn') !== false;
     let weather = 'clear';
-    let weatherUntil = 4;
+    let weatherUntil = 3;   // game minutes
     let lastGameDay = 0;
     const p = { cover: 0.18, fog: 0, rain: 0, snow: 0, wind: 0.3 };
     let night = 0, dusk = 0;
@@ -59,14 +60,14 @@ const Atmosphere = (() => {
 
     // ---------- clouds ----------
     function makeCloudShape() {
-        const w = 26 + Math.floor(Math.random() * 30);
-        const h = 12 + Math.floor(Math.random() * 7);
+        const w = 52 + Math.floor(Math.random() * 60);
+        const h = 24 + Math.floor(Math.random() * 14);
         const blobs = 4 + Math.floor(Math.random() * 4);
         const circles = [];
         for (let i = 0; i < blobs; i++) {
             const k = blobs === 1 ? 0.5 : i / (blobs - 1);
-            const cx = 4 + (w - 8) * k + rand(-2, 2);
-            const r = h * 0.28 + h * 0.3 * (1 - Math.abs(2 * k - 1)) + rand(0, 1.5);
+            const cx = 8 + (w - 16) * k + rand(-4, 4);
+            const r = h * 0.28 + h * 0.3 * (1 - Math.abs(2 * k - 1)) + rand(0, 3);
             const cy = h - 2 - r * 0.65;
             circles.push([cx, cy, r]);
         }
@@ -196,7 +197,7 @@ const Atmosphere = (() => {
 
     function renderFog(view) {
         const level = fogLevel();
-        FOG_CELL = view.zoom >= 0.9 ? 4 : 8;
+        FOG_CELL = view.zoom >= 0.9 ? 2 : 4;
         const nScale = 0.22 * FOG_CELL / 8; // keep blob size constant in world space
         const cx0 = Math.max(0, Math.floor(view.x0 / FOG_CELL) - 1);
         const cy0 = Math.max(0, Math.floor(view.y0 / FOG_CELL) - 1);
@@ -249,7 +250,7 @@ const Atmosphere = (() => {
     }
 
     function makeVignette(w, h) {
-        const s = 6;
+        const s = 3;
         const vw = Math.ceil(w / s), vh = Math.ceil(h / s);
         const c = makeCanvas(vw, vh);
         const ctx = c.getContext('2d');
@@ -278,7 +279,7 @@ const Atmosphere = (() => {
             }
         }
         weather = next;
-        const [a, b] = WEATHERS[next].days;
+        const [a, b] = WEATHERS[next].mins;
         weatherUntil = gameDay + rand(a, b);
         if (onWeatherChange && next !== prev) onWeatherChange(next, prev);
     }
@@ -307,19 +308,18 @@ const Atmosphere = (() => {
         const running = gs.started && !gs.paused && !gs.gameOver;
         const sm = running ? 0.3 + Math.min(gs.speed, 3) * 0.7 : 0.35;
 
-        // Dusk / dawn glow: strongest around the edges of night
-        if (Game.hasCastle()) {
-            const t = (gs.day + gs.dayProgress) / DAY_NIGHT_CYCLE_DAYS;
-            dusk = clamp(1 - Math.abs(Math.cos(t * Math.PI * 2)) * 3.2, 0, 1);
+        // Dusk / dawn glow: strongest around 07:00 and 19:00
+        if (Game.isClockRunning()) {
+            dusk = clamp(1 - Math.abs(Math.cos((Game.getHour() - 1) / 24 * Math.PI * 2)) * 3.2, 0, 1);
         } else {
             dusk = 0;
         }
 
-        // Weather schedule (in game days)
-        const gd = gs.day + gs.dayProgress;
-        if (gd < lastGameDay - 0.5) { weather = 'clear'; weatherUntil = gd + 4; } // new game
+        // Weather schedule (in game minutes)
+        const gd = (gs.time || 0) / 60;
+        if (gd < lastGameDay - 0.5) { weather = 'clear'; weatherUntil = gd + 3; } // new game
         lastGameDay = gd;
-        if (enabled && Game.hasCastle() && gd >= weatherUntil) pickWeather(gd);
+        if (enabled && Game.isClockRunning() && gd >= weatherUntil) pickWeather(gd);
 
         const target = enabled ? WEATHERS[weather] : { cover: 0, fog: 0, rain: 0, snow: 0, wind: 0.3 };
         const k = 1 - Math.exp(-dt * 0.35);
@@ -453,7 +453,7 @@ const Atmosphere = (() => {
 
         // Fog (recomputed every second frame, drawn every frame)
         if (fogLevel() > 0.02) {
-            fogFrame = (fogFrame + 1) % 2;
+            fogFrame = (fogFrame + 1) % 3;
             if (fogFrame === 0 || !fogRect) renderFog(view);
             if (fogRect && fogCanvas) ctx.drawImage(fogCanvas, fogRect.x, fogRect.y, fogRect.w, fogRect.h);
         }
@@ -497,19 +497,21 @@ const Atmosphere = (() => {
             ctx.globalAlpha = clamp(Math.min(l.t * 3, l.life - l.t), 0, 1);
             ctx.fillStyle = l.color;
             const flip = Math.floor(l.t * 6) % 2;
-            ctx.fillRect(Math.round(l.x), Math.round(l.y), flip ? 2 : 1, flip ? 1 : 2);
+            ctx.fillRect(Math.round(l.x), Math.round(l.y), 1, 1);
+            if (flip) ctx.fillRect(Math.round(l.x) + 1, Math.round(l.y), 1, 1);
         });
         ctx.globalAlpha = 1;
     }
 
+    // 1px bird silhouettes (14x6), wings up / wings down
     const BIRD_FRAMES = [
-        [[0, 0], [6, 0], [1, 1], [2, 1], [4, 1], [5, 1], [3, 2]],         // wings up
-        [[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [0, 2], [3, 2], [6, 2]], // wings down
-    ];
+        ['#............#', '.#..........#.', '..##......##..', '....##..##....', '......##......', '..............'],
+        ['..............', '..............', '.....####.....', '..###....###..', '.#..........#.', '#............#'],
+    ].map(rows => rows.flatMap((row, y) => [...row].map((ch, x) => ch === '#' ? [x, y] : null).filter(Boolean)));
 
     function drawBird(ctx, x, y, frame, color) {
         ctx.fillStyle = color;
-        BIRD_FRAMES[frame].forEach(([cx, cy]) => ctx.fillRect(Math.round(x) + cx * 2 - 7, Math.round(y) + cy * 2, 2, 2));
+        BIRD_FRAMES[frame].forEach(([cx, cy]) => ctx.fillRect(Math.round(x) + cx - 7, Math.round(y) + cy, 1, 1));
     }
 
     // Above everything in the world: birds and clouds (world transform)
@@ -540,8 +542,8 @@ const Atmosphere = (() => {
     // Screen-space pass after the night tint: dusk, rain, glows, flash, vignette
     function drawScreen(ctx, view) {
         if (!glowSprite) {
-            glowSprite = makeGlow(12, 3, '255,170,70', [[0.35, 0.5], [0.62, 0.28], [0.88, 0.12]]);
-            fireflySprite = makeGlow(5, 2, '210,255,110', [[0.3, 1], [0.75, 0.35], [1.01, 0.12]]);
+            glowSprite = makeGlow(18, 2, '255,170,70', [[0.3, 0.5], [0.5, 0.36], [0.7, 0.22], [0.9, 0.1]]);
+            fireflySprite = makeGlow(7, 1, '210,255,110', [[0.25, 1], [0.6, 0.45], [1.01, 0.12]]);
         }
         const W = view.w, H = view.h;
 
@@ -579,13 +581,13 @@ const Atmosphere = (() => {
             if (lightK > 0 && b.def.lights) {
                 ctx.globalAlpha = lightK * 0.9;
                 b.def.lights.forEach(([lx, ly, lw, lh]) => {
-                    ctx.drawImage(glowSprite, snap(ox + lx + lw / 2 - 18, 3), snap(oy + ly + lh / 2 - 18, 3));
+                    ctx.drawImage(glowSprite, snap(ox + lx + lw / 2 - 18, 2), snap(oy + ly + lh / 2 - 18, 2));
                 });
             }
             if (forge) {
                 const flick = 0.85 + Math.sin(performance.now() / 90) * 0.08 + Math.random() * 0.07;
                 ctx.globalAlpha = (0.2 + lightK * 0.7) * flick;
-                ctx.drawImage(glowSprite, snap(ox + 32 - 18, 3), snap(oy + 38 - 18, 3));
+                ctx.drawImage(glowSprite, snap(ox + 32 - 18, 2), snap(oy + 38 - 18, 2));
             }
         });
 
@@ -615,7 +617,7 @@ const Atmosphere = (() => {
         const key = `${W}x${H}`;
         if (vigKey !== key) { vignette = makeVignette(W, H); vigKey = key; }
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(vignette, 0, 0, vignette.width * 6, vignette.height * 6);
+        ctx.drawImage(vignette, 0, 0, vignette.width * 3, vignette.height * 3);
     }
 
     let lastRainT = performance.now();
@@ -639,7 +641,7 @@ const Atmosphere = (() => {
                 d.x = rand(-60, W); d.y = rand(-60, -10); d.gy = rand(H * 0.1, H);
             }
             const s = vx / d.vy * 4;
-            for (let k = 0; k < 3; k++) ctx.fillRect(Math.round(d.x + k * s), Math.round(d.y + k * 4), 2, 4);
+            for (let k = 0; k < 3; k++) ctx.fillRect(Math.round(d.x + k * s), Math.round(d.y + k * 4), 1, 4);
         });
         splashes.forEach(s => { s.t += dt; });
         splashes = splashes.filter(s => s.t < 0.18);
@@ -659,7 +661,7 @@ const Atmosphere = (() => {
         const W = view.w, H = view.h;
         const want = Math.floor(p.snow * 190 * (W * H) / (1280 * 800));
         while (flakes.length < want) {
-            flakes.push({ x: rand(-40, W), y: rand(-H, 0), vy: rand(28, 60), ph: rand(0, 6), s: Math.random() < 0.3 ? 3 : 2, gy: rand(H * 0.2, H) });
+            flakes.push({ x: rand(-40, W), y: rand(-H, 0), vy: rand(28, 60), ph: rand(0, 6), s: Math.random() < 0.3 ? 2 : 1, gy: rand(H * 0.2, H) });
         }
         if (flakes.length > want) flakes.length = want;
         if (!flakes.length) return;

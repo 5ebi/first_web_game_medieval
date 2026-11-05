@@ -22,7 +22,6 @@ Kostenlose Pixel-Editoren: **Piskel** (piskelapp.com, im Browser), **Lospec Pixe
 |---|---|---|
 | `tiles.png` | 128 × 256 | Bodenkacheln, 32 × 32 pro Feld, siehe `templates/tiles_guide.png` |
 | `buildings/<typ>.png` | siehe Tabelle | ein Gebäude |
-| `buildings/apple_orchard_young.png`, `buildings/farm_young.png` | wie fertig | Zustand während des Wachsens |
 | `nature/tree_oak.png` | 32 × 48 | Laubbaum |
 | `nature/tree_pine.png` | 32 × 56 | Nadelbaum |
 | `nature/stone_pile.png` | 32 × 24 | Steinhaufen auf Steinvorkommen |
@@ -55,12 +54,10 @@ Hast du weniger als 4 Spalten, werden die vorhandenen wiederholt.
 | `house.png` | 2 × 2 | 64 × 64 |
 | `tavern.png` | 2 × 2 | 64 × 64 |
 | `lumberjack.png` | 2 × 2 | 64 × 64 |
+| `hunter.png` | 2 × 2 | 64 × 64 |
 | `quarry.png` | 2 × 2 | 64 × 64 |
 | `iron_mine.png` | 2 × 2 | 64 × 64 |
 | `blacksmith.png` | 2 × 2 | 64 × 64 |
-| `chicken_hut.png` | 2 × 2 | 64 × 64 |
-| `apple_orchard.png` | 3 × 2 | 96 × 64 |
-| `farm.png` | 3 × 3 | 96 × 96 |
 
 Gebäude werden **unten mittig** auf ihre Grundfläche gesetzt. Du darfst sie also höher machen
 (z. B. ein Turm mit 64 × 96), dann ragen sie nach oben über ihr Feld hinaus, wie in vielen Aufbauspielen.
@@ -89,7 +86,7 @@ Dann http://localhost:8000 öffnen. Per Doppelklick (`file://`) wird das Manifes
 
 ## Tipps für einen stimmigen Look
 
-- Bleib bei **echten Pixeln**: kein Weichzeichnen, kein Antialiasing, keine Verläufe.
+- Bleib bei **echten Pixeln** im 1-Pixel-Raster: kein Weichzeichnen, kein Antialiasing, keine Verläufe. Das Spiel zeichnet alles mit 1 Pixel pro Spielpixel.
 - Eine **feste Palette** von 16 bis 32 Farben hält alles zusammen. Gute fertige Paletten gibt es auf lospec.com/palette-list (z. B. „Endesga 32“ oder „Resurrect 64“).
 - **Licht kommt von oben links**: helle Kante oben/links, dunkle Kante unten/rechts.
 - Gras eher **ruhig und wenig kontrastreich**, damit Gebäude und Bewohner sich abheben.

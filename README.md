@@ -9,41 +9,34 @@ Turn your sound on: music, ambience and effects are all synthesized in the brows
 
 ## How to Play
 
-- **Place your Castle** first (it is pre-selected, just click the map). The calendar starts once it stands.
+Inspired by Stronghold, made for phones and desktop.
+
+- **Place your Castle** (it is pre-selected), then the **Warehouse**. Time stands still until the warehouse is built; it brings the starting supplies (50 wood, 20 stone, 20 meat).
+- Nothing grows by itself: **only buildings with workers produce**, in batches (a bar under each building shows the next delivery). The castle gives you 10 villagers.
+- The **lumberjack is always free**, so you can never run out of wood for good.
+- A **quarry** must stand at least half on a stone field. Lumberjacks and hunters need a forest nearby.
+- Every working villager eats **0.5 meat per minute**. Without meat your people leave after 60 seconds.
+- A **day** (full day/night cycle) lasts 6 minutes at 1x. Each **season** lasts one day: hunting is better in summer and autumn and halved in winter. A warning two minutes before winter tells you how much meat to store.
 - **Drag** the map to scroll, **mouse wheel** / trackpad pinch / **+** / **-** to zoom, **WASD** or **arrow keys** to pan, click the **minimap** to jump
 - On touch screens: tap the map to position the building, tap it again to build; the bar above the menu cancels
 - **Right-click**, **Escape** or the ✕ in the placement bar cancels placement
-- **Space** to pause/unpause, **1/2/3** for speed, **M** mute, **H** help, **C** center on the Castle
-- Every building has a **hotkey** (shown in the menu)
-- Click a placed building for details or to **demolish** it (50% refund, **Del** key)
-- Progress is **saved automatically**; use *Continue* on the title screen
-- **Seasons**: a year has 46 days. Summer (+25%) and autumn (+50%) bring richer harvests; in winter fields and orchards rest and chickens lay less, so stock up in autumn. A warning six days before winter tells you how much food to store.
-- **Weather** changes every few days: clear, cloudy, rain with thunder, or fog. The sun icon in the top bar shows the current sky.
-- **Settings** (gear icon or **O**): language (English / Deutsch), music on/off, sound effects on/off, weather & atmosphere on/off. The language follows your browser the first time and is remembered afterwards.
+- **Space** to pause/unpause, **1/2/3** for speed, **M** mute, **O** settings, **H** help, **C** center on the Castle
+- Click a placed building for details or to **demolish** it (50% refund, **Del** key). Progress is **saved automatically**.
+- **Weather** changes every few minutes: clear, cloudy, rain (snow in winter) or fog.
 
-### Buildings
+### Buildings (rates at 1x)
 
 | Building | Cost | Workers | Effect |
 |---|---|---|---|
-| Castle | Free | — | +10 villagers, +2 wood and +1 stone/day |
-| Warehouse | First free, then 30 wood, 20 stone | — | +300 storage |
+| Castle | Free | — | +10 villagers |
+| Warehouse | First free (+ starting supplies), then 30 wood, 20 stone | — | +300 storage |
+| Lumberjack | **Always free** | 2 | 4 wood every 20 s (12/min), near forest |
+| Hunter's Hut | 15 wood | 2 | 4 meat every 30 s (8/min), near forest |
+| Stone Quarry | 20 wood | 3 | 4 stone every 30 s (8/min), half on a stone field |
 | House | 15 wood, 10 stone | — | +5 villagers |
-| Tavern | 20 wood, 10 stone, 5 iron | — | +8 villagers |
-| Lumberjack | 10 wood | 2 | +6 wood/day (near forest) |
-| Stone Quarry | 10 wood | 2 | +4 stone/day (near stone) |
-| Iron Mine | 15 wood, 10 stone | 2 | +2 iron/day (near stone) |
-| Blacksmith | 20 wood, 15 stone, 10 iron | 1 | +25% wood, stone and iron production (limit 1) |
-| Chicken Hut | 10 wood, 5 stone | 1 | +3 food/day |
-| Apple Orchard | 15 wood | 1 | +6 food/day after 6 days |
-| Wheat Farm | 20 wood, 10 stone | 2 | +10 food/day after 4 days |
-
-### Tips
-
-- Every **working** villager eats **1 food/day**. Idle villagers feed themselves, so housing alone is safe.
-- **3 consecutive days** without food = game over. The food counter turns red while you are in danger.
-- Lumberjacks, quarries and mines must be within **5 tiles** of forest / stone deposits. The dashed box while placing shows the radius.
-- Resources are capped by **storage** (shown in the top bar). Build the Warehouse before your stockpiles fill up.
-- The **goal box** above the minimap always shows your next milestone.
+| Tavern | 25 wood, 15 stone, 5 iron | — | +8 villagers |
+| Iron Mine | 30 wood, 15 stone | 3 | 3 iron every 40 s (4.5/min), near stone |
+| Blacksmith | 30 wood, 20 stone, 10 iron | 1 | wood, stone and iron 25% faster (limit 1) |
 
 ## Custom art
 

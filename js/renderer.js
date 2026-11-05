@@ -133,6 +133,39 @@ const Renderer = (() => {
             }
         }
 
+        // Soft, ragged transitions between different kinds of ground (no hard 32px tile edges):
+        // a jagged strip of the neighbouring tile is drawn over each shared edge.
+        const landPriority = { [TERRAIN.SAND]: 1, [TERRAIN.DIRT]: 2, [TERRAIN.STONE_DEPOSIT]: 3, [TERRAIN.GRASS]: 4, [TERRAIN.FLOWERS]: 4, [TERRAIN.GRASS_DARK]: 5, [TERRAIN.FOREST]: 6 };
+        const T = TILE_SIZE;
+        for (let y = 0; y < MAP_HEIGHT; y++) {
+            for (let x = 0; x < MAP_WIDTH; x++) {
+                const t = grid[y][x];
+                if (t === TERRAIN.WATER) continue;
+                [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) return;
+                    const n = grid[ny][nx];
+                    if (n === TERRAIN.WATER || n === t) return;
+                    // only the "stronger" ground creeps over the weaker one (grass over sand, forest over grass)
+                    if ((landPriority[n] || 0) <= (landPriority[t] || 0)) return;
+                    if ((landPriority[n] === 4 && landPriority[t] === 4)) return;
+                    tctx.save();
+                    tctx.beginPath();
+                    for (let i = 0; i < T; i += 2) {
+                        const h0 = (x * 928371 + y * 364479 + i * 7919 + (dx + 2) * 31 + (dy + 2) * 17) >>> 0;
+                        const depth = 1 + (h0 % 5 === 0 ? 3 : h0 % 3);
+                        if (dx === 1) tctx.rect((x + 1) * T - depth, y * T + i, depth, 2);
+                        if (dx === -1) tctx.rect(x * T, y * T + i, depth, 2);
+                        if (dy === 1) tctx.rect(x * T + i, (y + 1) * T - depth, 2, depth);
+                        if (dy === -1) tctx.rect(x * T + i, y * T, 2, depth);
+                    }
+                    tctx.clip();
+                    tctx.drawImage(Sprites.getSeasonalTile(n, GameMap.getVariant(nx, ny), season), x * T, y * T);
+                    tctx.restore();
+                });
+            }
+        }
+
         // Shorelines: foam on water tiles bordering land (frozen in winter: no foam)
         for (let y = 0; y < MAP_HEIGHT && !winter; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
@@ -212,12 +245,11 @@ const Renderer = (() => {
         ctx.fill();
     }
 
+    // 0 during the day, 1 in the middle of the night (darkest around 01:00)
     function nightAmount(gs) {
-        if (!Game.hasCastle()) return 0;
-        const t = (gs.day + gs.dayProgress) / DAY_NIGHT_CYCLE_DAYS;
-        // 0 at noon, 1 at midnight; eased so days feel longer than nights
-        const v = Math.max(0, -Math.cos(t * Math.PI * 2));
-        return Math.pow(v, 1.6);
+        if (!Game.isClockRunning()) return 0;
+        const v = Math.max(0, Math.cos((Game.getHour() - 1) / 24 * Math.PI * 2));
+        return Math.pow(v, 1.5);
     }
 
     // ---------- Main render ----------
@@ -288,10 +320,9 @@ const Renderer = (() => {
         }
 
         // Stone piles (ground layer)
-        const stonePileSprite = Sprites.getStonePile(season);
         GameMap.getStones().forEach(s => {
             if (s.x + 32 > vx0 && s.x - 32 < vx1 && s.y + 24 > vy0 && s.y - 24 < vy1) {
-                ctx.drawImage(stonePileSprite, s.x, s.y);
+                ctx.drawImage(Sprites.getStonePile(season, ((s.x * 7 + s.y * 3) | 0) % 3), Math.round(s.x), Math.round(s.y));
             }
         });
 
@@ -304,9 +335,9 @@ const Renderer = (() => {
                 drawables.push({
                     y: t.y + 16,
                     draw: () => {
-                        const sprite = Sprites.getTree(t.type === 'pine' ? 'pine' : 'oak', season);
+                        const sprite = Sprites.getTree(t.type === 'pine' ? 'pine' : 'oak', season, ((t.x * 13 + t.y * 7) | 0) % 3);
                         drawShadowEllipse(t.x + 3, t.y + 15, 9, 4, 0.22);
-                        ctx.drawImage(sprite, t.x - sprite.width / 2, t.y - sprite.height + 16);
+                        ctx.drawImage(sprite, Math.round(t.x - sprite.width / 2), Math.round(t.y - sprite.height + 16));
                     }
                 });
             }
@@ -342,7 +373,7 @@ const Renderer = (() => {
             drawables.push({
                 y: v.y,
                 draw: () => {
-                    const sprite = Sprites.drawVillager(v.frame, v.palette, v.flip);
+                    const sprite = Sprites.drawVillager(v.frame, v.palette, v.flip, v.tool);
                     drawShadowEllipse(v.x, v.y, 5, 2, 0.25);
                     const bob = v.waitT > 0 ? (v.frame ? -1 : 0) : 0;
                     ctx.drawImage(sprite, Math.round(v.x - sprite.width / 2), Math.round(v.y - sprite.height + bob));
@@ -445,6 +476,16 @@ const Renderer = (() => {
             b.def.lights.forEach(([lx, ly, lw, lh]) => ctx.fillRect(ox + lx, oy + ly, lw, lh));
         }
 
+        // Work cycle: a thin bar under production buildings shows when the next delivery arrives
+        if (b.def.production && b.active && Game.isClockRunning()) {
+            const bw = Math.min(b.width - 12, 40);
+            const bx = Math.round(b.pixelX + (b.width - bw) / 2), by = b.pixelY + b.height - 3;
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(bx - 1, by - 1, bw + 2, 3);
+            ctx.fillStyle = COLORS[b.def.production.resource] || '#ffd24a';
+            ctx.fillRect(bx, by, Math.round(bw * Math.min(1, b.progress || 0)), 1);
+        }
+
         // Inactive (no workers) indicator
         if (b.maxWorkers > 0 && !b.active) {
             ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -522,8 +563,7 @@ const Renderer = (() => {
         if (d.provides.populationCap) text = t('menu.villagers', { n: d.provides.populationCap });
         else if (d.provides.storage) text = t('menu.storage', { n: d.provides.storage });
         else if (d.provides.productionBonus) text = t('menu.bonus', { n: Math.round(d.provides.productionBonus * 100) });
-        else if (d.production) text = t('menu.prod', { n: d.production.amount, res: resName(d.production.resource) }) +
-            (d.production.growthDays ? ' · ' + t('menu.after', { n: d.production.growthDays }) : '');
+        else if (d.production) text = t('menu.prod', { n: Math.round(d.production.amount * 60 / d.production.cycle), res: resName(d.production.resource) });
         if (text) Effects.floatText(b.pixelX + b.width / 2, b.pixelY - 6, text, '#ffe08a');
     }
 
@@ -565,28 +605,31 @@ const Renderer = (() => {
             const top = oy + sprite.height - Math.min(sprite.height, h + 8);
             const bottom = oy + sprite.height;
             const left = ox + 2, right = ox + sprite.width - 4;
-            ctx.fillStyle = '#8a5a2a';
-            ctx.fillRect(left, top, 2, bottom - top);
-            ctx.fillRect(right, top, 2, bottom - top);
-            if (sprite.width > 70) ctx.fillRect(ox + Math.round(sprite.width / 2) - 1, top, 2, bottom - top);
-            ctx.fillStyle = '#6b4226';
-            for (let y = bottom - 10; y > top; y -= 12) ctx.fillRect(left, y, right - left + 2, 2);
+            // 1px poles with a lighter edge, cross braces and lashings
+            const pole = (x) => {
+                ctx.fillStyle = '#8a5a2a'; ctx.fillRect(x, top, 1, bottom - top);
+                ctx.fillStyle = '#b07a42'; ctx.fillRect(x - 1, top, 1, bottom - top);
+            };
+            pole(left + 1); pole(right);
+            if (sprite.width > 70) pole(ox + Math.round(sprite.width / 2));
+            for (let y = bottom - 10; y > top; y -= 10) {
+                ctx.fillStyle = '#6b4226'; ctx.fillRect(left, y, right - left + 1, 1);
+                ctx.fillStyle = '#c8b090'; ctx.fillRect(left, y - 1, 2, 3); ctx.fillRect(right - 1, y - 1, 2, 3);
+            }
             // Planks on the current working level
             ctx.fillStyle = '#c49a5c';
-            ctx.fillRect(left - 2, top, right - left + 6, 2);
+            ctx.fillRect(left - 2, top, right - left + 6, 1);
+            ctx.fillStyle = '#8a6a3a';
+            ctx.fillRect(left - 2, top + 1, right - left + 6, 1);
         }
 
         // Builder hammering next to the site
         const swing = Math.floor(nowT / 110) % 2;
         const bx = fx - 6, by = fy + fh;
-        const villager = Sprites.drawVillager(swing, (b.id + 2) % 6, false);
+        const villager = Sprites.drawVillager(swing, (b.id + 2) % 6, false, 'hammer');
         ctx.fillStyle = 'rgba(0,0,0,0.25)';
         ctx.fillRect(Math.round(bx - 5), Math.round(by - 1), 10, 2);
-        ctx.drawImage(villager, Math.round(bx - villager.width / 2), Math.round(by - villager.height));
-        ctx.fillStyle = '#6b4226';
-        ctx.fillRect(Math.round(bx + 5), Math.round(by - 15 + swing * 3), 2, 6);
-        ctx.fillStyle = '#b8b8c0';
-        ctx.fillRect(Math.round(bx + 4), Math.round(by - 17 + swing * 3), 5, 3);
+        ctx.drawImage(villager, Math.round(bx - villager.width / 2), Math.round(by - villager.height + swing));
 
         // Thin progress bar above the site
         const bw = Math.min(fw - 8, 48);

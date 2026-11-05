@@ -25,6 +25,7 @@
         onGameOver: () => UI.showGameOver(),
         onMilestone: (m) => UI.showMilestone(m),
         onSeasonChange: (season) => UI.showSeason(season),
+        onClockStart: () => setTimeout(() => UI.showNotification(t('g.tiplumber'), 'info'), 1200),
         onProduce: (b, res, amount) => {
             if (amount <= 0) return;
             const shown = Math.round(amount * 10) / 10;

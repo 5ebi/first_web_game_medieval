@@ -110,6 +110,8 @@ const UI = (() => {
 
     function updateInsets() {
         const top = els.resourceBar.offsetHeight || 48;
+        // the top bar wraps into two rows on phones: toasts and panels must start below it
+        document.documentElement.style.setProperty('--bar-bottom', top + 'px');
         if (isCompact()) {
             Renderer.setInsets({ top, right: 0, bottom: els.buildingMenu.offsetHeight || 120, left: 0 });
         } else {
@@ -204,8 +206,7 @@ const UI = (() => {
         if (def.provides.storage) parts.push(t('menu.storage', { n: def.provides.storage }));
         if (def.provides.productionBonus) parts.push(t('menu.bonus', { n: Math.round(def.provides.productionBonus * 100) }));
         if (def.production) {
-            parts.push(t('menu.prod', { n: def.production.amount, res: resName(def.production.resource) }));
-            if (def.production.growthDays) parts.push(t('menu.after', { n: def.production.growthDays }));
+            parts.push(t('menu.prod', { n: fmtNum(def.production.amount * 60 / def.production.cycle), res: resName(def.production.resource) }));
         }
         return parts.join(' · ');
     }
@@ -217,10 +218,15 @@ const UI = (() => {
         let html = `<div class="tt-title">${bName(def)}</div><div class="tt-desc">${bDesc(def)}</div>`;
         html += `<div class="tt-row"><span>${t('tt.size')}</span><span>${t('tt.tiles', { w: def.width, h: def.height })}</span></div>`;
         html += `<div class="tt-row"><span>${t('tt.cost')}</span><span>${costHtml(def)}</span></div>`;
-        if (def.workers) html += `<div class="tt-row"><span>${t('tt.workers')}</span><span>${t('tt.eats', { n: def.workers })}</span></div>`;
+        if (def.workers) html += `<div class="tt-row"><span>${t('tt.workers')}</span><span>${t('tt.eats', { n: def.workers, f: fmtNum(FOOD_PER_WORKER_PER_MIN) })}</span></div>`;
+        if (def.production) {
+            const p = def.production;
+            html += `<div class="tt-row"><span>${t('info.production')}</span><span>${t('tt.batch', { a: p.amount, res: resName(p.resource), s: p.cycle })}</span></div>`;
+        }
+        if (def.onStone) html += `<div class="tt-row"><span>${t('tt.needs')}</span><span>${t('tt.onstone')}</span></div>`;
         if (def.production?.resource === 'food') {
             const wm = SEASONS.find(s => s.id === 'winter').food[def.key];
-            if (wm !== undefined && wm !== 1) html += `<div class="tt-row"><span>${t('tt.winter')}</span><span>${wm === 0 ? t('season.rest') : '×' + fmtMult(wm)}</span></div>`;
+            if (wm !== undefined && wm !== 1) html += `<div class="tt-row"><span>${t('tt.winter')}</span><span>${wm === 0 ? t('season.rest') : '×' + fmtNum(wm)}</span></div>`;
         }
         if (def.production?.requires) html += `<div class="tt-row"><span>${t('tt.needs')}</span><span>${def.production.requires === 'FOREST' ? t('tt.forest') : t('tt.stone')}</span></div>`;
         if (reason) html += `<div class="tt-reason">${reason}</div>`;
@@ -580,7 +586,13 @@ const UI = (() => {
                         justPlaced = result;
                         pendingTouch = null;
                         const def = BUILDINGS[selectedBuilding];
-                        if ((def.limit !== null && BuildingManager.countByType(selectedBuilding) >= def.limit) ||
+                        if (result.type === 'castle' && !Game.hasWarehouse()) {
+                            // Guided start: the warehouse comes next and starts the clock
+                            selectBuilding('warehouse');
+                            showNotification(t('g.aftercastle'), 'info');
+                        } else if (result.type === 'warehouse' && BuildingManager.countByType('warehouse') === 1) {
+                            deselectBuilding(true);
+                        } else if ((def.limit !== null && BuildingManager.countByType(selectedBuilding) >= def.limit) ||
                             !Game.isBuildingAvailable(selectedBuilding)) {
                             deselectBuilding(true);
                         }
@@ -719,7 +731,9 @@ const UI = (() => {
     function updateSeason(gs) {
         if (!els.seasonRes) return;
         const s = Game.getSeason();
-        const key = `${s.id}|${s.daysLeft}|${s.toWinter}|${s.year}|${Lang.get()}`;
+        const toWinterMin = Math.ceil(s.secondsToWinter / 60);
+        const leftMin = Math.ceil(s.secondsLeft / 60);
+        const key = `${s.id}|${leftMin}|${toWinterMin}|${s.year}|${Lang.get()}`;
         if (key === lastSeasonKey) return;
         if (!lastSeasonKey.startsWith(s.id + '|')) {
             els.iconSeason.innerHTML = '';
@@ -728,9 +742,9 @@ const UI = (() => {
         lastSeasonKey = key;
         els.resSeason.textContent = t('season.' + s.id);
         els.seasonRes.title = s.id === 'winter'
-            ? t('season.tip.winter', { year: s.year, left: s.daysLeft })
-            : t('season.tip', { name: t('season.' + s.id), year: s.year, left: s.daysLeft, winter: s.toWinter });
-        els.seasonRes.classList.toggle('winter-soon', s.id !== 'winter' && s.toWinter <= WINTER_WARNING_DAYS);
+            ? t('season.tip.winter', { year: s.year, left: leftMin })
+            : t('season.tip', { name: t('season.' + s.id), year: s.year, left: leftMin, winter: toWinterMin });
+        els.seasonRes.classList.toggle('winter-soon', Game.isClockRunning() && s.id !== 'winter' && s.secondsToWinter <= WINTER_WARNING_SECONDS);
     }
 
     function updateSky(gs) {
@@ -782,21 +796,20 @@ const UI = (() => {
             const prod = building.def.production;
             const out = Game.getBuildingOutput(building);
             const resting = prod.resource === 'food' && Game.getSeasonMultiplier(building.type) === 0;
-            const status = building.grown
-                ? (!building.active ? `<span class="bad">${t('info.noworkers')}</span>`
-                    : resting ? `<span class="bad">${t('season.rest')}</span>`
-                    : `<span class="ok">${t('info.active')}</span>`)
-                : t('info.growing', { a: building.growthProgress, b: prod.growthDays });
-            // Show what the building really yields today (bonuses and season included)
-            const shown = Math.round(out * 10) / 10;
-            const cls = out > prod.amount ? 'ok' : out < prod.amount ? 'bad' : '';
-            html += `<div class="stat"><span class="stat-label">${t('info.production')}</span><span class="${cls}">${t('menu.prod', { n: shown.toLocaleString(Lang.get() === 'de' ? 'de-DE' : 'en-US'), res: resName(prod.resource) })}</span></div>`;
+            const status = !building.active ? `<span class="bad">${t('info.noworkers')}</span>`
+                : resting ? `<span class="bad">${t('season.rest')}</span>`
+                : `<span class="ok">${t('info.active')}</span>`;
+            // Show what the building really yields right now (bonuses and season included)
+            const base = prod.amount * 60 / prod.cycle;
+            const cls = out > base + 0.01 ? 'ok' : out < base - 0.01 ? 'bad' : '';
+            html += `<div class="stat"><span class="stat-label">${t('info.production')}</span><span class="${cls}">${t('menu.prod', { n: fmtNum(out), res: resName(prod.resource) })}</span></div>`;
+            html += `<div class="stat"><span class="stat-label">${t('info.delivery')}</span><span>${t('tt.batch', { a: prod.amount, res: resName(prod.resource), s: prod.cycle })}</span></div>`;
             html += `<div class="stat"><span class="stat-label">${t('info.status')}</span><span>${status}</span></div>`;
             if (prod.resource === 'food') {
                 const season = Game.getSeason();
                 const m = Game.getSeasonMultiplier(building.type, season);
                 const cls = m > 1 ? 'ok' : m < 1 ? 'bad' : '';
-                html += `<div class="stat"><span class="stat-label">${t('info.season')}</span><span class="${cls}">${t('season.' + season.id)} ${m === 0 ? '· ' + t('season.rest') : '×' + fmtMult(m)}</span></div>`;
+                html += `<div class="stat"><span class="stat-label">${t('info.season')}</span><span class="${cls}">${t('season.' + season.id)} ${m === 0 ? '· ' + t('season.rest') : '×' + fmtNum(m)}</span></div>`;
             }
         }
         if (building.def.provides.populationCap) {
@@ -855,8 +868,8 @@ const UI = (() => {
             const v = Math.floor(val);
             let s = `${v}`;
             const r = Math.round(rate * 10) / 10;
-            if (r > 0) s += ` <span class="rate up">+${r}</span>`;
-            else if (r < 0) s += ` <span class="rate down">${r}</span>`;
+            if (r > 0) s += ` <span class="rate up">+${fmtNum(r)}/min</span>`;
+            else if (r < 0) s += ` <span class="rate down">${fmtNum(r)}/min</span>`;
             return s;
         }
 
@@ -865,7 +878,7 @@ const UI = (() => {
         els.resIron.innerHTML = fmt(gs.resources.iron, rates.iron);
         els.resFood.innerHTML = fmt(gs.resources.food, foodNet);
         els.resPop.textContent = `${gs.populationUsed} / ${gs.populationCap}`;
-        els.resDay.textContent = t('res.day', { n: gs.day });
+        els.resDay.textContent = Game.isClockRunning() ? t('res.daytime', { n: gs.day, time: clockText() }) : t('res.notime');
         if (els.storageLabel) els.storageLabel.textContent = `${gs.maxStorage}`;
 
         ['wood', 'stone', 'iron', 'food'].forEach(r => {
@@ -873,7 +886,7 @@ const UI = (() => {
             el.parentElement.classList.toggle('full', gs.resources[r] >= gs.maxStorage - 0.01);
             el.parentElement.title = t('res.storage.value', { name: t('res.' + r[0].toUpperCase() + r.slice(1)), v: Math.floor(gs.resources[r]), max: gs.maxStorage });
         });
-        els.resFood.parentElement.classList.toggle('danger', gs.starvationDays > 0 || (foodNet < 0 && gs.resources.food < -foodNet * 3));
+        els.resFood.parentElement.classList.toggle('danger', gs.starving > 0 || (foodNet < 0 && gs.resources.food < -foodNet * 2));
         els.resPop.parentElement.title = t('res.pop.title', { used: gs.populationUsed, cap: gs.populationCap, free: Game.getFreeWorkers() });
 
         const next = Game.getNextMilestone();
@@ -884,7 +897,9 @@ const UI = (() => {
 
         updateBuildingButtons();
         syncSpeedButtons();
+        if (els.resourceBar.offsetHeight !== lastBarHeight) { lastBarHeight = els.resourceBar.offsetHeight; updateInsets(); }
     }
+    let lastBarHeight = 0;
 
     // ---------- notifications ----------
     const notifSounds = { warning: 'warning', danger: 'warning', success: null, grown: 'grown', info: null };
@@ -906,8 +921,14 @@ const UI = (() => {
         if (snd) AudioSys.play(snd);
     }
 
-    function fmtMult(m) {
-        return m.toLocaleString(Lang.get() === 'de' ? 'de-DE' : 'en-US', { maximumFractionDigits: 2 });
+    function fmtNum(m) {
+        return Number(m).toLocaleString(Lang.get() === 'de' ? 'de-DE' : 'en-US', { maximumFractionDigits: 1 });
+    }
+
+    function clockText() {
+        const h = Game.getHour();
+        const hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 10) * 10;
+        return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     }
 
     // Big banner when a new season starts
@@ -934,6 +955,8 @@ const UI = (() => {
         div.className = 'notification milestone';
         div.innerHTML = `<span class="m-label">${t('g.milestone')}</span> ${t('ms.' + m.id)}`;
         els.notifications.appendChild(div);
+        const maxNotes = isCompact() ? 2 : 4;
+        while (els.notifications.children.length > maxNotes) els.notifications.firstChild.remove();
         div.style.animationDelay = `0s, 4.5s`;
         setTimeout(() => div.remove(), 5000);
         AudioSys.play('milestone');

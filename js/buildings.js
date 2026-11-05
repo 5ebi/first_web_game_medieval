@@ -78,6 +78,7 @@ const BuildingManager = (() => {
             grown: b.grown,
             growthProgress: b.growthProgress,
             paid: b.paid,
+            progress: b.progress || 0,
         }));
     }
 
@@ -95,6 +96,7 @@ const BuildingManager = (() => {
             b.growthProgress = s.growthProgress ?? 0;
             b.buildStart = 0; // loaded buildings are already finished
             if (s.paid) b.paid = s.paid;
+            b.progress = s.progress || 0;
             nextId = Math.max(nextId, b.id + 1);
         });
     }

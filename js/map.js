@@ -87,7 +87,8 @@ const GameMap = (() => {
                 } else if (e > 0.4 && e < 0.6 && m > 0.3 && m < 0.5 && rng() > 0.85) {
                     terrain[y][x] = TERRAIN.FLOWERS;
                 } else {
-                    terrain[y][x] = rng() > 0.5 ? TERRAIN.GRASS : TERRAIN.GRASS_DARK;
+                    // light and dark grass in natural patches instead of a per-tile checkerboard
+                    terrain[y][x] = detail[y][x] + (rng() - 0.5) * 0.12 > 0.52 ? TERRAIN.GRASS_DARK : TERRAIN.GRASS;
                 }
             }
         }
@@ -157,14 +158,15 @@ const GameMap = (() => {
 
     // Clear trees, stone piles and flowers under a building footprint.
     // Returns true when terrain tiles changed (terrain cache must be rebuilt).
-    function clearArea(tileX, tileY, w, h) {
+    function clearArea(tileX, tileY, w, h, opts = {}) {
         let changed = false;
         for (let dy = 0; dy < h; dy++) {
             for (let dx = 0; dx < w; dx++) {
                 const tx = tileX + dx, ty = tileY + dy;
                 if (tx < 0 || ty < 0 || tx >= MAP_WIDTH || ty >= MAP_HEIGHT) continue;
                 const t = terrain[ty][tx];
-                if (t === TERRAIN.FOREST || t === TERRAIN.STONE_DEPOSIT || t === TERRAIN.FLOWERS) {
+                // a quarry keeps the stone field it stands on
+                if (t === TERRAIN.FOREST || (t === TERRAIN.STONE_DEPOSIT && !opts.keepStone) || t === TERRAIN.FLOWERS) {
                     terrain[ty][tx] = TERRAIN.GRASS;
                     changed = true;
                 }

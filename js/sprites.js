@@ -31,93 +31,104 @@ const Sprites = (() => {
     }
 
     // ============================================
-    // TERRAIN TILES (32x32, several variants per type)
+    // TERRAIN TILES (32x32, 1px detail, several variants per type)
     // ============================================
     const TILE_VARIANTS = 4;
 
     function drawTile(type, variant) {
         const key = `tile_${type}_${variant}`;
         if (cache[key]) return cache[key];
-        const c = createCanvas(TILE_SIZE, TILE_SIZE);
+        const T = TILE_SIZE;
+        const c = createCanvas(T, T);
         const ctx = c.getContext('2d');
         const rng = mulberry32(type * 1000 + variant * 7 + 13);
-
-        const speck = (n, colors, size = 2) => {
+        const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+        const fill = (col) => { ctx.fillStyle = col; ctx.fillRect(0, 0, T, T); };
+        const patches = (n, colors, size) => {
             for (let i = 0; i < n; i++) {
-                const x = Math.floor(rng() * (TILE_SIZE - size));
-                const y = Math.floor(rng() * (TILE_SIZE - size));
-                ctx.fillStyle = colors[Math.floor(rng() * colors.length)];
-                ctx.fillRect(x, y, size, size);
+                ctx.fillStyle = pick(colors);
+                ctx.fillRect(Math.floor(rng() * T), Math.floor(rng() * T), 1 + Math.floor(rng() * size), 1 + Math.floor(rng() * size * 0.6));
             }
         };
-        const blades = (n, colors) => {
+        const dots = (n, colors) => {
             for (let i = 0; i < n; i++) {
-                const x = Math.floor(rng() * (TILE_SIZE - 2));
-                const y = Math.floor(rng() * (TILE_SIZE - 4));
-                ctx.fillStyle = colors[Math.floor(rng() * colors.length)];
-                ctx.fillRect(x, y, 1, 3);
-                ctx.fillRect(x + 1, y + 1, 1, 2);
+                ctx.fillStyle = pick(colors);
+                ctx.fillRect(Math.floor(rng() * T), Math.floor(rng() * T), 1, 1);
             }
+        };
+        // little grass blades: dark root pixel, light tip, sometimes a bent second tip
+        const blades = (n, light, dark) => {
+            for (let i = 0; i < n; i++) {
+                const x = Math.floor(rng() * T), y = 2 + Math.floor(rng() * (T - 2));
+                ctx.fillStyle = dark; ctx.fillRect(x, y, 1, 1);
+                ctx.fillStyle = light; ctx.fillRect(x, y - 1, 1, 1);
+                if (rng() < 0.5) ctx.fillRect(x + (rng() < 0.5 ? -1 : 1), y - 2, 1, 1);
+            }
+        };
+        const pebble = (x, y, w, h, base, top, bottom) => {
+            ctx.fillStyle = base; ctx.fillRect(x, y, w, h);
+            ctx.fillStyle = top; ctx.fillRect(x, y, w, 1); ctx.fillRect(x, y, 1, h);
+            ctx.fillStyle = bottom; ctx.fillRect(x, y + h - 1, w, 1); ctx.fillRect(x + w - 1, y, 1, h);
         };
 
         switch (type) {
             case TERRAIN.GRASS:
             case TERRAIN.FLOWERS:
-                ctx.fillStyle = '#5a8f3c';
-                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-                speck(10, ['#62973f', '#54873a', '#5e9440'], 3);
-                blades(7, ['#6aa548', '#4c7f32']);
+                fill('#5a8f3c');
+                patches(7, ['#62973f', '#54873a', '#5e9440'], 5);
+                dots(70, ['#6aa548', '#4f8636', '#66a044', '#548a38']);
+                blades(16, '#78b452', '#4a7f30');
                 break;
             case TERRAIN.GRASS_DARK:
-                ctx.fillStyle = '#4e8330';
-                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-                speck(10, ['#558a36', '#487a2c', '#4a7f2c'], 3);
-                blades(7, ['#5e9a3e', '#3f7026']);
+                fill('#4e8330');
+                patches(7, ['#558a36', '#487a2c', '#4a7f2c'], 5);
+                dots(70, ['#5e9a3e', '#43722a', '#58923a', '#4b7e2e']);
+                blades(16, '#6aa648', '#3f7026');
                 break;
             case TERRAIN.FOREST:
-                ctx.fillStyle = '#3f7127';
-                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-                speck(12, ['#467a2c', '#386522', '#3a6a24'], 3);
-                blades(6, ['#4f8a34', '#2f5a1c']);
+                fill('#3f7127');
+                patches(8, ['#467a2c', '#386522', '#3a6a24'], 5);
+                dots(60, ['#4f8a34', '#2f5a1c', '#35641f', '#44782a']);
+                dots(10, ['#6b5a32', '#5a4a2a', '#7a6438']);   // fallen needles and twigs
+                blades(9, '#58933c', '#2f5a1c');
                 break;
             case TERRAIN.WATER:
-                ctx.fillStyle = '#3a7ecf';
-                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-                speck(6, ['#3576c4', '#3f86d6'], 4);
+                fill('#3a7ecf');
+                patches(6, ['#3576c4', '#3f86d6'], 7);
+                dots(28, ['#4a8edc', '#3270bc', '#4388d8']);
+                for (let i = 0; i < 3; i++) {
+                    const x = Math.floor(rng() * (T - 6)), y = 2 + Math.floor(rng() * (T - 4)), w = 3 + Math.floor(rng() * 3);
+                    ctx.fillStyle = '#5c9ce2'; ctx.fillRect(x, y, w, 1);
+                    ctx.fillStyle = '#2f6cb4'; ctx.fillRect(x + 1, y + 1, w - 1, 1);
+                }
                 break;
             case TERRAIN.SAND:
-                ctx.fillStyle = '#d8bd7c';
-                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-                speck(10, ['#cfb270', '#e0c68a', '#c9ad6c'], 2);
+                fill('#d8bd7c');
+                patches(5, ['#d2b574', '#dec584'], 6);
+                dots(100, ['#cfb270', '#e0c68a', '#c9ad6c', '#e8d29e']);
+                for (let i = 0; i < 3; i++) pebble(Math.floor(rng() * 29), Math.floor(rng() * 30), 2, 1, '#b89e64', '#c8ae74', '#a08a58');
                 break;
             case TERRAIN.DIRT:
-                ctx.fillStyle = '#8a7050';
-                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-                speck(10, ['#7f6648', '#947a58'], 2);
+                fill('#8a7050');
+                patches(6, ['#82684a', '#927858'], 5);
+                dots(90, ['#7f6648', '#947a58', '#6f5a40', '#9c8262']);
+                for (let i = 0; i < 4; i++) pebble(Math.floor(rng() * 28), Math.floor(rng() * 29), 2 + Math.floor(rng() * 2), 2, '#9a8a72', '#b0a088', '#6a5a44');
                 break;
             case TERRAIN.STONE_DEPOSIT:
-                // rocky ground: muted green-grey earth with embedded pebbles
-                ctx.fillStyle = '#6f7a62';
-                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
-                speck(8, ['#66705a', '#78836a', '#5f6a54'], 3);
-                for (let i = 0; i < 4; i++) {
-                    const x = Math.floor(rng() * 26);
-                    const y = Math.floor(rng() * 26);
-                    const w = 3 + Math.floor(rng() * 4);
-                    const h = 2 + Math.floor(rng() * 3);
-                    ctx.fillStyle = '#8f8f85';
-                    ctx.fillRect(x, y, w, h);
-                    ctx.fillStyle = '#a8a8a0';
-                    ctx.fillRect(x, y, w, 1);
-                    ctx.fillStyle = '#5a5a52';
-                    ctx.fillRect(x, y + h - 1, w, 1);
+                fill('#6f7a62');
+                patches(7, ['#66705a', '#78836a', '#5f6a54'], 5);
+                dots(60, ['#7c8770', '#5a6450', '#838e76']);
+                for (let i = 0; i < 6; i++) {
+                    const w = 3 + Math.floor(rng() * 4), h = 2 + Math.floor(rng() * 3);
+                    const x = Math.floor(rng() * (T - w)), y = Math.floor(rng() * (T - h - 1));
+                    ctx.fillStyle = '#545c4c'; ctx.fillRect(x + 1, y + h, w, 1);      // little shadow
+                    pebble(x, y, w, h, '#8f8f85', '#b6b6ae', '#5a5a52');
+                    if (w > 4) { ctx.fillStyle = '#76766e'; ctx.fillRect(x + 2, y + 1, 1, h - 2); } // crack
                 }
                 break;
             default:
-                ctx.fillStyle = '#5a8f3c';
-                ctx.fillRect(0, 0, TILE_SIZE, TILE_SIZE);
+                fill('#5a8f3c');
         }
-
         cache[key] = c;
         return c;
     }
@@ -126,16 +137,28 @@ const Sprites = (() => {
     function drawShore(dir) {
         const key = `shore_${dir}`;
         if (cache[key]) return cache[key];
-        const c = createCanvas(TILE_SIZE, TILE_SIZE);
+        const T = TILE_SIZE;
+        const c = createCanvas(T, T);
         const ctx = c.getContext('2d');
-        ctx.fillStyle = 'rgba(220, 240, 255, 0.55)';
-        const rng = mulberry32(dir.charCodeAt(0));
-        for (let i = 0; i < TILE_SIZE; i += 2) {
-            const len = rng() > 0.6 ? 3 : 2;
-            if (dir === 'n') ctx.fillRect(i, 0, 2, len);
-            if (dir === 's') ctx.fillRect(i, TILE_SIZE - len, 2, len);
-            if (dir === 'w') ctx.fillRect(0, i, len, 2);
-            if (dir === 'e') ctx.fillRect(TILE_SIZE - len, i, len, 2);
+        const rng = mulberry32(dir.charCodeAt(0) * 31);
+        for (let i = 0; i < T; i++) {
+            const len = 1 + Math.floor(rng() * 3);
+            for (let k = 0; k < len; k++) {
+                ctx.fillStyle = k === 0 ? 'rgba(255,255,255,0.75)' : 'rgba(220,240,255,0.45)';
+                if (dir === 'n') ctx.fillRect(i, k, 1, 1);
+                if (dir === 's') ctx.fillRect(i, T - 1 - k, 1, 1);
+                if (dir === 'w') ctx.fillRect(k, i, 1, 1);
+                if (dir === 'e') ctx.fillRect(T - 1 - k, i, 1, 1);
+            }
+            // a few loose foam bubbles further out
+            if (rng() < 0.15) {
+                ctx.fillStyle = 'rgba(230,245,255,0.5)';
+                const d = 4 + Math.floor(rng() * 3);
+                if (dir === 'n') ctx.fillRect(i, d, 1, 1);
+                if (dir === 's') ctx.fillRect(i, T - 1 - d, 1, 1);
+                if (dir === 'w') ctx.fillRect(d, i, 1, 1);
+                if (dir === 'e') ctx.fillRect(T - 1 - d, i, 1, 1);
+            }
         }
         cache[key] = c;
         return c;
@@ -147,174 +170,346 @@ const Sprites = (() => {
         if (cache[key]) return cache[key];
         const c = createCanvas(16, 4);
         const ctx = c.getContext('2d');
-        ctx.fillStyle = 'rgba(255,255,255,0.35)';
-        if (frame === 0) { ctx.fillRect(2, 1, 6, 2); ctx.fillRect(9, 2, 4, 1); }
-        else if (frame === 1) { ctx.fillRect(1, 2, 5, 2); ctx.fillRect(8, 1, 6, 1); }
-        else { ctx.fillRect(3, 0, 4, 1); ctx.fillRect(6, 2, 7, 2); }
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        const shapes = [
+            [[2, 2], [3, 1], [4, 1], [5, 1], [6, 2], [10, 2], [11, 1], [12, 2]],
+            [[1, 2], [2, 2], [3, 1], [4, 1], [5, 2], [9, 1], [10, 1], [11, 2], [12, 2]],
+            [[3, 1], [4, 0], [5, 0], [6, 1], [8, 2], [9, 2], [10, 1], [11, 1], [12, 2]],
+        ];
+        shapes[frame % 3].forEach(([x, y]) => ctx.fillRect(x, y, 1, 1));
+        ctx.fillStyle = 'rgba(40,90,170,0.35)';
+        shapes[frame % 3].forEach(([x, y]) => ctx.fillRect(x, y + 1, 1, 1));
         cache[key] = c;
         return c;
     }
 
     // ============================================
-    // TREES / NATURE
+    // TREES (1px detail, 3 variants each)
     // ============================================
-    function drawTree(scale = 2) {
-        const key = `tree_${scale}`;
-        if (cache[key]) return cache[key];
-        const c = createCanvas(16 * scale, 24 * scale);
-        const ctx = c.getContext('2d');
+    const LEAF_GREEN = ['#163f0e', '#1f5616', '#2a6c20', '#38822a', '#4f9c38', '#6cb84a'];
 
-        // Trunk
-        for (let y = 14; y < 24; y++) {
-            for (let x = 6; x < 10; x++) {
-                px(ctx, x, y, y % 3 === 0 ? '#5a3418' : '#6b4226', scale);
+    // Fills a union of circles with lit-from-top-left shading and a leafy texture
+    function shadeBlob(ctx, circles, palette, outline, seed) {
+        const w = ctx.canvas.width, h = ctx.canvas.height;
+        const inside = (x, y) => circles.some(([cx, cy, r]) => (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 < r * r);
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                if (!inside(x, y)) continue;
+                let best = circles[0], bd = 1e9;
+                for (const cc of circles) {
+                    const d = ((x + 0.5 - cc[0]) ** 2 + (y + 0.5 - cc[1]) ** 2) / (cc[2] * cc[2]);
+                    if (d < bd) { bd = d; best = cc; }
+                }
+                const nx = (x + 0.5 - best[0]) / best[2], ny = (y + 0.5 - best[1]) / best[2];
+                let light = -(nx * 0.55 + ny * 0.8) * 0.9 + (hash2(x, y, seed) - 0.5) * 0.7;
+                let idx = Math.round((light + 1) / 2 * (palette.length - 1));
+                idx = Math.max(0, Math.min(palette.length - 1, idx));
+                const edge = !inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1);
+                ctx.fillStyle = (edge && outline && (nx > -0.3 || ny > 0.2)) ? outline : palette[idx];
+                ctx.fillRect(x, y, 1, 1);
             }
         }
-        // Leaves - round top
-        const leafColors = ['#2d6b1e', '#3a8528', '#247a16', '#1d5b0e', '#35782a'];
-        for (let y = 2; y < 15; y++) {
-            for (let x = 2; x < 14; x++) {
-                const dx = x - 8, dy = y - 8;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist < 6.5) {
-                    const ci = (x * 3 + y * 7) % leafColors.length;
-                    // darker on the lower-right for a lit-from-top-left look
-                    const shade = (dx + dy > 5) ? '#1d5b0e' : leafColors[ci];
-                    px(ctx, x, y, shade, scale);
+    }
+
+    function drawTrunk(ctx, x0, y0, w, y1, seed) {
+        for (let y = y0; y <= y1; y++) {
+            for (let x = x0; x < x0 + w; x++) {
+                const col = x === x0 ? '#86562e' : x === x0 + w - 1 ? '#4e2e16' : (hash2(x, y, seed) < 0.18 ? '#5a3418' : '#6b4226');
+                ctx.fillStyle = col;
+                ctx.fillRect(x, y, 1, 1);
+            }
+        }
+        // root flare
+        ctx.fillStyle = '#5a3418';
+        ctx.fillRect(x0 - 2, y1, 2, 1); ctx.fillRect(x0 + w, y1, 2, 1);
+        ctx.fillRect(x0 - 1, y1 - 1, 1, 1); ctx.fillRect(x0 + w, y1 - 1, 1, 1);
+    }
+
+    function drawOakLeafy(variant) {
+        const c = createCanvas(32, 48);
+        const ctx = c.getContext('2d');
+        const r = mulberry32(variant * 97 + 5);
+        drawTrunk(ctx, 14, 26, 5, 47, variant);
+        // a couple of visible boughs
+        ctx.fillStyle = '#5a3418';
+        ctx.fillRect(12, 27, 2, 1); ctx.fillRect(19, 26, 2, 1);
+        const j = () => (r() - 0.5) * 3;
+        const circles = [
+            [16 + j(), 15 + j(), 10], [9 + j(), 19 + j(), 7], [23 + j(), 19 + j(), 7],
+            [12 + j(), 10 + j(), 7], [21 + j(), 10 + j(), 7], [16 + j(), 23, 6.5],
+        ];
+        shadeBlob(ctx, circles, LEAF_GREEN, '#123a0c', variant * 13 + 1);
+        // a few bright leaf glints on the sunny side
+        for (let i = 0; i < 7; i++) {
+            const x = 7 + Math.floor(r() * 12), y = 5 + Math.floor(r() * 12);
+            if (ctx.getImageData(x, y, 1, 1).data[3] > 0) { ctx.fillStyle = '#86cc5c'; ctx.fillRect(x, y, 1, 1); }
+        }
+        return c;
+    }
+
+    // Draws a 1px branch with a given thickness, returns the tip
+    function branchLine(ctx, x0, y0, x1, y1, thick, color, pts) {
+        const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+        for (let i = 0; i <= steps; i++) {
+            const x = Math.round(x0 + (x1 - x0) * i / steps), y = Math.round(y0 + (y1 - y0) * i / steps);
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, thick, 1);
+            if (pts) pts.push([x, y]);
+        }
+    }
+
+    // Leafless oak; returns the canvas plus the branch tips and pixels for decoration
+    function drawBareOakShape(variant) {
+        const c = createCanvas(32, 48);
+        const ctx = c.getContext('2d');
+        const r = mulberry32(variant * 131 + 17);
+        drawTrunk(ctx, 14, 22, 4, 47, variant);
+        const tips = [], pts = [];
+        const grow = (x, y, ang, len, thick, depth) => {
+            const x1 = x + Math.cos(ang) * len, y1 = y + Math.sin(ang) * len;
+            branchLine(ctx, x, y, x1, y1, thick, thick > 1 ? '#5a3418' : '#6e4a2a', pts);
+            if (depth <= 0 || len < 3) { tips.push([Math.round(x1), Math.round(y1)]); return; }
+            const n = 2 + (r() < 0.35 ? 1 : 0);
+            for (let i = 0; i < n; i++) {
+                const a = ang + (i - (n - 1) / 2) * (0.55 + r() * 0.3) + (r() - 0.5) * 0.3;
+                grow(x1, y1, a, len * (0.62 + r() * 0.15), Math.max(1, thick - 1), depth - 1);
+            }
+        };
+        grow(16, 23, -Math.PI / 2 - 0.55 + (r() - 0.5) * 0.2, 8, 2, 3);
+        grow(16, 22, -Math.PI / 2 + (r() - 0.5) * 0.2, 9, 2, 3);
+        grow(17, 23, -Math.PI / 2 + 0.55 + (r() - 0.5) * 0.2, 8, 2, 3);
+        return { c, ctx, tips, pts, r };
+    }
+
+    // Autumn: mostly bare branches, a little foliage left on top, some green and brown leaves
+    function drawAutumnOak(variant) {
+        const { c, ctx, tips, r } = drawBareOakShape(variant);
+        const colors = ['#c8781e', '#d89a2a', '#b8521e', '#8a5a22', '#7a4a1c', '#e0b040', '#4f8a34', '#3a7a28'];
+        tips.forEach(([x, y]) => {
+            if (y > 24 || r() < 0.15) return;           // foliage only on the upper branches
+            const n = 3 + Math.floor(r() * 6);
+            for (let i = 0; i < n; i++) {
+                const lx = x + Math.round((r() - 0.5) * 4), ly = y + Math.round((r() - 0.6) * 3);
+                if (lx < 0 || ly < 0 || lx > 31 || ly > 47) continue;
+                ctx.fillStyle = colors[Math.floor(r() * colors.length)];
+                ctx.fillRect(lx, ly, 1, 1);
+                if (r() < 0.3) ctx.fillRect(lx + 1, ly, 1, 1);
+            }
+        });
+        // a few leaves still clinging lower down
+        for (let i = 0; i < 6; i++) {
+            const t = tips[Math.floor(r() * tips.length)];
+            if (!t) break;
+            ctx.fillStyle = colors[3 + Math.floor(r() * 3)];
+            ctx.fillRect(t[0] + Math.round((r() - 0.5) * 2), t[1] + 2 + Math.floor(r() * 3), 1, 1);
+        }
+        return c;
+    }
+
+    function drawWinterOak(variant) {
+        const { c, ctx, pts, r } = drawBareOakShape(variant);
+        const data = ctx.getImageData(0, 0, 32, 48).data;
+        const solid = (x, y) => x >= 0 && y >= 0 && x < 32 && y < 48 && data[(y * 32 + x) * 4 + 3] > 0;
+        pts.forEach(([x, y]) => {
+            if (y < 40 && !solid(x, y - 1) && r() < 0.65) {
+                ctx.fillStyle = r() < 0.7 ? '#f2f6fb' : '#d6e0ec';
+                ctx.fillRect(x, y - 1, 1, 1);
+            }
+        });
+        return c;
+    }
+
+    function drawPine(variant, snowy) {
+        const c = createCanvas(32, 56);
+        const ctx = c.getContext('2d');
+        const r = mulberry32(variant * 71 + 3);
+        drawTrunk(ctx, 15, 44, 3, 55, variant + 7);
+        const pal = ['#0c3410', '#134416', '#1b561e', '#246a26', '#317e30', '#47963e'];
+        const tiers = 6;
+        const solidMap = new Set();
+        for (let i = 0; i < tiers; i++) {
+            const top = 1 + i * 7, bottom = top + 11;
+            const maxW = 3 + i * 2.1 + (r() - 0.5);
+            for (let y = top; y <= bottom; y++) {
+                const k = (y - top) / (bottom - top);
+                const hw = 0.8 + k * maxW;
+                for (let x = Math.floor(16 - hw); x <= Math.ceil(16 + hw); x++) {
+                    if (Math.abs(x + 0.5 - 16) > hw) continue;
+                    if (y === bottom && hash2(x, y, variant + i) < 0.45) continue; // ragged hem
+                    const side = (x + 0.5 - 16) / hw;
+                    let light = -side * 0.7 - (1 - k) * 0.25 + (hash2(x, y, variant * 5 + 1) - 0.5) * 0.6;
+                    let idx = Math.max(0, Math.min(pal.length - 1, Math.round((light + 1) / 2 * (pal.length - 1))));
+                    if (side > 0.85 || y === bottom) idx = 0;   // dark rim on the shadow side / hem
+                    ctx.fillStyle = pal[idx];
+                    ctx.fillRect(x, y, 1, 1);
+                    solidMap.add(x + ',' + y);
                 }
             }
         }
-        // Highlights
-        px(ctx, 5, 5, '#4a9538', scale);
-        px(ctx, 6, 4, '#4a9538', scale);
-        px(ctx, 4, 6, '#4a9538', scale);
+        if (snowy) {
+            for (const key of solidMap) {
+                const [x, y] = key.split(',').map(Number);
+                const open = !solidMap.has(x + ',' + (y - 1));
+                if (open && hash2(x, y, variant + 99) < 0.85) {
+                    ctx.fillStyle = '#f2f6fb'; ctx.fillRect(x, y, 1, 1);
+                    if (solidMap.has(x + ',' + (y + 1)) && hash2(x, y, 7) < 0.6) { ctx.fillStyle = '#d6e0ec'; ctx.fillRect(x, y + 1, 1, 1); }
+                } else if (x < 16 && hash2(x, y, variant + 5) < 0.06) {
+                    ctx.fillStyle = '#e8eef5'; ctx.fillRect(x, y, 1, 1);
+                }
+            }
+        }
+        return c;
+    }
 
+    // Tree sprite for a kind ('oak' | 'pine'), season and variant (0-2); custom tree art wins
+    function getTree(kind, season = 'spring', variant = 0) {
+        const baseKey = kind === 'pine' ? 'pine_2' : 'tree_2';
+        if (customArt.has(baseKey)) return cache[baseKey];
+        const s = (season === 'summer') ? 'spring' : (kind === 'pine' && season === 'autumn' ? 'spring' : season);
+        const key = `tree_${kind}_${s}_${variant}`;
+        if (cache[key]) return cache[key];
+        let c;
+        if (kind === 'pine') c = drawPine(variant, s === 'winter');
+        else if (s === 'autumn') c = drawAutumnOak(variant);
+        else if (s === 'winter') c = drawWinterOak(variant);
+        else c = drawOakLeafy(variant);
         cache[key] = c;
         return c;
     }
 
-    function drawPineTree(scale = 2) {
-        const key = `pine_${scale}`;
-        if (cache[key]) return cache[key];
-        const c = createCanvas(16 * scale, 28 * scale);
-        const ctx = c.getContext('2d');
+    function drawTree() { return getTree('oak', 'spring', 0); }
+    function drawPineTree() { return getTree('pine', 'spring', 0); }
 
-        for (let y = 20; y < 28; y++) {
-            for (let x = 7; x < 9; x++) {
-                px(ctx, x, y, y % 2 === 0 ? '#5a3418' : '#6b4226', scale);
-            }
-        }
-        const layers = [
-            { y: 2, w: 2 }, { y: 5, w: 4 }, { y: 8, w: 5 }, { y: 11, w: 6 },
-            { y: 14, w: 7 }, { y: 17, w: 7 }, { y: 20, w: 5 },
-        ];
-        const pineColors = ['#1d5b0e', '#2a6b18', '#1a5010', '#256b15'];
-        layers.forEach(l => {
-            for (let dy = 0; dy < 3; dy++) {
-                const w = l.w - dy;
-                for (let dx = -w; dx <= w; dx++) {
-                    const ci = (Math.abs(dx) + dy + l.y) % pineColors.length;
-                    const col = dx > w - 2 ? '#174a0c' : pineColors[ci];
-                    px(ctx, 8 + dx, l.y + dy, col, scale);
+    // ---- Stone piles (1px boulders) ----
+    function drawStonePileVariant(variant) {
+        const c = createCanvas(32, 24);
+        const ctx = c.getContext('2d');
+        const r = mulberry32(variant * 53 + 11);
+        const pal = ['#4a4a46', '#62625c', '#7c7c76', '#96968e', '#b2b2aa', '#cacac2'];
+        const rocks = [
+            [10, 16, 6.5, 5], [20, 15, 7, 6], [14, 10, 5, 4], [26, 19, 4, 3], [5, 20, 3.5, 2.5],
+        ].map(([x, y, rx, ry]) => [x + (r() - 0.5) * 2, y + (r() - 0.5) * 1.5, rx * (0.85 + r() * 0.3), ry]);
+        // shadow on the ground first
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        ctx.fillRect(4, 21, 26, 2);
+        rocks.sort((a, b) => a[1] - b[1]).forEach(([cx, cy, rx, ry], i) => {
+            for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) {
+                for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+                    const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
+                    const d = nx * nx + ny * ny;
+                    if (d > 1) continue;
+                    let light = -(nx * 0.5 + ny * 0.85) + (hash2(x, y, variant * 3 + i) - 0.5) * 0.35;
+                    let idx = Math.max(0, Math.min(pal.length - 1, Math.round((light + 1) / 2 * (pal.length - 1))));
+                    if (d > 0.78 && (nx > 0 || ny > 0)) idx = 0;      // outline on the shadow side
+                    ctx.fillStyle = pal[idx];
+                    ctx.fillRect(x, y, 1, 1);
                 }
             }
         });
-
-        cache[key] = c;
         return c;
     }
 
-    function drawStonePile(scale = 2) {
-        const key = `stone_${scale}`;
-        if (cache[key]) return cache[key];
-        const c = createCanvas(16 * scale, 12 * scale);
-        const ctx = c.getContext('2d');
-
-        const stones = [
-            { x: 3, y: 6, w: 5, h: 5, color: '#9a9a9a' },
-            { x: 8, y: 5, w: 6, h: 6, color: '#8a8a8a' },
-            { x: 5, y: 3, w: 4, h: 4, color: '#aaa' },
-            { x: 1, y: 8, w: 3, h: 3, color: '#7a7a7a' },
-            { x: 12, y: 7, w: 3, h: 4, color: '#888' },
-        ];
-        stones.forEach(s => {
-            ctx.fillStyle = s.color;
-            ctx.fillRect(s.x * scale, s.y * scale, s.w * scale, s.h * scale);
-            ctx.fillStyle = '#bbb';
-            ctx.fillRect(s.x * scale, s.y * scale, s.w * scale, 1 * scale);
-            ctx.fillStyle = '#666';
-            ctx.fillRect(s.x * scale, (s.y + s.h - 1) * scale, s.w * scale, 1 * scale);
-        });
-
-        cache[key] = c;
-        return c;
+    function drawStonePile(scale, variant = 0) {
+        if (customArt.has('stone_2')) return cache.stone_2;
+        const key = `stone_v${variant}`;
+        if (!cache[key]) cache[key] = drawStonePileVariant(variant);
+        return cache[key];
     }
 
     function drawFlowers(scale = 2, seed = 0) {
-        const key = `flowers_${scale}_${seed}`;
+        const key = `flowers_${seed}`;
         if (cache[key]) return cache[key];
         const c = createCanvas(TILE_SIZE, TILE_SIZE);
         const ctx = c.getContext('2d');
-
-        const flowerColors = ['#e04848', '#eedd44', '#d64fd6', '#ff8844', '#5a8cff', '#ffffff'];
+        const petals = ['#e04848', '#eedd44', '#d64fd6', '#ff8844', '#5a8cff', '#ffffff', '#ff9ac8'];
         const rng = mulberry32(seed);
-        const n = 4 + Math.floor(rng() * 4);
+        const n = 5 + Math.floor(rng() * 5);
         for (let i = 0; i < n; i++) {
-            const fx = Math.floor(rng() * 28) + 2;
-            const fy = Math.floor(rng() * 26) + 2;
-            const fc = flowerColors[Math.floor(rng() * flowerColors.length)];
-            ctx.fillStyle = '#2d6b1e';
-            ctx.fillRect(fx + 1, fy + 2, 1, 3);
-            ctx.fillStyle = fc;
-            ctx.fillRect(fx, fy, 3, 2);
-            ctx.fillRect(fx + 1, fy - 1, 1, 1);
+            const fx = 2 + Math.floor(rng() * 27), fy = 3 + Math.floor(rng() * 24);
+            const col = petals[Math.floor(rng() * petals.length)];
+            ctx.fillStyle = '#3a7a28';
+            ctx.fillRect(fx, fy + 1, 1, 3);
+            ctx.fillRect(fx + (rng() < 0.5 ? -1 : 1), fy + 3, 1, 1);    // leaf
+            if (rng() < 0.6) {
+                // small cross-shaped blossom with a yellow heart
+                ctx.fillStyle = col;
+                ctx.fillRect(fx - 1, fy, 1, 1); ctx.fillRect(fx + 1, fy, 1, 1);
+                ctx.fillRect(fx, fy - 1, 1, 1); ctx.fillRect(fx, fy + 1, 1, 1);
+                ctx.fillStyle = col === '#eedd44' ? '#ffffff' : '#ffd84a';
+                ctx.fillRect(fx, fy, 1, 1);
+            } else {
+                ctx.fillStyle = col;
+                ctx.fillRect(fx, fy, 1, 1);
+            }
         }
-
         cache[key] = c;
         return c;
     }
 
     // ============================================
-    // VILLAGERS (8x12 px, scale 2, 2 walk frames)
+    // VILLAGERS (16x24, 1px detail, 2 walk frames, tools by trade)
     // ============================================
-    const TUNIC_COLORS = ['#b04040', '#3c6fb0', '#4f8a3c', '#b08a30', '#7a4fa0', '#8a6a4a'];
+    const TUNIC_COLORS = [
+        ['#b04040', '#8a2c2c', '#c85a5a'], ['#3c6fb0', '#2a5288', '#5a8acc'], ['#4f8a3c', '#3a6a2c', '#68a452'],
+        ['#b08a30', '#8a6a22', '#caa448'], ['#7a4fa0', '#5c3a7c', '#9468b8'], ['#8a6a4a', '#6a5038', '#a08060'],
+    ];
+    const HAIR_COLORS = ['#4a2a10', '#2a1a08', '#8a5a2a', '#c8a050', '#3a2418', '#6a3a1a'];
 
-    function drawVillager(frame, palette, flip) {
-        const key = `villager_${frame}_${palette}_${flip ? 1 : 0}`;
+    function drawVillager(frame, palette, flip, tool) {
+        const key = `villager_${frame}_${palette}_${flip ? 1 : 0}_${tool || ''}`;
         if (cache[key]) return cache[key];
-        const s = 2;
-        const c = createCanvas(8 * s, 12 * s);
+        const c = createCanvas(16, 24);
         const ctx = c.getContext('2d');
-        const tunic = TUNIC_COLORS[palette % TUNIC_COLORS.length];
-        const skin = '#e8b890';
-        const hair = palette % 2 === 0 ? '#4a2a10' : '#2a1a08';
-
-        const P = (x, y, col) => px(ctx, flip ? 7 - x : x, y, col, s);
-
-        // hair / head
-        P(3, 0, hair); P(4, 0, hair);
-        P(2, 1, hair); P(3, 1, skin); P(4, 1, skin); P(5, 1, hair);
-        P(3, 2, skin); P(4, 2, skin);
+        const [tunic, tunicDark, tunicLight] = TUNIC_COLORS[palette % TUNIC_COLORS.length];
+        const hair = HAIR_COLORS[(palette * 5 + 1) % HAIR_COLORS.length];
+        const skin = '#e8b890', skinDark = '#c8946c';
+        const R = (x, y, w, h, col) => {
+            ctx.fillStyle = col;
+            for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) ctx.fillRect(flip ? 15 - xx : xx, yy, 1, 1);
+        };
+        // head
+        R(5, 2, 6, 6, skin);
+        R(10, 3, 1, 5, skinDark);
+        R(5, 1, 6, 2, hair); R(4, 2, 1, 3, hair); R(5, 3, 1, 1, hair);
+        R(8, 5, 1, 1, '#2a1a10');                 // eye (looking in walking direction)
+        R(10, 5, 1, 1, '#2a1a10');
+        R(9, 7, 1, 1, skinDark);                  // mouth shadow
+        R(7, 8, 3, 1, skinDark);                  // neck
         // body
-        for (let y = 3; y < 8; y++) {
-            for (let x = 2; x < 6; x++) P(x, y, tunic);
-        }
-        // belt
-        P(2, 6, '#3a2810'); P(3, 6, '#3a2810'); P(4, 6, '#3a2810'); P(5, 6, '#3a2810');
+        R(4, 9, 8, 6, tunic);
+        R(4, 9, 8, 1, tunicLight);
+        R(10, 10, 2, 5, tunicDark);
+        R(4, 14, 8, 1, '#5a3a1a');                // belt
+        R(7, 14, 1, 1, '#d0a020');                // buckle
+        R(4, 15, 8, 1, tunicDark);                // tunic hem
         // arms
-        P(1, 4, skin); P(6, 4, skin);
-        P(1, 5, skin); P(6, 5, skin);
-        // legs (walk animation)
+        R(3, 10, 1, 4, tunicDark); R(3, 14, 1, 1, skin);
+        R(12, 10, 1, 3, tunic); R(12, 13, 1, 1, skin);
+        // legs + boots (walk cycle)
         if (frame === 0) {
-            P(2, 8, '#4a3828'); P(3, 8, '#4a3828'); P(4, 8, '#4a3828'); P(5, 8, '#4a3828');
-            P(2, 9, '#4a3828'); P(5, 9, '#4a3828');
-            P(2, 10, '#2a1a08'); P(5, 10, '#2a1a08');
+            R(5, 16, 2, 5, '#4a3828'); R(9, 16, 2, 5, '#4a3828');
+            R(6, 16, 1, 5, '#3a2a1c'); R(10, 16, 1, 5, '#3a2a1c');
+            R(5, 21, 3, 1, '#2a1a0c'); R(9, 21, 3, 1, '#2a1a0c');
         } else {
-            P(2, 8, '#4a3828'); P(3, 8, '#4a3828'); P(4, 8, '#4a3828'); P(5, 8, '#4a3828');
-            P(3, 9, '#4a3828'); P(4, 9, '#4a3828');
-            P(1, 10, '#2a1a08'); P(3, 10, '#2a1a08'); P(5, 10, '#2a1a08'); P(6, 10, '#2a1a08');
+            R(4, 16, 2, 4, '#4a3828'); R(10, 16, 2, 4, '#4a3828');
+            R(5, 16, 1, 4, '#3a2a1c'); R(11, 16, 1, 4, '#3a2a1c');
+            R(3, 20, 3, 1, '#2a1a0c'); R(10, 20, 3, 1, '#2a1a0c');
         }
-
+        // tool in the front hand
+        const handle = '#7a5230';
+        if (tool === 'axe') {
+            R(13, 7, 1, 8, handle);
+            R(14, 7, 2, 3, '#a8a8b0'); R(15, 7, 1, 3, '#e0e0e8');
+        } else if (tool === 'pick') {
+            R(13, 8, 1, 8, handle);
+            R(11, 7, 5, 1, '#9a9aa4'); R(11, 8, 1, 1, '#9a9aa4'); R(15, 8, 1, 1, '#9a9aa4');
+        } else if (tool === 'bow') {
+            R(14, 6, 1, 1, '#8a5a2a'); R(15, 7, 1, 8, '#8a5a2a'); R(14, 15, 1, 1, '#8a5a2a');
+            R(13, 7, 1, 8, '#e8e0c8');
+        } else if (tool === 'hammer') {
+            R(13, 9, 1, 6, handle);
+            R(12, 7, 3, 2, '#86868e'); R(12, 7, 3, 1, '#a8a8b0');
+        }
         cache[key] = c;
         return c;
     }
@@ -359,13 +554,13 @@ const Sprites = (() => {
                 R(13, 8, 1, 5, '#6a7490');
                 break;
             case 'food':
-                // apple
-                R(5, 5, 7, 7, '#d8382c');
-                R(4, 6, 1, 5, '#d8382c'); R(12, 6, 1, 5, '#d8382c');
-                R(6, 12, 5, 1, '#a82418');
-                R(6, 6, 2, 2, '#ff8a7a');
-                R(8, 2, 1, 3, '#5a3418');
-                R(9, 3, 3, 1, '#4f8a3c'); P(10, 2, '#4f8a3c');
+                // meat leg: browned meat with a bone sticking out
+                R(4, 4, 7, 7, '#b84a2c');
+                R(3, 5, 1, 5, '#b84a2c'); R(11, 5, 1, 5, '#b84a2c'); R(5, 3, 5, 1, '#b84a2c');
+                R(5, 4, 3, 2, '#d8704a'); P(5, 6, '#e8906a');
+                R(9, 8, 2, 3, '#8a2e1a'); R(6, 11, 4, 1, '#8a2e1a');
+                R(10, 10, 2, 2, '#f2e8d4'); R(12, 12, 2, 2, '#f2e8d4');
+                P(14, 12, '#f2e8d4'); P(12, 14, '#f2e8d4'); P(14, 14, '#d8ccb4'); P(13, 13, '#d8ccb4');
                 break;
             case 'pop':
                 // villager bust
@@ -1145,8 +1340,82 @@ const Sprites = (() => {
         return c;
     }
 
+    function drawHunter() {
+        const key = 'hunter';
+        if (cache[key]) return cache[key];
+        const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+        const R = (x, y, ww, hh, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, ww, hh); };
+
+        // trampled ground in front
+        R(6, 54, 52, 8, 'rgba(110, 82, 50, 0.45)');
+        // stone chimney (smoke comes out at [16, 6])
+        R(13, 6, 7, 18, '#7a7468'); R(13, 6, 7, 1, '#9a9488'); R(19, 7, 1, 17, '#5a5448');
+        for (let y = 9; y < 24; y += 3) R(13 + (y % 2), y, 6, 1, '#68625a');
+        // log walls
+        for (let y = 28; y < 56; y += 4) {
+            R(8, y, 44, 4, (y / 4) % 2 ? '#7a5230' : '#6a4626');
+            R(8, y, 44, 1, '#94683e');
+            R(8, y + 3, 44, 1, '#4e3018');
+            R(6, y, 3, 4, '#a07a4a'); R(7, y + 1, 1, 2, '#6a4626');      // log ends
+            R(51, y, 3, 4, '#a07a4a'); R(52, y + 1, 1, 2, '#6a4626');
+        }
+        // bark roof
+        for (let y = 14; y < 30; y++) {
+            const k = (y - 14) / 16, hw = 6 + k * 26;
+            R(Math.round(31 - hw), y, Math.round(hw * 2), 1, y % 3 === 0 ? '#3e3020' : '#4a3a26');
+        }
+        R(4, 29, 56, 2, '#2e2416');
+        for (let x = 10; x < 54; x += 5) R(x, 18 + Math.abs(x - 31) / 3 | 0, 1, 10, 'rgba(0,0,0,0.18)');
+        // door with antlers above it
+        R(27, 42, 10, 14, '#3a2410'); R(28, 43, 8, 13, '#2a1808'); R(35, 49, 1, 1, '#c8a040');
+        const ant = '#ece0c4';
+        R(31, 38, 2, 2, ant); R(29, 35, 1, 3, ant); R(34, 35, 1, 3, ant);
+        R(28, 33, 1, 2, ant); R(35, 33, 1, 2, ant); R(30, 34, 1, 1, ant); R(33, 34, 1, 1, ant);
+        // small window
+        R(14, 38, 6, 5, '#2a1a0a'); R(15, 39, 4, 3, '#e8c060'); R(17, 39, 1, 3, '#3a2410');
+        // drying rack with a stretched hide
+        R(53, 34, 1, 24, '#5a3a1a'); R(61, 34, 1, 24, '#5a3a1a'); R(52, 35, 11, 1, '#6a4626');
+        R(54, 37, 7, 11, '#b07a48'); R(55, 38, 5, 9, '#c48c58'); R(54, 37, 7, 1, '#8a5a32'); R(54, 47, 7, 1, '#8a5a32');
+        // meat hanging under the eave
+        R(44, 31, 1, 3, '#5a3a1a'); R(43, 34, 3, 5, '#a83a2a'); R(43, 34, 1, 5, '#c85a42'); R(45, 38, 1, 1, '#7a2418');
+        // chopping block and a bundle of arrows
+        R(10, 56, 7, 5, '#7a5230'); R(10, 56, 7, 1, '#b8905c'); R(15, 52, 1, 5, '#5a3a1a'); R(13, 51, 4, 2, '#a8a8b0');
+        R(20, 52, 1, 8, '#8a6a3a'); R(22, 51, 1, 9, '#8a6a3a'); R(19, 51, 2, 1, '#d8d0c0'); R(21, 50, 2, 1, '#d8d0c0');
+
+        cache[key] = c;
+        return c;
+    }
+
+    // Adds 1px detail to a flat building sprite: material grain, a light rim on the
+    // top-left edges and a dark outline on the bottom-right edges of the silhouette.
+    function detailPass(src, seed) {
+        const w = src.width, h = src.height;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+        ctx.drawImage(src, 0, 0);
+        let img;
+        try { img = ctx.getImageData(0, 0, w, h); } catch (e) { return src; }
+        const d = img.data;
+        const src8 = new Uint8ClampedArray(d);
+        const a = (x, y) => (x < 0 || y < 0 || x >= w || y >= h) ? 0 : src8[(y * w + x) * 4 + 3];
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                if (src8[i + 3] < 200) continue;
+                let f = 1 + (hash2(x, y, seed) - 0.5) * 0.12;
+                if (a(x + 1, y) < 100 || a(x, y + 1) < 100) f *= 0.6;
+                else if (a(x - 1, y) < 100 || a(x, y - 1) < 100) f *= 1.2;
+                d[i] = src8[i] * f; d[i + 1] = src8[i + 1] * f; d[i + 2] = src8[i + 2] * f;
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+        return c;
+    }
+
     // Get building sprite by type
-    function getBuilding(type, extra) {
+    function getBuildingRaw(type, extra) {
         const grown = extra?.grown !== false;
         switch (type) {
             case 'castle': return drawCastle();
@@ -1157,11 +1426,23 @@ const Sprites = (() => {
             case 'quarry': return drawQuarry();
             case 'iron_mine': return drawIronMine();
             case 'blacksmith': return drawBlacksmith();
+            case 'hunter': return drawHunter();
             case 'chicken_hut': return drawChickenHut();
             case 'apple_orchard': return drawAppleOrchard(grown);
             case 'farm': return drawFarm(grown);
             default: return null;
         }
+    }
+
+    // Building sprite with the 1px detail pass (custom art from assets/ is used as is)
+    function getBuilding(type, extra) {
+        const raw = getBuildingRaw(type, extra);
+        if (!raw) return null;
+        const rawKey = buildingCacheKey(type, extra?.grown !== false);
+        if (customArt.has(rawKey)) return raw;
+        const key = 'd_' + rawKey;
+        if (!cache[key]) cache[key] = detailPass(raw, rawKey.length * 31 + 7);
+        return cache[key];
     }
 
     // ============================================
@@ -1192,12 +1473,13 @@ const Sprites = (() => {
         } else if (season === 'autumn' && green) {
             ctx.fillStyle = 'rgba(190, 120, 30, 0.28)';
             ctx.fillRect(0, 0, T, T);
-            const leaf = ['#c8781e', '#b8521e', '#e0b040', '#a8441a'];
-            for (let i = 0; i < 7; i++) {
+            const leaf = ['#c8781e', '#b8521e', '#e0b040', '#a8441a', '#8a5a22'];
+            for (let i = 0; i < 14; i++) {
                 const x = Math.floor(hash2(i, variant, type + 3) * (T - 2));
                 const y = Math.floor(hash2(variant, i, type + 5) * (T - 1));
                 ctx.fillStyle = leaf[i % leaf.length];
-                ctx.fillRect(x, y, 2, 1);
+                ctx.fillRect(x, y, 1, 1);
+                if (i % 3 === 0) ctx.fillRect(x + 1, y, 1, 1);
             }
         } else if (season === 'winter') {
             if (type === TERRAIN.WATER) {
@@ -1215,23 +1497,23 @@ const Sprites = (() => {
                     for (let k = 0; k < 4; k++) { ctx.fillRect(x, y, 1, 2); x += hash2(k, i, variant) > 0.5 ? 1 : -1; y += 2; }
                 }
             } else {
-                // Snow blanket in 2px cells; only a few small patches of ground peek through
-                const patches = { [TERRAIN.STONE_DEPOSIT]: 4, [TERRAIN.SAND]: 2, [TERRAIN.DIRT]: 2, [TERRAIN.FOREST]: 2 }[type] ?? 1;
+                // Snow blanket in 1px detail; only a few small patches of ground peek through
+                const patches = { [TERRAIN.STONE_DEPOSIT]: 4, [TERRAIN.SAND]: 2, [TERRAIN.DIRT]: 2, [TERRAIN.FOREST]: 3 }[type] ?? 2;
                 const holes = [];
                 for (let i = 0; i < patches; i++) {
                     if (hash2(i, variant, type + 61) < 0.35 && type !== TERRAIN.STONE_DEPOSIT) continue;
                     const big = type === TERRAIN.STONE_DEPOSIT;
                     holes.push({
-                        x: Math.floor(hash2(i, variant, type + 71) * 13) * 2, y: Math.floor(hash2(variant, i, type + 73) * 14) * 2,
-                        w: big ? 8 : 4, h: big ? 4 : 2,
+                        x: Math.floor(hash2(i, variant, type + 71) * 27), y: Math.floor(hash2(variant, i, type + 73) * 29),
+                        w: big ? 6 : 2 + Math.floor(hash2(i, i, type) * 2), h: big ? 3 : 1 + Math.floor(hash2(variant, i, 9) * 2),
                     });
                 }
-                for (let y = 0; y < T; y += 2) {
-                    for (let x = 0; x < T; x += 2) {
+                for (let y = 0; y < T; y++) {
+                    for (let x = 0; x < T; x++) {
                         if (holes.some(o => x >= o.x && x < o.x + o.w && y >= o.y && y < o.y + o.h)) continue;
                         const m = hash2(x, y, 11 + variant + type * 3);
-                        ctx.fillStyle = m < 0.06 ? '#d3dce8' : m > 0.93 ? '#f9fbfd' : '#e8eef5';
-                        ctx.fillRect(x, y, 2, 2);
+                        ctx.fillStyle = m < 0.05 ? '#d3dce8' : m > 0.94 ? '#f9fbfd' : m > 0.8 ? '#eef3f8' : '#e6edf5';
+                        ctx.fillRect(x, y, 1, 1);
                     }
                 }
                 // soft blue shadow at the lower edge of each hole (depth)
@@ -1270,65 +1552,11 @@ const Sprites = (() => {
         return c;
     }
 
-    function drawOak(leafColors, dark, highlight) {
-        const scale = 2;
-        const c = createCanvas(16 * scale, 24 * scale);
-        const ctx = c.getContext('2d');
-        for (let y = 14; y < 24; y++) for (let x = 6; x < 10; x++) px(ctx, x, y, y % 3 === 0 ? '#5a3418' : '#6b4226', scale);
-        for (let y = 2; y < 15; y++) {
-            for (let x = 2; x < 14; x++) {
-                const dx = x - 8, dy = y - 8;
-                if (Math.sqrt(dx * dx + dy * dy) < 6.5) {
-                    px(ctx, x, y, (dx + dy > 5) ? dark : leafColors[(x * 3 + y * 7) % leafColors.length], scale);
-                }
-            }
-        }
-        [[5, 5], [6, 4], [4, 6]].forEach(([x, y]) => px(ctx, x, y, highlight, scale));
-        return c;
-    }
-
-    function drawBareOak() {
-        const scale = 2;
-        const c = createCanvas(16 * scale, 24 * scale);
-        const ctx = c.getContext('2d');
-        const bark = '#5a3418', bark2 = '#6b4226';
-        for (let y = 12; y < 24; y++) for (let x = 7; x < 9; x++) px(ctx, x, y, y % 3 === 0 ? bark : bark2, scale);
-        px(ctx, 6, 22, bark, scale); px(ctx, 9, 23, bark, scale);
-        const branches = [
-            [[7, 12], [6, 11], [5, 10], [4, 9], [3, 8], [3, 7]],
-            [[8, 12], [9, 11], [10, 10], [11, 9], [12, 8], [12, 7]],
-            [[7, 11], [7, 10], [7, 9], [6, 8], [6, 7], [5, 6], [5, 5]],
-            [[8, 10], [9, 9], [9, 8], [10, 7], [10, 6], [11, 5]],
-            [[7, 9], [8, 8], [8, 7], [8, 6], [8, 5], [8, 4], [7, 3]],
-            [[5, 10], [4, 10], [3, 11]],
-            [[10, 10], [11, 11], [12, 11]],
-        ];
-        branches.forEach(br => br.forEach(([x, y]) => px(ctx, x, y, bark, scale)));
-        // snow resting on top of the branches
-        branches.forEach(br => br.forEach(([x, y], i) => { if (i % 2 === 0) px(ctx, x, y - 1, '#eef3f8', scale); }));
-        return c;
-    }
-
-    // Tree sprite for a season ('oak' or 'pine'); custom tree art is used unchanged
-    function getTree(kind, season) {
-        const base = kind === 'pine' ? drawPineTree() : drawTree();
-        const baseKey = kind === 'pine' ? 'pine_2' : 'tree_2';
-        if (!season || season === 'spring' || season === 'summer' || customArt.has(baseKey)) return base;
-        if (kind === 'pine' && season === 'autumn') return base;
-        const key = `stree_${kind}_${season}`;
-        if (cache[key]) return cache[key];
-        let c;
-        if (kind === 'oak' && season === 'autumn') c = drawOak(['#c8781e', '#d89a2a', '#b8521e', '#e0b040', '#a8441a'], '#7a2e10', '#f0c860');
-        else if (kind === 'oak') c = drawBareOak();
-        else c = snowCap(base);
-        cache[key] = c;
-        return c;
-    }
-
-    function getStonePile(season) {
-        if (season !== 'winter') return drawStonePile();
-        if (!cache.stone_winter) cache.stone_winter = snowCap(drawStonePile());
-        return cache.stone_winter;
+    function getStonePile(season, variant = 0) {
+        if (season !== 'winter') return drawStonePile(1, variant);
+        const key = `stone_winter_${variant}`;
+        if (!cache[key]) cache[key] = snowCap(drawStonePile(1, variant));
+        return cache[key];
     }
 
     // Building sprite for a season: snow on the roofs in winter
@@ -1434,12 +1662,14 @@ const Sprites = (() => {
             jobs.push(load(`buildings/${type}.png`).then(img => {
                 if (!img) return;
                 cache[buildingCacheKey(type, true)] = imageToCanvas(img, 0, 0, img.width, img.height);
+                customArt.add(buildingCacheKey(type, true));
                 replaced.push(type);
             }));
             if (GROWTH_TYPES.includes(type)) {
                 jobs.push(load(`buildings/${type}_young.png`).then(img => {
                     if (!img) return;
                     cache[buildingCacheKey(type, false)] = imageToCanvas(img, 0, 0, img.width, img.height);
+                    customArt.add(buildingCacheKey(type, false));
                     replaced.push(type + '_young');
                 }));
             }
@@ -1468,7 +1698,7 @@ const Sprites = (() => {
         await Promise.all(jobs);
         // Derived caches must be rebuilt from the new art
         Object.keys(cache).forEach(k => {
-            if (/^(thumb_|shadow_|stile_|stree_|sbld_|stone_winter)/.test(k)) delete cache[k];
+            if (/^(thumb_|shadow_|stile_|stree_|sbld_|stone_winter|d_|tree_(oak|pine)_)/.test(k)) delete cache[k];
         });
         return replaced;
     }
