@@ -19,7 +19,7 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.deployment_retry.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,6 +30,34 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
+      - name: Cancel stuck Pages deployments
+        # A deployment that GitHub still reports as "in progress" blocks every new one
+        # ("Deployment request failed ... due to in progress deployment").
+        # Cancelling only needs pages:write, so the workflow can unblock itself.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for sha in $(gh api "repos/${{ github.repository }}/commits?sha=${{ github.ref_name }}&per_page=15" --jq '.[].sha'); do
+            [ "$sha" = "${{ github.sha }}" ] && continue
+            if gh api -X POST "repos/${{ github.repository }}/pages/deployments/$sha/cancel" >/dev/null 2>&1; then
+              echo "Cancelled stuck deployment $sha"
+            fi
+          done
       - name: Deploy to GitHub Pages
         id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Unblock and retry deploy
+        # Covers a parallel legacy "deploy from branch" build of the same commit
+        if: steps.deployment.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for sha in $(gh api "repos/${{ github.repository }}/commits?sha=${{ github.ref_name }}&per_page=15" --jq '.[].sha'); do
+            gh api -X POST "repos/${{ github.repository }}/pages/deployments/$sha/cancel" >/dev/null 2>&1 && echo "Cancelled deployment $sha" || true
+          done
+          sleep 20
+      - name: Deploy to GitHub Pages (retry)
+        id: deployment_retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
