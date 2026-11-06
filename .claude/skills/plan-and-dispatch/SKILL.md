@@ -76,6 +76,7 @@ Create it with the GitHub tools in `5ebi/first_web_game_medieval`, label `task`
 - [ ] <checkable result, e.g. "rain stays on the ground while the map is dragged">
 - [ ] `sh tests/run-all.sh` passes; desktop, phone portrait, phone landscape screenshots checked
 - [ ] Strings in `en` and `de`
+- [ ] PR body ends with a preview link of its branch and the live link
 
 ## Base
 `main` <or: "branch `claude/x` from PR #N, which is not merged yet">
@@ -113,7 +114,11 @@ Reply to the owner in German, short:
 
 - answers to their **questions**,
 - a table: task · issue link · session · status (running / waiting for #N),
-- what you deliberately left out or need a decision on.
+- what you deliberately left out or need a decision on,
+- **at the end, the test links** (see "Test link" in `CLAUDE.md`): always the live build
+  `https://5ebi.github.io/first_web_game_medieval/`, plus a preview link
+  `https://raw.githack.com/5ebi/first_web_game_medieval/<branch>/index.html` for every
+  PR that is ready to look at.
 
 Then schedule a check-in for yourself (`send_later`, ~45 minutes) to look at the
 worker sessions (`get_session`, `list_events` with `kinds: ["result"]`). When a PR
