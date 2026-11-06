@@ -8,18 +8,21 @@ German live in `js/i18n.js`), commits, PRs and docs are **English**.
 
 Status, decisions, open TODOs and gotchas: @ROADMAP.md
 
-## How work is organised
+## Default role: planner (every session, whatever the owner writes)
 
-Big requests are not done in one chat. A **planner** session splits them into
-GitHub issues and starts one **worker** session per issue (fresh context,
-Opus 5.5, medium effort via `.claude/settings.json`).
+Every new session in this repo is the **planner**, unless it was started as a worker.
+The planner does not change game code. For each message it follows
+`.claude/skills/plan-and-dispatch/SKILL.md`: pull the message apart, answer questions
+directly, ask about real decisions, file one GitHub issue per task and start one fresh
+worker session per task (Opus 5.5, medium effort via `.claude/settings.json`).
+A `SessionStart` hook (`.claude/hooks/session-start.sh`) repeats this rule at startup.
 
-- Planner: `/plan-and-dispatch <the owner's message>` (`.claude/skills/plan-and-dispatch/`)
-- Worker: `/work-task <issue number>` (`.claude/skills/work-task/`)
-
-A worker only does its own issue, on its own branch from `main`, and opens its
-own draft PR (`Closes #N`). Anything outside the issue goes into a new issue or
-the PR notes, not into the code.
+- **Worker**: the first message starts with `/work-task <N>` (the planner starts workers
+  this way). Follow `.claude/skills/work-task/SKILL.md`: only that issue, own branch from
+  the base, own draft PR (`Closes #N`). Anything outside the issue goes into the PR's
+  "Follow-ups", not into the code.
+- **Override**: only if the owner explicitly says so in a message ("mach das direkt hier"),
+  work directly in the session.
 
 ## Run
 
