@@ -683,181 +683,296 @@ const Sprites = (() => {
     }
 
     // ============================================
-    // RESOURCE ICONS (16x16, scale 2 -> 32x32 shown at 20px)
+    // MENU ICONS
+    // Designed on a 32x32 grid (1 design pixel = 1 px of the base canvas), with a
+    // dark outline added automatically. drawIcon() returns the base scaled up by a
+    // whole factor so a ~20 CSS px icon still has >= 1 device pixel per design
+    // pixel on 2x/3x screens; the browser only ever scales it down.
     // ============================================
-    function drawIcon(name) {
-        const key = `icon_${name}`;
+    const ICON_GRID = 32;
+    const ICON_OUTLINE = [28, 18, 10];
+    function iconScale() {
+        const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+        return Math.max(2, Math.min(4, Math.ceil(dpr)));
+    }
+
+    // Base 32x32 art (also what assets/templates/icons/*.png are exported from)
+    function getIconBase(name) {
+        const key = `iconbase_${name}`;
         if (cache[key]) return cache[key];
-        const s = 2;
-        const c = createCanvas(16 * s, 16 * s);
+        const N = ICON_GRID;
+        const c = createCanvas(N, N);
         const ctx = c.getContext('2d');
-        const P = (x, y, col) => px(ctx, x, y, col, s);
-        const R = (x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x * s, y * s, w * s, h * s); };
+        const R = (x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); };
+        const P = (x, y, col) => R(x, y, 1, 1, col);
+        // filled ellipse; shade(dx, dy) may return a colour per pixel (dx/dy in -1..1)
+        const ell = (cx, cy, rx, ry, col) => {
+            for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) {
+                for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+                    const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry;
+                    if (dx * dx + dy * dy > 1) continue;
+                    const cc = typeof col === 'function' ? col(dx, dy) : col;
+                    if (cc) P(x, y, cc);
+                }
+            }
+        };
+        // light from the top left: light / base / dark bands across a round shape
+        const lit = (light, base, dark, hi) => (dx, dy) => {
+            const d = dx + dy;
+            if (hi && dx < -0.2 && dx > -0.65 && dy < -0.2 && dy > -0.65) return hi;
+            return d < -0.75 ? light : d > 0.55 ? dark : base;
+        };
+        const line = (x0, y0, x1, y1, col, w = 1) => {
+            const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) || 1;
+            for (let i = 0; i <= n; i++) {
+                const x = Math.round(x0 + (x1 - x0) * i / n), y = Math.round(y0 + (y1 - y0) * i / n);
+                R(x - Math.floor((w - 1) / 2), y - Math.floor((w - 1) / 2), w, w, col);
+            }
+        };
+        // ring segment (for sound waves)
+        const arc = (cx, cy, r0, r1, maxAngle, col) => {
+            for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+                const dx = x + 0.5 - cx, dy = y + 0.5 - cy, d = Math.hypot(dx, dy);
+                if (d >= r0 && d < r1 && dx > 0 && Math.abs(Math.atan2(dy, dx)) <= maxAngle) P(x, y, col);
+            }
+        };
+        const cloud = (top, light, base, dark) => {
+            ell(10, top + 9, 6, 5.5, base); ell(17, top + 6, 7.5, 7, base); ell(24, top + 9.5, 5.5, 5, base);
+            R(5, top + 9, 24, 6, base);
+            ell(15, top + 3.5, 4.5, 3, light); ell(9, top + 7, 3, 2, light);
+            R(6, top + 14, 22, 1, dark); R(25, top + 11, 3, 3, dark);
+            P(21, top + 3, '#ffffff'); P(14, top + 2, '#ffffff'); P(15, top + 2, '#ffffff');
+        };
+        const flake = (x, y, col) => { P(x, y, col); P(x - 1, y, col); P(x + 1, y, col); P(x, y - 1, col); P(x, y + 1, col); };
+        const speaker = (body, light, dark) => {
+            R(3, 12, 6, 8, body); R(3, 12, 6, 1, light); R(3, 19, 6, 1, dark);
+            for (let i = 0; i < 7; i++) R(9 + i, 12 - i, 1, 8 + i * 2, body);
+            line(9, 12, 15, 6, light);
+            line(9, 19, 15, 25, dark);
+            R(4, 14, 1, 4, light);
+        };
 
         switch (name) {
-            case 'wood':
-                // a log seen from the side with rings on the end
-                R(3, 5, 10, 6, '#8a5a2a');
-                R(3, 5, 10, 1, '#a0703a');
-                R(3, 10, 10, 1, '#5a3418');
-                R(10, 4, 4, 8, '#c49a5c');
-                R(11, 6, 2, 4, '#8a5a2a');
-                P(12, 7, '#c49a5c');
-                R(2, 5, 1, 6, '#5a3418');
+            case 'wood': {
+                // two logs stacked, ring ends facing right
+                R(4, 5, 17, 10, '#86542a'); R(4, 5, 17, 2, '#a8743c'); R(4, 14, 17, 1, '#5a3416');
+                line(6, 9, 13, 9, '#6a3e1c'); line(9, 11, 18, 11, '#6a3e1c');
+                ell(21, 10, 4, 5, '#d8b070'); ell(21, 10, 2.6, 3.4, '#b88a4c'); ell(21, 10, 1.3, 1.8, '#dcb878'); P(21, 10, '#8a5a2a');
+                R(2, 15, 19, 11, '#86542a'); R(2, 15, 19, 2, '#a8743c'); R(2, 25, 19, 1, '#5a3416');
+                line(4, 19, 12, 19, '#6a3e1c'); line(8, 22, 17, 22, '#6a3e1c'); line(14, 18, 18, 18, '#a8743c');
+                ell(21, 20.5, 5, 5.5, '#e0bc7c'); ell(21, 20.5, 3.6, 4, '#c0925a'); ell(21, 20.5, 2.2, 2.6, '#e0bc7c');
+                ell(21, 20.5, 1, 1.2, '#9a6834'); P(18, 17, '#f4dca4'); P(19, 16, '#f4dca4');
                 break;
+            }
             case 'stone':
-                R(3, 7, 10, 6, '#8a8a8a');
-                R(5, 4, 7, 4, '#9c9c9c');
-                R(5, 4, 7, 1, '#bdbdbd');
-                R(3, 7, 2, 1, '#bdbdbd');
-                R(3, 12, 10, 1, '#5c5c5c');
-                P(11, 9, '#6c6c6c'); P(7, 10, '#6c6c6c');
+                ell(13, 18, 11, 9, lit('#b4b4ba', '#8e8e96', '#62626a', '#d4d4da'));
+                ell(24, 23, 6.5, 5.5, lit('#a8a8ae', '#84848c', '#5a5a62'));
+                ell(8, 25, 4.5, 3.5, lit('#9c9ca4', '#7c7c84', '#56565e'));
+                line(11, 14, 14, 18, '#6c6c74'); line(14, 18, 13, 21, '#6c6c74');
+                line(17, 13, 19, 16, '#a2a2aa'); P(24, 20, '#c4c4ca'); P(23, 20, '#c4c4ca');
                 break;
-            case 'iron':
-                // ingot
-                R(2, 8, 12, 5, '#8c96ad');
-                R(4, 5, 8, 4, '#aab3c8');
-                R(4, 5, 8, 1, '#d0d6e4');
-                R(2, 12, 12, 1, '#55607a');
-                R(13, 8, 1, 5, '#6a7490');
+            case 'iron': {
+                // ingot: lighter top face, darker front face
+                for (let y = 9; y <= 14; y++) R(11 - (y - 9), y, 11 + (y - 9) * 2, 1, y === 9 ? '#f0f4fa' : '#c6cede');
+                for (let y = 15; y <= 23; y++) R(5 - ((y - 15) >> 2), y, 22 + ((y - 15) >> 2) * 2, 1, y >= 21 ? '#5c6680' : '#8892aa');
+                R(5, 15, 22, 1, '#a8b2c6');
+                line(12, 11, 16, 11, '#ffffff'); P(8, 17, '#b8c2d6'); P(9, 17, '#b8c2d6');
+                R(24, 16, 2, 5, '#6c7690');
                 break;
+            }
             case 'food':
-                // meat leg: browned meat with a bone sticking out
-                R(4, 4, 7, 7, '#b84a2c');
-                R(3, 5, 1, 5, '#b84a2c'); R(11, 5, 1, 5, '#b84a2c'); R(5, 3, 5, 1, '#b84a2c');
-                R(5, 4, 3, 2, '#d8704a'); P(5, 6, '#e8906a');
-                R(9, 8, 2, 3, '#8a2e1a'); R(6, 11, 4, 1, '#8a2e1a');
-                R(10, 10, 2, 2, '#f2e8d4'); R(12, 12, 2, 2, '#f2e8d4');
-                P(14, 12, '#f2e8d4'); P(12, 14, '#f2e8d4'); P(14, 14, '#d8ccb4'); P(13, 13, '#d8ccb4');
+                // roast leg: browned meat, bone sticking out to the lower right
+                line(19, 19, 25, 25, '#f2e8d4', 4);
+                line(20, 21, 25, 26, '#cfc2a6', 1);
+                ell(27, 23.5, 2.6, 2.6, '#f2e8d4'); ell(23.5, 27, 2.6, 2.6, '#f2e8d4');
+                P(24, 28, '#cfc2a6'); P(28, 24, '#cfc2a6'); P(26, 22, '#ffffff'); P(22, 26, '#ffffff');
+                ell(13, 13, 10, 9, lit('#d06a42', '#b04628', '#7a2a16'));
+                ell(10, 9.5, 3.5, 2.2, '#e8946a'); P(9, 9, '#fac0a0'); P(10, 9, '#fac0a0');
+                P(15, 10, '#8a3420'); P(12, 15, '#8a3420'); P(17, 15, '#8a3420'); P(8, 14, '#c85a38');
                 break;
             case 'pop':
-                // villager bust
-                R(6, 2, 4, 4, '#e8b890');
-                R(6, 2, 4, 1, '#4a2a10');
-                R(4, 6, 8, 6, '#3c6fb0');
-                R(3, 7, 1, 3, '#e8b890'); R(12, 7, 1, 3, '#e8b890');
-                R(4, 12, 8, 1, '#2a4f80');
+                // villager bust: hood, face, tunic
+                ell(16, 26, 12, 8, lit('#5a8fd0', '#3c6fb0', '#284e84'));
+                R(13, 17, 6, 3, '#c8946a');
+                ell(16, 11, 6, 6.5, lit('#f4cca4', '#e8b890', '#c8946a'));
+                ell(16, 6.5, 6.5, 3.5, (dx, dy) => dy < 0.3 ? (dx < -0.3 ? '#7a4a22' : '#5a3416') : null);
+                R(10, 7, 1, 4, '#5a3416'); R(21, 7, 1, 4, '#5a3416');
+                P(13, 11, '#2a1a0c'); P(18, 11, '#2a1a0c'); R(15, 14, 2, 1, '#b07850');
+                R(15, 20, 2, 8, '#284e84'); P(16, 22, '#d8c070'); P(16, 25, '#d8c070');
                 break;
             case 'bow':
-                // drawn bow with arrow
-                R(4, 2, 2, 1, '#a8743c'); R(3, 3, 1, 10, '#a8743c'); R(4, 13, 2, 1, '#a8743c');
-                R(6, 1, 1, 1, '#7a4a22'); R(6, 14, 1, 1, '#7a4a22');
-                R(4, 3, 1, 10, '#7a4a22');
-                for (let i = 0; i < 6; i++) { P(6 + i, 2 + i, '#e8e0c8'); P(6 + i, 13 - i, '#e8e0c8'); }
-                R(4, 7, 10, 1, '#8a5a2a'); R(13, 6, 2, 3, '#c8c8d0'); R(4, 6, 2, 1, '#b82820'); R(4, 8, 2, 1, '#b82820');
+                // bow seen from the side with a nocked arrow (32x32 grid)
+                for (let i = 0; i < 24; i++) {
+                    const y = 4 + i, bend = Math.round(6 * Math.sin(Math.PI * i / 23));
+                    R(8 - bend, y, 3, 1, i < 2 || i > 21 ? '#6a3e18' : '#a8743c');
+                    P(8 - bend, y, '#c8945a');
+                }
+                line(9, 5, 9, 26, '#e8e0c8');
+                R(5, 15, 21, 2, '#8a5a2a'); R(5, 15, 21, 1, '#a8743c');
+                R(24, 13, 3, 6, '#c8c8d0'); R(27, 15, 2, 2, '#c8c8d0'); P(24, 13, '#f0f0f6');
+                R(4, 13, 4, 2, '#b82820'); R(4, 17, 4, 2, '#b82820'); R(4, 13, 4, 1, '#d84838');
+                R(2, 14, 3, 1, '#6a3e18'); R(2, 17, 3, 1, '#6a3e18');
                 break;
             case 'sword':
-                // diagonal sword: blade, guard, grip, pommel
-                for (let i = 0; i < 9; i++) { P(4 + i, 11 - i, '#d0d6e4'); P(5 + i, 11 - i, '#9aa4b8'); }
-                P(13, 2, '#f0f4fa'); P(14, 1, '#f0f4fa');
-                for (let i = 0; i < 5; i++) P(1 + i, 8 + i, '#c8a040');
-                P(3, 12, '#5a3418'); P(2, 13, '#5a3418'); P(4, 13, '#5a3418');
-                R(1, 14, 2, 1, '#c8a040'); P(1, 13, '#c8a040');
+                // diagonal sword: blade with edge highlight, cross guard, grip, pommel
+                for (let i = 0; i < 18; i++) {
+                    R(9 + i, 20 - i, 2, 2, '#b8c0d0');
+                    P(9 + i, 20 - i, '#eef2f8');
+                    P(11 + i, 21 - i, '#7a8498');
+                }
+                R(27, 2, 2, 2, '#f4f8fc');
+                for (let i = 0; i < 9; i++) { R(3 + i, 15 + i, 2, 2, '#c8a040'); P(3 + i, 15 + i, '#e8cc70'); }
+                for (let i = 0; i < 5; i++) R(4 + i, 24 - i, 2, 2, '#5a3418');
+                R(2, 26, 4, 4, '#c8a040'); R(2, 26, 4, 1, '#e8cc70'); P(5, 29, '#8a6a20');
                 break;
             case 'shield':
-                R(3, 2, 10, 7, '#3c6fb0'); R(4, 9, 8, 2, '#3c6fb0'); R(5, 11, 6, 2, '#3c6fb0'); R(7, 13, 2, 1, '#3c6fb0');
-                R(3, 2, 10, 1, '#8aa8d8'); R(7, 3, 2, 10, '#e8d070'); R(4, 6, 8, 1, '#e8d070');
-                R(12, 3, 1, 6, '#2a5288');
+                // heater shield with a gold cross
+                R(5, 3, 22, 14, '#3c6fb0');
+                for (let i = 0; i < 12; i++) R(5 + i, 17 + i, 22 - 2 * i, 1, '#3c6fb0');
+                R(5, 3, 22, 2, '#8aa8d8'); R(5, 3, 2, 14, '#5a8fd0');
+                R(25, 5, 2, 12, '#284e84');
+                for (let i = 0; i < 12; i++) P(26 - i, 17 + i, '#284e84');
+                R(14, 5, 4, 23, '#e8d070'); R(7, 11, 18, 4, '#e8d070');
+                R(14, 5, 1, 23, '#fff0a0'); R(7, 11, 18, 1, '#fff0a0');
                 break;
             case 'hammer':
-                R(7, 6, 2, 9, '#a07040'); R(7, 6, 1, 9, '#c8945a');
-                R(3, 2, 10, 4, '#9a9aa4'); R(3, 2, 10, 1, '#d0d0d8'); R(3, 5, 10, 1, '#6a6a74');
-                R(2, 3, 1, 2, '#9a9aa4'); R(13, 3, 1, 2, '#9a9aa4');
-                break;
-            case 'spring':
-                R(7, 9, 2, 6, '#4f8a3c'); R(9, 11, 3, 2, '#4f8a3c');
-                R(6, 2, 4, 3, '#f28ab4'); R(6, 8, 4, 2, '#f28ab4');
-                R(3, 4, 3, 4, '#f28ab4'); R(10, 4, 3, 4, '#f28ab4');
-                R(6, 5, 4, 3, '#ffd84a'); P(7, 5, '#fff2a0');
-                P(4, 4, '#ffc0d8'); P(7, 2, '#ffc0d8');
-                break;
-            case 'autumn':
-                R(6, 3, 4, 2, '#e0902a'); R(4, 5, 8, 2, '#d8742a'); R(3, 7, 10, 2, '#c85a22');
-                R(4, 9, 8, 2, '#b8481e'); R(6, 11, 4, 1, '#a83e1a');
-                R(8, 4, 1, 8, '#7a2e10'); R(8, 12, 1, 3, '#6b4226');
-                P(6, 7, '#7a2e10'); P(10, 6, '#7a2e10'); P(5, 9, '#7a2e10'); P(11, 9, '#7a2e10');
-                P(5, 5, '#f0c060');
-                break;
-            case 'winter':
-                R(7, 1, 2, 14, '#e8f2ff'); R(1, 7, 14, 2, '#e8f2ff');
-                for (let i = 0; i < 4; i++) { P(3 + i, 3 + i, '#bcd8f4'); P(12 - i, 3 + i, '#bcd8f4'); P(3 + i, 12 - i, '#bcd8f4'); P(12 - i, 12 - i, '#bcd8f4'); }
-                P(6, 2, '#bcd8f4'); P(9, 2, '#bcd8f4'); P(6, 13, '#bcd8f4'); P(9, 13, '#bcd8f4');
-                P(2, 6, '#bcd8f4'); P(2, 9, '#bcd8f4'); P(13, 6, '#bcd8f4'); P(13, 9, '#bcd8f4');
-                R(7, 7, 2, 2, '#ffffff');
-                break;
-            case 'snow':
-                R(3, 4, 10, 4, '#d8e0ec');
-                R(5, 2, 4, 2, '#d8e0ec'); R(8, 2, 3, 2, '#e8eef6');
-                R(3, 7, 10, 1, '#a8b4c8');
-                P(4, 10, '#ffffff'); P(8, 9, '#ffffff'); P(11, 11, '#ffffff'); P(6, 13, '#ffffff'); P(10, 14, '#ffffff');
-                P(3, 13, '#dfe9f8'); P(12, 13, '#dfe9f8');
-                break;
-            case 'summer':
-            case 'day':
-                // sun
-                R(5, 5, 6, 6, '#f6c431');
-                R(6, 4, 4, 1, '#f6c431'); R(6, 11, 4, 1, '#f6c431');
-                R(4, 6, 1, 4, '#f6c431'); R(11, 6, 1, 4, '#f6c431');
-                R(6, 6, 2, 2, '#ffe58a');
-                P(7, 1, '#f6c431'); P(8, 1, '#f6c431');
-                P(7, 14, '#f6c431'); P(8, 14, '#f6c431');
-                P(1, 7, '#f6c431'); P(1, 8, '#f6c431');
-                P(14, 7, '#f6c431'); P(14, 8, '#f6c431');
-                P(3, 3, '#f6c431'); P(12, 3, '#f6c431'); P(3, 12, '#f6c431'); P(12, 12, '#f6c431');
-                break;
-            case 'cloud':
-                R(3, 7, 10, 5, '#e8edf5');
-                R(5, 5, 4, 2, '#e8edf5'); R(8, 4, 3, 3, '#e8edf5');
-                R(5, 5, 4, 1, '#ffffff'); R(8, 4, 3, 1, '#ffffff');
-                R(3, 11, 10, 1, '#a8b4c8');
-                R(2, 8, 1, 3, '#e8edf5'); R(13, 8, 1, 3, '#e8edf5');
-                break;
-            case 'rain':
-                R(3, 4, 10, 4, '#a8b4c8');
-                R(5, 2, 4, 2, '#a8b4c8'); R(8, 2, 3, 2, '#b8c4d8');
-                R(3, 7, 10, 1, '#7a869a');
-                P(4, 10, '#7ab0ff'); P(4, 11, '#7ab0ff'); P(8, 9, '#7ab0ff'); P(8, 10, '#7ab0ff');
-                P(11, 11, '#7ab0ff'); P(11, 12, '#7ab0ff'); P(6, 13, '#7ab0ff'); P(6, 14, '#7ab0ff');
-                break;
-            case 'fog':
-                R(2, 4, 9, 2, '#c8d0dc'); R(5, 8, 9, 2, '#e0e6ee'); R(2, 12, 10, 2, '#b0b8c6');
-                break;
-            case 'moon':
-                R(5, 3, 6, 10, '#f2e6a8');
-                R(4, 5, 1, 6, '#f2e6a8'); R(11, 5, 1, 6, '#f2e6a8');
-                R(8, 3, 4, 7, 'rgba(0,0,0,0)');
-                ctx.clearRect(8 * s, 2 * s, 5 * s, 9 * s);
-                R(6, 5, 1, 1, '#d8c880'); R(6, 9, 2, 1, '#d8c880');
-                P(13, 3, '#fff8d0'); P(2, 2, '#fff8d0'); P(13, 12, '#fff8d0');
-                break;
-            case 'sound':
-                R(2, 6, 3, 4, '#e8d5a3');
-                R(5, 4, 2, 8, '#e8d5a3');
-                R(7, 3, 1, 1, '#e8d5a3'); R(7, 12, 1, 1, '#e8d5a3');
-                R(9, 5, 1, 6, '#e8d5a3');
-                R(11, 3, 1, 10, '#e8d5a3');
-                break;
-            case 'mute':
-                R(2, 6, 3, 4, '#9a8a68');
-                R(5, 4, 2, 8, '#9a8a68');
-                R(7, 3, 1, 1, '#9a8a68'); R(7, 12, 1, 1, '#9a8a68');
-                for (let i = 0; i < 5; i++) { P(9 + i, 5 + i, '#d44'); P(13 - i, 5 + i, '#d44'); }
-                break;
-            case 'music':
-                R(5, 3, 1, 9, '#e8d5a3');
-                R(5, 3, 6, 1, '#e8d5a3');
-                R(10, 3, 1, 7, '#e8d5a3');
-                R(3, 11, 3, 2, '#e8d5a3');
-                R(8, 9, 3, 2, '#e8d5a3');
+                R(14, 11, 4, 19, '#9a6a3a'); R(14, 11, 1, 19, '#c8945a'); R(17, 11, 1, 19, '#6a4420');
+                R(14, 21, 4, 1, '#4a2e14'); R(14, 24, 4, 1, '#4a2e14'); R(14, 27, 4, 1, '#4a2e14');
+                R(5, 3, 22, 9, '#9a9aa6'); R(5, 3, 22, 2, '#d4d4dc'); R(5, 10, 22, 2, '#64646e');
+                R(3, 4, 2, 7, '#7c7c88'); R(27, 4, 2, 7, '#7c7c88'); R(3, 4, 2, 1, '#b4b4be');
+                R(13, 5, 6, 1, '#f0f0f6'); R(13, 12, 6, 1, '#4a4a54');
                 break;
             case 'storage':
-                R(3, 6, 10, 7, '#a07840');
-                R(3, 6, 10, 1, '#c49a5c');
-                R(3, 9, 10, 1, '#6b4f10');
-                R(7, 7, 2, 5, '#6b4f10');
+                // crate with a top face, planks, X brace and nails
+                R(6, 4, 22, 5, '#c89a5c'); R(6, 4, 22, 1, '#e0b878');
+                for (let i = 0; i < 3; i++) R(4 + i, 7 - i, 1, 1, '#c89a5c');
+                R(3, 8, 23, 20, '#a87a42');
+                R(3, 14, 23, 1, '#7a5428'); R(3, 21, 23, 1, '#7a5428');
+                line(5, 10, 23, 26, '#8a6030', 2); line(23, 10, 5, 26, '#8a6030', 2);
+                R(3, 8, 23, 2, '#6b4a20'); R(3, 26, 23, 2, '#6b4a20'); R(3, 8, 2, 20, '#6b4a20'); R(24, 8, 2, 20, '#6b4a20');
+                R(26, 6, 2, 21, '#7a5428'); P(26, 5, '#a87a42');
+                P(4, 9, '#cfd0d4'); P(24, 9, '#cfd0d4'); P(4, 26, '#cfd0d4'); P(24, 26, '#cfd0d4');
+                R(3, 10, 23, 1, '#c89a5c');
+                break;
+            case 'spring': {
+                // blossom with leaves
+                line(16, 18, 16, 29, '#4a8a34', 2);
+                ell(11, 24, 4.5, 2.2, '#5ea040'); ell(21, 22, 4.5, 2.2, '#5ea040'); P(10, 23, '#8ccc60'); P(20, 21, '#8ccc60');
+                const petal = lit('#ffc0d8', '#f28ab4', '#c85a8a');
+                ell(16, 6.5, 4.5, 4.5, petal); ell(9.5, 11.5, 4.5, 4.5, petal); ell(22.5, 11.5, 4.5, 4.5, petal);
+                ell(12, 18, 4.5, 4, petal); ell(20, 18, 4.5, 4, petal);
+                ell(16, 13, 3.6, 3.6, lit('#fff2a0', '#ffd84a', '#d8a020'));
+                break;
+            }
+            case 'summer':
+            case 'day': {
+                // sun with eight rays
+                const ray = '#f0a828';
+                line(16, 1, 16, 5, ray, 2); line(16, 27, 16, 30, ray, 2); line(1, 16, 5, 16, ray, 2); line(27, 16, 30, 16, ray, 2);
+                line(5, 5, 8, 8, ray, 2); line(26, 5, 23, 8, ray, 2); line(5, 26, 8, 23, ray, 2); line(26, 26, 23, 23, ray, 2);
+                ell(16, 16, 9, 9, lit('#ffe88a', '#f6c431', '#e09a20', '#fff6c8'));
+                break;
+            }
+            case 'autumn': {
+                // falling leaf with veins and stem
+                const leaf = (dx, dy) => (dy < -0.3 ? '#f0a030' : dy < 0.35 ? '#dc6e26' : '#b8481e');
+                ell(16, 14, 9, 11, leaf);
+                ell(8, 13, 4, 4, leaf); ell(24, 13, 4, 4, leaf); ell(10, 20, 3.5, 3.5, leaf); ell(22, 20, 3.5, 3.5, leaf);
+                line(16, 5, 16, 30, '#7a2e10'); line(16, 12, 9, 9, '#8a3814'); line(16, 12, 23, 9, '#8a3814');
+                line(16, 18, 10, 16, '#8a3814'); line(16, 18, 22, 16, '#8a3814');
+                P(12, 6, '#ffd070'); P(13, 5, '#ffd070'); P(11, 7, '#ffd070');
+                break;
+            }
+            case 'winter': {
+                const ice = '#eaf4ff', blue = '#a8cff4';
+                R(15, 2, 2, 28, ice); R(2, 15, 28, 2, ice);
+                for (let i = 0; i < 20; i++) { P(6 + i, 6 + i, blue); P(7 + i, 6 + i, blue); P(25 - i, 6 + i, blue); P(24 - i, 6 + i, blue); }
+                // V-shaped branches near the end of each main arm
+                for (let k = 1; k <= 3; k++) {
+                    P(15 - k, 8 - k, ice); P(16 + k, 8 - k, ice); P(15 - k, 23 + k, ice); P(16 + k, 23 + k, ice);
+                    P(8 - k, 15 - k, ice); P(8 - k, 16 + k, ice); P(23 + k, 15 - k, ice); P(23 + k, 16 + k, ice);
+                }
+                R(13, 13, 6, 6, '#ffffff'); R(15, 15, 2, 2, blue);
+                break;
+            }
+            case 'snow':
+                cloud(3, '#ffffff', '#dfe7f2', '#a8b4c8');
+                flake(8, 23, '#ffffff'); flake(16, 27, '#ffffff'); flake(24, 23, '#ffffff'); P(12, 29, '#dfe9f8'); P(21, 29, '#dfe9f8');
+                break;
+            case 'cloud':
+                cloud(7, '#ffffff', '#e8edf5', '#a8b4c8');
+                break;
+            case 'rain':
+                cloud(2, '#c8d2e2', '#a4b0c4', '#6e7a90');
+                [[7, 21], [13, 23], [19, 21], [25, 23], [10, 27], [22, 27]].forEach(([x, y]) => {
+                    P(x, y, '#9ccaff'); P(x, y + 1, '#5a98f0'); P(x - 1, y + 2, '#5a98f0');
+                });
+                break;
+            case 'fog':
+                [[4, 6, 18, '#e0e6ee'], [10, 13, 19, '#c8d0dc'], [3, 20, 20, '#d4dae4'], [12, 27, 15, '#b0b8c6']].forEach(([x, y, w, col]) => {
+                    R(x + 1, y, w - 2, 3, col); R(x, y + 1, w, 1, col); R(x + 2, y, w - 6, 1, '#f4f7fb');
+                });
+                break;
+            case 'moon':
+                ell(15, 16, 11, 11, (dx, dy) => {
+                    const ex = (dx * 11 + 15 - 21) / 9.5, ey = (dy * 11 + 16 - 11) / 9.5;
+                    if (ex * ex + ey * ey <= 1) return null;
+                    return dx + dy < -0.6 ? '#fff6c8' : dx + dy > 0.4 ? '#d8c070' : '#f2e2a0';
+                });
+                ell(9, 18, 1.6, 1.6, '#d8c070'); ell(12, 24, 1.2, 1.2, '#d8c070'); P(7, 13, '#d8c070');
+                flake(26, 22, '#fff8d0'); P(23, 4, '#fff8d0'); P(29, 13, '#fff8d0');
+                break;
+            case 'sound':
+                speaker('#e8d5a3', '#fff2cc', '#b89c68');
+                arc(16, 16, 4, 6, 0.8, '#e8d5a3');
+                arc(16, 16, 8.5, 10.5, 0.95, '#e8d5a3');
+                break;
+            case 'mute':
+                speaker('#9a8a68', '#b8a884', '#6e6248');
+                line(19, 11, 28, 20, '#e04a3a', 2); line(28, 11, 19, 20, '#e04a3a', 2);
+                break;
+            case 'music':
+                // two beamed eighth notes
+                R(10, 6, 2, 19, '#e8d5a3'); R(24, 4, 2, 18, '#e8d5a3');
+                for (let i = 0; i < 15; i++) R(10 + i, 6 - Math.round(i * 2 / 14), 1, 4, '#e8d5a3');
+                ell(8, 25, 4, 3, lit('#fff2cc', '#e8d5a3', '#b89c68'));
+                ell(22, 22, 4, 3, lit('#fff2cc', '#e8d5a3', '#b89c68'));
                 break;
         }
 
+        outlineIcon(ctx, N);
+        cache[key] = c;
+        return c;
+    }
+
+    // Dark 1px border around every opaque pixel: keeps icons readable on any panel
+    function outlineIcon(ctx, N) {
+        const img = ctx.getImageData(0, 0, N, N);
+        const d = img.data;
+        const solid = i => d[i * 4 + 3] > 127;
+        const edge = [];
+        for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+            const i = y * N + x;
+            if (solid(i)) continue;
+            if ((x > 0 && solid(i - 1)) || (x < N - 1 && solid(i + 1)) || (y > 0 && solid(i - N)) || (y < N - 1 && solid(i + N))) edge.push(i);
+        }
+        edge.forEach(i => {
+            d[i * 4] = ICON_OUTLINE[0]; d[i * 4 + 1] = ICON_OUTLINE[1]; d[i * 4 + 2] = ICON_OUTLINE[2]; d[i * 4 + 3] = 255;
+        });
+        ctx.putImageData(img, 0, 0);
+    }
+
+    // Icon at display resolution (cached). Custom PNGs replace the base art.
+    function drawIcon(name) {
+        const key = `icon_${name}`;
+        if (cache[key]) return cache[key];
+        const base = getIconBase(name);
+        // whole-number upscale only (a custom 64x64 PNG becomes 128 px, not 96)
+        const factor = Math.max(1, Math.ceil(ICON_GRID * iconScale() / base.width));
+        const c = createCanvas(base.width * factor, base.height * factor);
+        const ctx = c.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(base, 0, 0, c.width, c.height);
         cache[key] = c;
         return c;
     }
@@ -1964,11 +2079,12 @@ const Sprites = (() => {
             }));
         });
 
-        // Resource icons: assets/icons/<name>.png (32x32)
+        // Resource icons: assets/icons/<name>.png (32x32 design grid; larger whole multiples work too)
         ['wood', 'stone', 'iron', 'food', 'pop', 'day', 'storage'].forEach(name => {
             jobs.push(load(`icons/${name}.png`).then(img => {
                 if (!img) return;
-                cache[`icon_${name}`] = imageToCanvas(img, 0, 0, img.width, img.height);
+                cache[`iconbase_${name}`] = imageToCanvas(img, 0, 0, img.width, img.height);
+                delete cache[`icon_${name}`];
                 replaced.push('icon_' + name);
             }));
         });
@@ -1981,11 +2097,14 @@ const Sprites = (() => {
         return replaced;
     }
 
-    // Thumbnail of a building for the menu (fits into size x size)
+    // Thumbnail of a building for the menu: fits into size x size CSS px and is
+    // rendered at size x devicePixelRatio, so it stays sharp on retina screens.
     function getBuildingThumb(type, size = 40) {
         const key = `thumb_${type}_${size}`;
         if (cache[key]) return cache[key];
         const sprite = getBuilding(type);
+        const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+        size = Math.round(size * Math.max(1, Math.min(4, dpr)));
         const c = createCanvas(size, size);
         const ctx = c.getContext('2d');
         ctx.imageSmoothingEnabled = false;

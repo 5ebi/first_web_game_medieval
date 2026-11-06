@@ -47,6 +47,14 @@ Tick the "Done when" boxes in your head one by one; if one can't be met, say so.
    - title: what changed, in plain words
    - body: `Closes #N`, what changed, what you checked (devices, test output),
      screenshots worth seeing (describe them if you can't attach), "Follow-ups".
+   - the body **ends with the test links** (see "Test link" in `CLAUDE.md`):
+     `▶ Preview: https://raw.githack.com/5ebi/first_web_game_medieval/<branch>/index.html`
+     and `Live (main): https://5ebi.github.io/first_web_game_medieval/` (shows the change
+     once merged).
 4. Comment on the issue with the PR link.
 5. Reply in German with 3–6 lines: what is done, the PR link, what to look at
-   when playtesting, anything left open. Then stop.
+   when playtesting, anything left open. The **last line is the branch preview link**
+   (`https://raw.githack.com/5ebi/first_web_game_medieval/<branch>/index.html`, note
+   that a fresh push can take a few minutes to appear), plus the live link
+   `https://5ebi.github.io/first_web_game_medieval/` if the PR is already merged.
+   Then stop.

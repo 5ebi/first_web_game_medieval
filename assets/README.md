@@ -27,6 +27,15 @@ Kostenlose Pixel-Editoren: **Piskel** (piskelapp.com, im Browser), **Lospec Pixe
 | `nature/stone_pile.png` | 32 × 24 | Steinhaufen auf Steinvorkommen |
 | `icons/<name>.png` | 32 × 32 | Symbole oben: wood, stone, iron, food, pop, day, storage |
 
+### Symbole (`icons/`)
+
+Ein Symbol ist ein 32 × 32-Raster, 1 Pixel pro Bildpunkt (wie die Vorlagen in `templates/icons/`).
+Das Spiel vergrössert es ganzzahlig auf die Bildschirmauflösung (2× bis 4×), damit es auch auf
+Retina-/Handy-Bildschirmen scharf bleibt. Du darfst auch ein ganzzahliges Vielfaches abgeben
+(z. B. 64 × 64 für mehr Details). Ein dunkler Rand um das Motiv hilft, dass es auf der Leiste lesbar bleibt.
+
+Icons are a 32 × 32 grid; the game scales them up by a whole factor to screen resolution. Whole multiples (64 × 64) work too.
+
 ### `tiles.png` – Bodenkacheln
 
 8 Zeilen × 4 Spalten, jede Zelle 32 × 32 Pixel. Die 4 Spalten sind Varianten derselben Kachel;

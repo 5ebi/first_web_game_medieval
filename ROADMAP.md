@@ -26,7 +26,8 @@ _Last updated: 2026-11-06_
 
 - Time only starts when castle **and** first warehouse stand. A day lasts 6 minutes at
   1×, a season one day, a year 4 days.
-- Only buildings with workers produce, in batches. The lumberjack is always free.
+- Only buildings with workers produce, in batches. The lumberjack costs
+  10 wood; it is free only when none stands and the player can't pay for one.
 - Working villagers eat 0.5 meat/min; 60 s without meat → game over.
 - Quarry must stand at least half on a stone field; lumberjack/hunter need forest,
   iron mine needs stone nearby.
@@ -39,6 +40,10 @@ _Last updated: 2026-11-06_
   (#16), raids and combat later.
 - Save format v4 (same `SAVE_KEY`): v3 saves are migrated (a blacksmith is dropped and
   its cost refunded).
+- Every reply to the owner and every PR body ends with a test link: live
+  `https://5ebi.github.io/first_web_game_medieval/`, or for an unmerged branch
+  `https://raw.githack.com/5ebi/first_web_game_medieval/<branch>/index.html`
+  (githack caches; a fresh push can take a few minutes to appear).
 - Music and sound are synthesized; no database. Saves live in `localStorage`. A DB
   only becomes relevant for accounts, cloud saves or leaderboards.
 

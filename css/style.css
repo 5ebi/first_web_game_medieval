@@ -133,6 +133,38 @@ button {
 }
 .resource-value .rate.up { color: var(--ok); }
 .resource-value .rate.down { color: #ff8a7a; }
+.resource-value .rate.zero { color: var(--text-dim); }
+/* the danger pulse is for the stock, the balance stays steady */
+.resource.danger .resource-value .rate { animation: none; }
+
+/* meat counter opens its breakdown */
+.resource.food { cursor: pointer; border-radius: 4px; padding: 2px 4px; margin: -2px -4px; }
+.resource.food:hover, .resource.food.open { background: rgba(255, 215, 0, 0.1); }
+.resource.food:focus-visible { outline: 1px solid var(--gold-light); }
+
+#food-pop {
+    position: fixed;
+    z-index: 30;
+    min-width: 210px;
+    max-width: calc(100vw - 16px);
+    background: var(--panel-dark);
+    border: 1px solid var(--gold);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.55);
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 12px 9px;
+}
+#food-pop.hidden { display: none; }
+#food-pop .fp-title { font-weight: 700; color: var(--gold-bright); margin-bottom: 5px; }
+#food-pop .fp-row { display: flex; justify-content: space-between; gap: 14px; padding: 1px 0; }
+#food-pop .fp-net { border-top: 1px solid rgba(139, 105, 20, 0.6); margin-top: 3px; padding-top: 4px; font-weight: 700; }
+#food-pop .rate { font-weight: 700; white-space: nowrap; }
+#food-pop .rate.up { color: var(--ok); }
+#food-pop .rate.down { color: #ff8a7a; }
+#food-pop .rate.zero { color: var(--text-dim); }
+#food-pop .fp-warn { color: #ff8a7a; margin-top: 4px; }
+#food-pop .fp-hint { color: var(--text-faint); font-size: 11.5px; margin-top: 5px; }
 .resource-value.muted { color: var(--text-dim); }
 
 .resource.day {
@@ -696,7 +728,10 @@ kbd {
 
     .resource { font-size: 12px; gap: 4px; }
     .resource-icon, .resource-icon canvas { width: 18px; height: 18px; }
-    .resource .rate { display: none; }
+    /* rates stay visible: a compact second line under the value, without "/min" */
+    .resource-value { display: inline-flex; flex-direction: column; align-items: flex-start; line-height: 1.05; }
+    .resource-value .rate { font-size: 10px; margin-left: 0; }
+    .resource-value .rate-unit { display: none; }
     #storage-res { display: none; }
     .day-bar { display: none; }
     #zoom-controls, #music-btn, #help-btn { display: none; }
