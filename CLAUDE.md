@@ -48,7 +48,7 @@ accessibility tree. Add a check to `tests/smoke.js` when you change behaviour.
 
 | File | Area | What lives there |
 |---|---|---|
-| `js/constants.js` | balance | map size, `TERRAIN`, `BUILDINGS` (cost, workers, production), `SEASONS`, `MILESTONES`, `SAVE_KEY` |
+| `js/constants.js` | balance | map size, `TERRAIN`, `BUILDINGS` (cost, workers, production), `WEAPONS` (smith products → soldier types), `SEASONS`, `MILESTONES`, `SAVE_KEY` |
 | `js/settings.js` | settings | persisted options (`lotk_settings_v1`) |
 | `js/i18n.js` | text | `t(key, vars)`, `bName`, `resName`; every UI string in `en` **and** `de` |
 | `js/audio.js` | audio | `AudioSys`: synthesized SFX, ambience (wind, rain, birds), procedural music |
@@ -56,6 +56,7 @@ accessibility tree. Add a check to `tests/smoke.js` when you change behaviour.
 | `js/map.js` | world gen | `GameMap`: seeded terrain, trees, stones, elevation |
 | `js/buildings.js` | state | `BuildingManager`: placed buildings, save/load of buildings |
 | `js/villagers.js` | life | `Villagers`: workers walking work routes (cosmetic), click info |
+| `js/units.js` | military | `Units`: soldiers recruited at the barracks (`{ id, type, x, y, hp, state }`), formation spots, save/load |
 | `js/effects.js` | fx | `Effects`: particles, floating texts |
 | `js/atmosphere.js` | fx | `Atmosphere`: weather, clouds, fog, rain/snow, birds, night lights |
 | `js/game.js` | rules | `Game`: economy tick, placement rules, seasons, milestones, save |
@@ -74,7 +75,8 @@ accessibility tree. Add a check to `tests/smoke.js` when you change behaviour.
 - `UI.selectBuilding(type)`, `UI.deselectBuilding()`, `UI.getPlacementPreview()`.
 - `Renderer.getCamera()`, `Renderer.setZoom(z)`, `Renderer.centerOn(wx, wy)`,
   `Renderer.worldToScreen(wx, wy)`. Tile → world: `tile * TILE_SIZE` (32).
-- `Atmosphere.setWeather('rain', true)`, `Villagers.getAll()`.
+- `Atmosphere.setWeather('rain', true)`, `Villagers.getAll()`, `Units.getAll()`.
+- `Game.setSmithProduct(id, 'sword')`, `Game.recruit(barracksId, 'archer')`, `Game.getState().weapons`.
 
 ## Conventions
 

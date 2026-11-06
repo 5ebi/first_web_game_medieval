@@ -31,6 +31,14 @@ _Last updated: 2026-11-06_
 - Quarry must stand at least half on a stone field; lumberjack/hunter need forest,
   iron mine needs stone nearby.
 - Villagers are cosmetic (they don't carry the economy), but they must look plausible.
+- The blacksmith (+25% tools bonus) is gone. Iron now goes into weapons: the **weapon
+  smith** forges bows (wood) or swords (iron), chosen in its info panel; the **barracks**
+  turns a free villager plus a weapon into an archer or swordsman. Soldiers count as
+  working villagers (they eat). Weapons are data-driven (`WEAPONS` in `constants.js`).
+- Military has no enemies yet: soldiers only stand guard. Selection/movement is next
+  (#16), raids and combat later.
+- Save format v4 (same `SAVE_KEY`): v3 saves are migrated (a blacksmith is dropped and
+  its cost refunded).
 - Music and sound are synthesized; no database. Saves live in `localStorage`. A DB
   only becomes relevant for accounts, cloud saves or leaderboards.
 
@@ -38,7 +46,7 @@ _Last updated: 2026-11-06_
 
 1. Merge PR #5, then playtest on a real iPhone (Safari) and Android (Chrome).
 2. PWA: manifest, service worker for offline play, icons.
-3. Balancing: iron has few uses; new houses add mouths before workers; winter food.
+3. Balancing: weapon costs / cycle times; new houses add mouths before workers; winter food.
 4. Missing basics: move buildings, manual worker assignment, roads, haptics on phones.
 5. Bigger direction (decide with the owner): night raids and defence, walls and
    towers, building upgrades, popularity / taxes like Stronghold.
