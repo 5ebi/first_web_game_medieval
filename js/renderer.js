@@ -135,7 +135,7 @@ const Renderer = (() => {
 
         // Soft, ragged transitions between different kinds of ground (no hard 32px tile edges):
         // a jagged strip of the neighbouring tile is drawn over each shared edge.
-        const landPriority = { [TERRAIN.SAND]: 1, [TERRAIN.DIRT]: 2, [TERRAIN.STONE_DEPOSIT]: 3, [TERRAIN.GRASS]: 4, [TERRAIN.FLOWERS]: 4, [TERRAIN.GRASS_DARK]: 5, [TERRAIN.FOREST]: 6 };
+        const landPriority = { [TERRAIN.SAND]: 1, [TERRAIN.DIRT]: 2, [TERRAIN.ROCKY]: 2.5, [TERRAIN.STONE_DEPOSIT]: 3, [TERRAIN.MEADOW]: 3.5, [TERRAIN.GRASS]: 4, [TERRAIN.FLOWERS]: 4, [TERRAIN.GRASS_DARK]: 5, [TERRAIN.FOREST]: 6 };
         const T = TILE_SIZE;
         for (let y = 0; y < MAP_HEIGHT; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
@@ -151,9 +151,12 @@ const Renderer = (() => {
                     if ((landPriority[n] === 4 && landPriority[t] === 4)) return;
                     tctx.save();
                     tctx.beginPath();
+                    // an organic, wavy edge reaching up to ~10px into the tile
+                    const ph = ((x * 92821 + y * 68917 + (dx + 2) * 31 + (dy + 2) * 17) >>> 0) % 628 / 100;
                     for (let i = 0; i < T; i += 2) {
                         const h0 = (x * 928371 + y * 364479 + i * 7919 + (dx + 2) * 31 + (dy + 2) * 17) >>> 0;
-                        const depth = 1 + (h0 % 5 === 0 ? 3 : h0 % 3);
+                        const wave = Math.sin(i * 0.21 + ph) * 0.6 + Math.sin(i * 0.47 + ph * 2.3) * 0.4;
+                        const depth = Math.max(1, Math.round(4 + wave * 4 + (h0 % 3) - 1));
                         if (dx === 1) tctx.rect((x + 1) * T - depth, y * T + i, depth, 2);
                         if (dx === -1) tctx.rect(x * T, y * T + i, depth, 2);
                         if (dy === 1) tctx.rect(x * T + i, (y + 1) * T - depth, 2, depth);
@@ -197,6 +200,8 @@ const Renderer = (() => {
             tctx.drawImage(Sprites.drawFlowers(2, d.seed), d.x * TILE_SIZE, d.y * TILE_SIZE);
         });
 
+        drawHillShade(tctx, grid, winter);
+
         // Minimap base (1px per tile)
         Atmosphere.onMapChanged();
 
@@ -232,6 +237,39 @@ const Renderer = (() => {
         }
     }
 
+    // Gentle hills: the elevation field is lit from the upper left and the result is
+    // posterised into a few bands on a 2px grid, so the ground has relief but stays pixel art.
+    function drawHillShade(tctx, grid, winter) {
+        const C = 2;
+        const W = MAP_PIXEL_W / C, H = MAP_PIXEL_H / C;
+        const img = tctx.createImageData(W, H);
+        const d = img.data;
+        const k = 1 / (TILE_SIZE / C);
+        const h = (x, y) => GameMap.getElevation(x * k - 0.5, y * k - 0.5);
+        for (let y = 0; y < H; y++) {
+            const ty = Math.floor(y * C / TILE_SIZE);
+            for (let x = 0; x < W; x++) {
+                const tx = Math.floor(x * C / TILE_SIZE);
+                if (grid[ty][tx] === TERRAIN.WATER) continue;
+                // slope towards the light (upper left) brightens, away darkens
+                const gx = h(x + 3, y) - h(x - 3, y), gy = h(x, y + 3) - h(x, y - 3);
+                let l = -(gx * 0.8 + gy) * 420;
+                // ordered dither so band edges are pixel-crisp but not ruler-straight
+                l += ((x * 3 + y * 7) % 4 - 1.5) * 0.06;
+                const band = Math.max(-3, Math.min(3, Math.round(l)));
+                if (!band) continue;
+                const i = (y * W + x) * 4;
+                if (band > 0) { d[i] = 255; d[i + 1] = 245; d[i + 2] = 200; d[i + 3] = band * (winter ? 9 : 13); }
+                else { d[i] = 20; d[i + 1] = 30; d[i + 2] = 20; d[i + 3] = -band * (winter ? 12 : 18); }
+            }
+        }
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        c.getContext('2d').putImageData(img, 0, 0);
+        tctx.imageSmoothingEnabled = false;
+        tctx.drawImage(c, 0, 0, MAP_PIXEL_W, MAP_PIXEL_H);
+    }
+
     function invalidateTerrainCache() {
         terrainCanvas = null;
         minimapTerrain = null;
@@ -250,6 +288,48 @@ const Renderer = (() => {
         if (!Game.isClockRunning()) return 0;
         const v = Math.max(0, Math.cos((Game.getHour() - 1) / 24 * Math.PI * 2));
         return Math.pow(v, 1.5);
+    }
+
+    // ---------- Sun & shadows ----------
+    // The sun rises in the east (right) and sets in the west (left): shadows swing from
+    // long to the left in the morning, short around noon, to long to the right at dusk.
+    function sunParams(night) {
+        const hour = Game.isClockRunning() ? Game.getHour() : 10;
+        const t = Math.max(0, Math.min(1, (hour - 6) / 14));
+        const s = (0.5 - t) * 2;                 // +1 morning .. -1 evening
+        const cover = Atmosphere.getCover();
+        const overcast = Math.max(0, Math.min(1, (cover - 0.35) / 0.55));
+        const alpha = 0.34 * Math.pow(1 - night, 1.5) * (1 - overcast * 0.7);
+        return { shear: s * 1.05, len: 0.32 + Math.abs(s) * 0.42, alpha };
+    }
+
+    let shadowCanvas = null, sctx = null;
+    function prepareShadowLayer() {
+        if (!shadowCanvas || shadowCanvas.width !== canvas.width || shadowCanvas.height !== canvas.height) {
+            shadowCanvas = document.createElement('canvas');
+            shadowCanvas.width = canvas.width; shadowCanvas.height = canvas.height;
+            sctx = shadowCanvas.getContext('2d');
+        }
+        sctx.setTransform(1, 0, 0, 1, 0, 0);
+        sctx.clearRect(0, 0, shadowCanvas.width, shadowCanvas.height);
+        sctx.imageSmoothingEnabled = false;
+    }
+
+    // Projects a sprite's silhouette onto the ground from its base line
+    function castShadow(sprite, ox, oy, baseY, sun) {
+        if (!sctx) return;
+        const sil = Sprites.getSilhouette(sprite);
+        if (!sil) return;
+        sctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -camera.x * dpr * zoom, -camera.y * dpr * zoom);
+        sctx.translate(0, baseY);
+        sctx.transform(1, 0, sun.shear, sun.len, 0, 0);
+        sctx.drawImage(sil, ox, oy - baseY);
+    }
+
+    function buildingSprite(b) {
+        return (season === 'winter' && !b.buildStart)
+            ? Sprites.getBuildingSeasonal(b.type, { grown: b.grown }, season)
+            : Sprites.getBuilding(b.type, { grown: b.grown });
     }
 
     // ---------- Main render ----------
@@ -326,29 +406,41 @@ const Renderer = (() => {
             }
         });
 
-        // Collect drawables for depth sorting
+        // Collect drawables for depth sorting. Each may also cast a sun shadow.
         const drawables = [];
+        const sun = sunParams(night);
+        const wind = Atmosphere.getWind();
 
-        // Trees
+        // Trees (crowns sway in the wind, a few px at most)
+        const swayAmp = 0.5 + wind * 1.8;
         GameMap.getTrees().forEach(t => {
             if (t.x + 40 > vx0 && t.x - 40 < vx1 && t.y + 60 > vy0 && t.y - 60 < vy1) {
+                const kind = t.type === 'pine' ? 'pine' : 'oak';
+                const variant = ((t.x * 13 + t.y * 7) | 0) % 3;
+                const ph = t.x * 0.045 + t.y * 0.031;
+                const sway = Math.sin(timeSec * (0.9 + wind * 1.4) + ph) + Math.sin(timeSec * 2.3 + ph * 1.7) * 0.25;
+                const frame = Math.max(-2, Math.min(2, Math.round(sway * swayAmp)));
+                const sprite = Sprites.getTreeFrame(kind, season, variant, frame);
+                const ox = Math.round(t.x - sprite.width / 2), oy = Math.round(t.y - sprite.height + 16);
                 drawables.push({
                     y: t.y + 16,
-                    draw: () => {
-                        const sprite = Sprites.getTree(t.type === 'pine' ? 'pine' : 'oak', season, ((t.x * 13 + t.y * 7) | 0) % 3);
-                        drawShadowEllipse(t.x + 3, t.y + 15, 9, 4, 0.22);
-                        ctx.drawImage(sprite, Math.round(t.x - sprite.width / 2), Math.round(t.y - sprite.height + 16));
-                    }
+                    shadow: () => castShadow(sprite, ox, oy, t.y + 16, sun),
+                    draw: () => ctx.drawImage(sprite, ox, oy),
                 });
             }
         });
 
-
         // Buildings
         BuildingManager.getAll().forEach(b => {
-            if (b.pixelX + b.width < vx0 || b.pixelX > vx1 || b.pixelY + b.height < vy0 || b.pixelY > vy1) return;
+            if (b.pixelX + b.width < vx0 - 60 || b.pixelX > vx1 + 60 || b.pixelY + b.height < vy0 || b.pixelY > vy1 + 120) return;
             drawables.push({
                 y: b.pixelY + b.height,
+                shadow: () => {
+                    if (b.buildStart) return;
+                    const spr = buildingSprite(b);
+                    if (!spr) return;
+                    castShadow(spr, b.pixelX + Math.round((b.width - spr.width) / 2), b.pixelY + b.height - spr.height, b.pixelY + b.height - 2, sun);
+                },
                 draw: () => drawBuilding(b, nowT, night, hoverInfo),
             });
             // Smoke
@@ -367,19 +459,41 @@ const Renderer = (() => {
             }
         });
 
-        // Villagers
+        // Villagers: feet exactly on their position, sun shadow plus a small contact shadow
+        const selVillager = hoverInfo?.villager;
         Villagers.getAll().forEach(v => {
             if (v.x < vx0 - 20 || v.x > vx1 + 20 || v.y < vy0 - 30 || v.y > vy1 + 20) return;
+            const sprite = Sprites.drawVillager(v.frame, v.palette, v.flip, v.tool, v.carry);
+            const ox = Math.round(v.x - sprite.width / 2), oy = Math.round(v.y) - sprite.height + 1 + (v.bob || 0);
             drawables.push({
                 y: v.y,
+                shadow: () => castShadow(sprite, ox, oy - (v.bob || 0), Math.round(v.y) + 1, sun),
                 draw: () => {
-                    const sprite = Sprites.drawVillager(v.frame, v.palette, v.flip, v.tool);
-                    drawShadowEllipse(v.x, v.y, 5, 2, 0.25);
-                    const bob = v.waitT > 0 ? (v.frame ? -1 : 0) : 0;
-                    ctx.drawImage(sprite, Math.round(v.x - sprite.width / 2), Math.round(v.y - sprite.height + bob));
-                }
+                    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+                    ctx.fillRect(Math.round(v.x) - 3, Math.round(v.y), 7, 1);
+                    if (selVillager === v) {
+                        ctx.strokeStyle = 'rgba(255, 215, 0, 0.95)';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.ellipse(Math.round(v.x) + 0.5, Math.round(v.y) + 0.5, 6, 2.5, 0, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                    ctx.drawImage(sprite, ox, oy);
+                },
             });
         });
+
+        // Sun shadows: drawn opaque into their own layer, then laid over the ground once,
+        // so overlapping shadows don't stack into dark blotches
+        if (sun.alpha > 0.01) {
+            prepareShadowLayer();
+            drawables.forEach(d => d.shadow && d.shadow());
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.globalAlpha = sun.alpha;
+            ctx.drawImage(shadowCanvas, 0, 0);
+            ctx.globalAlpha = 1;
+            ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -camera.x * dpr * zoom, -camera.y * dpr * zoom);
+        }
 
         drawables.sort((a, b) => a.y - b.y);
         drawables.forEach(d => d.draw());
@@ -424,7 +538,7 @@ const Renderer = (() => {
             ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         }
 
-        // Weather, light halos, rain, vignette
+        // Weather, light halos, rain
         Atmosphere.drawScreen(ctx, view);
 
         // Placement hint text near the cursor
@@ -452,13 +566,6 @@ const Renderer = (() => {
             return;
         }
 
-        // Soft drop shadow (silhouette offset to the lower right)
-        const shadow = Sprites.getBuildingShadow(b.type, { grown: b.grown });
-        if (shadow) {
-            ctx.globalAlpha = 0.28;
-            ctx.drawImage(shadow, ox + 4, oy + 4);
-            ctx.globalAlpha = 1;
-        }
 
         // Small "settle" bounce right after completion (in whole pixels)
         let lift = 0;
@@ -624,12 +731,12 @@ const Renderer = (() => {
         }
 
         // Builder hammering next to the site
-        const swing = Math.floor(nowT / 110) % 2;
+        const swing = Math.floor(nowT / 140) % 2;
         const bx = fx - 6, by = fy + fh;
-        const villager = Sprites.drawVillager(swing, (b.id + 2) % 6, false, 'hammer');
-        ctx.fillStyle = 'rgba(0,0,0,0.25)';
-        ctx.fillRect(Math.round(bx - 5), Math.round(by - 1), 10, 2);
-        ctx.drawImage(villager, Math.round(bx - villager.width / 2), Math.round(by - villager.height + swing));
+        const villager = Sprites.drawVillager(5 + swing, (b.id + 2) % 6, false, 'hammer');
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(Math.round(bx - 3), Math.round(by), 7, 1);
+        ctx.drawImage(villager, Math.round(bx - villager.width / 2), Math.round(by - villager.height + 1));
 
         // Thin progress bar above the site
         const bw = Math.min(fw - 8, 48);

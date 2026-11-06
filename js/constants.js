@@ -38,6 +38,8 @@ const TERRAIN = {
     FOREST: 5,       // has trees (resource)
     STONE_DEPOSIT: 6, // has stones (resource)
     FLOWERS: 7,
+    ROCKY: 8,        // gravelly ground with pebbles (buildable, not a stone field)
+    MEADOW: 9,       // dry, sunny meadow (buildable)
 };
 
 // Building definitions
@@ -228,4 +230,6 @@ const MINIMAP_COLORS = {
     [TERRAIN.FOREST]: '#2d5b1e',
     [TERRAIN.STONE_DEPOSIT]: '#7a7a6a',
     [TERRAIN.FLOWERS]: '#6a9f4c',
+    [TERRAIN.ROCKY]: '#7a7f68',
+    [TERRAIN.MEADOW]: '#7f9a48',
 };

@@ -45,7 +45,6 @@ const Atmosphere = (() => {
     let noise = null, mask = null;
     let fogCanvas = null, fogCtx = null, fogImg = null, fogRect = null, fogFrame = 0;
     let glowSprite = null, fireflySprite = null;
-    let vignette = null, vigKey = '';
 
     // ---------- helpers ----------
     const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -246,24 +245,6 @@ const Atmosphere = (() => {
                 ctx.fillRect(x * cellPx, y * cellPx, cellPx, cellPx);
             }
         }
-        return c;
-    }
-
-    function makeVignette(w, h) {
-        const s = 3;
-        const vw = Math.ceil(w / s), vh = Math.ceil(h / s);
-        const c = makeCanvas(vw, vh);
-        const ctx = c.getContext('2d');
-        const img = ctx.createImageData(vw, vh);
-        for (let y = 0; y < vh; y++) {
-            for (let x = 0; x < vw; x++) {
-                const nx = (x + 0.5) / vw * 2 - 1, ny = (y + 0.5) / vh * 2 - 1;
-                const r = Math.sqrt(nx * nx * 0.9 + ny * ny * 1.1);
-                const d = clamp((r - 0.78) / 0.5, 0, 1);
-                img.data[(y * vw + x) * 4 + 3] = [0, 16, 30, 46][clamp(Math.floor(d * 4), 0, 3)];
-            }
-        }
-        ctx.putImageData(img, 0, 0);
         return c;
     }
 
@@ -539,7 +520,7 @@ const Atmosphere = (() => {
         ctx.globalAlpha = 1;
     }
 
-    // Screen-space pass after the night tint: dusk, rain, glows, flash, vignette
+    // Screen-space pass after the night tint: dusk, rain, glows, flash
     function drawScreen(ctx, view) {
         if (!glowSprite) {
             glowSprite = makeGlow(18, 2, '255,170,70', [[0.3, 0.5], [0.5, 0.36], [0.7, 0.22], [0.9, 0.1]]);
@@ -605,6 +586,7 @@ const Atmosphere = (() => {
         view.setScreen();
 
         if (enabled) {
+            followCamera(view, [drops, splashes, flakes]);
             drawRain(ctx, view);
             drawSnow(ctx, view);
             if (flash > 0.01) {
@@ -612,44 +594,95 @@ const Atmosphere = (() => {
                 ctx.fillRect(0, 0, W, H);
             }
         }
+    }
 
-        // Pixel vignette
-        const key = `${W}x${H}`;
-        if (vigKey !== key) { vignette = makeVignette(W, H); vigKey = key; }
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(vignette, 0, 0, vignette.width * 3, vignette.height * 3);
+    // Rain and snow live in screen space but are anchored to the world: when the camera
+    // pans or zooms, every particle moves with the ground instead of sticking to the screen.
+    let lastCam = null;
+    function followCamera(view, list) {
+        const cam = { x: view.x0, y: view.y0, z: view.zoom };
+        if (lastCam) {
+            const k = cam.z / lastCam.z;
+            const dx = (cam.x - lastCam.x) * cam.z, dy = (cam.y - lastCam.y) * cam.z;
+            if (dx || dy || k !== 1) {
+                list.forEach(arr => arr.forEach(d => {
+                    if (k !== 1) { d.x *= k; d.y *= k; if (d.gy !== undefined) d.gy *= k; }
+                    d.x -= dx; d.y -= dy; if (d.gy !== undefined) d.gy -= dy;
+                }));
+            }
+        }
+        lastCam = cam;
+    }
+
+    function wrapX(d, W) {
+        if (d.x < -80) d.x += W + 140;
+        else if (d.x > W + 60) d.x -= W + 140;
     }
 
     let lastRainT = performance.now();
+    function newDrop(W, H, top) {
+        const near = Math.random() < 0.28;
+        return {
+            x: rand(-60, W + 20), y: top ? rand(-H * 0.5, -10) : rand(-H, H),
+            vy: near ? rand(720, 860) : rand(480, 600),
+            len: near ? 9 + Math.floor(Math.random() * 4) : 5 + Math.floor(Math.random() * 3),
+            near, gy: rand(H * 0.05, H + 10),
+        };
+    }
+
     function drawRain(ctx, view) {
         const now = performance.now();
         const dt = Math.min(0.05, (now - lastRainT) / 1000);
         lastRainT = now;
         const W = view.w, H = view.h;
-        const want = Math.floor(p.rain * 240 * (W * H) / (1280 * 800));
-        while (drops.length < want) drops.push({ x: rand(-40, W), y: rand(-H, 0), vy: rand(460, 600), gy: rand(H * 0.1, H) });
+        const want = Math.floor(p.rain * 330 * (W * H) / (1280 * 800));
+        while (drops.length < want) drops.push(newDrop(W, H, drops.length > want * 0.5));
         if (drops.length > want) drops.length = want;
         if (!drops.length && !splashes.length) return;
 
-        const vx = 60 + p.wind * 80;
-        ctx.fillStyle = 'rgba(175, 195, 235, 0.55)';
-        drops.forEach(d => {
-            d.y += d.vy * dt;
-            d.x += vx * dt;
-            if (d.y >= d.gy) {
-                splashes.push({ x: Math.round(d.x), y: Math.round(d.gy), t: 0 });
-                d.x = rand(-60, W); d.y = rand(-60, -10); d.gy = rand(H * 0.1, H);
-            }
-            const s = vx / d.vy * 4;
-            for (let k = 0; k < 3; k++) ctx.fillRect(Math.round(d.x + k * s), Math.round(d.y + k * 4), 1, 4);
-        });
+        const slant = (40 + p.wind * 70) / 700; // horizontal px per vertical px
+        // far layer first: thin and faint; near layer: longer, brighter streaks
+        for (let pass = 0; pass < 2; pass++) {
+            ctx.fillStyle = pass ? 'rgba(200, 214, 240, 0.42)' : 'rgba(170, 188, 225, 0.22)';
+            drops.forEach(d => {
+                if (d.near !== !!pass) return;
+                if (pass === 0) {
+                    d.y += d.vy * dt; d.x += d.vy * slant * dt;
+                    wrapX(d, W);
+                    if (d.y >= d.gy) {
+                        if (d.gy > -10 && d.gy < H + 10) splashes.push({ x: Math.round(d.x), y: Math.round(d.gy), t: 0, big: false });
+                        Object.assign(d, newDrop(W, H, true));
+                    }
+                }
+                // a streak is a stepped 1px line: crisp at every zoom
+                for (let k = 0; k < d.len; k++) ctx.fillRect(Math.round(d.x - (d.len - k) * slant), Math.round(d.y - d.len + k), 1, 1);
+            });
+            if (pass === 0) drops.forEach(d => {
+                if (!d.near) return;
+                d.y += d.vy * dt; d.x += d.vy * slant * dt;
+                wrapX(d, W);
+                if (d.y >= d.gy) {
+                    if (d.gy > -10 && d.gy < H + 10) splashes.push({ x: Math.round(d.x), y: Math.round(d.gy), t: 0, big: true });
+                    Object.assign(d, newDrop(W, H, true));
+                }
+            });
+        }
+        // Splashes: a tiny crown, then a widening ring on the ground
         splashes.forEach(s => { s.t += dt; });
-        splashes = splashes.filter(s => s.t < 0.18);
+        splashes = splashes.filter(s => s.t < 0.3);
         splashes.forEach(s => {
-            ctx.fillStyle = `rgba(200, 215, 245, ${(0.6 * (1 - s.t / 0.18)).toFixed(3)})`;
-            ctx.fillRect(s.x - 4, s.y, 2, 1);
-            ctx.fillRect(s.x + 2, s.y, 2, 1);
-            ctx.fillRect(s.x - 1, s.y - 2, 2, 1);
+            const k = s.t / 0.3;
+            const a = (s.big ? 0.5 : 0.32) * (1 - k);
+            ctx.fillStyle = `rgba(215, 228, 250, ${a.toFixed(3)})`;
+            if (k < 0.35) {
+                ctx.fillRect(s.x - 2, s.y - 1 - Math.round(k * 6), 1, 1);
+                ctx.fillRect(s.x + 2, s.y - 1 - Math.round(k * 6), 1, 1);
+                ctx.fillRect(s.x, s.y - 2 - Math.round(k * 8), 1, 1);
+            }
+            const r = 1 + Math.round(k * (s.big ? 4 : 3));
+            ctx.fillRect(s.x - r, s.y, 1, 1); ctx.fillRect(s.x + r, s.y, 1, 1);
+            ctx.fillRect(s.x - r + 1, s.y - 1, 2 * r - 1, 1);
+            ctx.fillRect(s.x - r + 1, s.y + 1, 2 * r - 1, 1);
         });
     }
 
@@ -661,7 +694,7 @@ const Atmosphere = (() => {
         const W = view.w, H = view.h;
         const want = Math.floor(p.snow * 190 * (W * H) / (1280 * 800));
         while (flakes.length < want) {
-            flakes.push({ x: rand(-40, W), y: rand(-H, 0), vy: rand(28, 60), ph: rand(0, 6), s: Math.random() < 0.3 ? 2 : 1, gy: rand(H * 0.2, H) });
+            flakes.push({ x: rand(-40, W), y: rand(-H, H), vy: rand(28, 60), ph: rand(0, 6), s: Math.random() < 0.3 ? 2 : 1, gy: rand(H * 0.2, H) });
         }
         if (flakes.length > want) flakes.length = want;
         if (!flakes.length) return;
@@ -669,7 +702,8 @@ const Atmosphere = (() => {
         flakes.forEach(f => {
             f.y += f.vy * dt;
             f.x += (drift + Math.sin(now / 700 + f.ph) * 14) * dt;
-            if (f.y > f.gy || f.x > W + 10) { f.x = rand(-40, W); f.y = rand(-40, -5); f.gy = rand(H * 0.2, H); }
+            wrapX(f, W);
+            if (f.y > f.gy) { f.x = rand(-40, W); f.y = rand(-40, -5); f.gy = rand(H * 0.2, H); }
             const fade = clamp((f.gy - f.y) / 30, 0, 1); // melt into the ground
             ctx.fillStyle = `rgba(245, 248, 255, ${(0.85 * fade).toFixed(3)})`;
             ctx.fillRect(Math.round(f.x), Math.round(f.y), f.s, f.s);
@@ -703,6 +737,8 @@ const Atmosphere = (() => {
     }
 
     function getWeather() { return enabled ? weather : 'clear'; }
+    function getWind() { return enabled ? p.wind : 0.3; }
+    function getCover() { return enabled ? p.cover : 0.18; }
     function isEnabled() { return enabled; }
     function setWeatherListener(fn) { onWeatherChange = fn; }
 
@@ -716,6 +752,8 @@ const Atmosphere = (() => {
         isEnabled,
         getSkyIcon,
         getWeather,
+        getWind,
+        getCover,
         setWeather,
         setWeatherListener,
     };

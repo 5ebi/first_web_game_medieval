@@ -71,37 +71,33 @@
         <!-- Pause banner -->
         <div id="pause-banner" class="hidden"><span class="pause-title" data-i18n="pause.title">PAUSED</span> <span data-i18n="pause.sub">press Space to continue</span></div>
 
-        <!-- Mobile: build button, goal chip and the backdrop behind the build sheet -->
-        <button id="build-fab" aria-haspopup="true">
-            <span class="fab-icon" id="fab-icon"></span>
-            <span data-i18n="menu.build">Build</span>
-            <span class="fab-dot hidden" id="fab-dot"></span>
-        </button>
-        <button id="goal-chip"><span class="goal-chip-label" data-i18n="menu.goal">Next goal</span><span id="goal-chip-text"></span></button>
-        <div id="sheet-backdrop" class="hidden"></div>
-
-        <!-- Building Menu (sidebar on desktop, bottom sheet on phones) -->
-        <div id="building-menu">
-            <div id="menu-head">
-                <h3 data-i18n="menu.buildings">Buildings</h3>
-                <button id="menu-close" data-i18n-title="s.close">&times;</button>
+        <!-- Command panel (bottom): minimap, building categories, buildings or the
+             info scroll of the selected building / villager, and the next goal -->
+        <div id="command-panel">
+            <div id="cp-map" class="cp-frame">
+                <canvas id="minimap" width="216" height="162" data-i18n-title="menu.minimap"></canvas>
             </div>
-            <div id="building-list"></div>
-            <div id="menu-bottom">
+            <div id="cp-main" class="cp-frame">
+                <div id="cp-cats" role="tablist"></div>
+                <div id="cp-body">
+                    <div id="cp-build" class="cp-view"></div>
+                    <div id="info-panel" class="cp-view hidden">
+                        <div id="info-portrait"></div>
+                        <div id="info-main">
+                            <h3 id="info-title">Building</h3>
+                            <div id="info-content"></div>
+                        </div>
+                        <div id="info-actions"></div>
+                        <button id="info-close" data-i18n-title="info.close">&times;</button>
+                    </div>
+                </div>
+            </div>
+            <div id="cp-side" class="cp-frame">
                 <div id="goal-box">
                     <div class="goal-head"><span data-i18n="menu.goal">Next goal</span><span id="goal-count">0/0</span></div>
                     <div id="goal-text"></div>
                 </div>
-                <canvas id="minimap" width="216" height="162" data-i18n-title="menu.minimap"></canvas>
             </div>
-        </div>
-
-        <!-- Info Panel (shows when clicking a placed building) -->
-        <div id="info-panel" class="hidden">
-            <button id="info-close" data-i18n-title="info.close">&times;</button>
-            <h3 id="info-title">Building</h3>
-            <div id="info-content"></div>
-            <div id="info-actions"></div>
         </div>
 
         <!-- Placement banner (visible while a building is selected) -->
