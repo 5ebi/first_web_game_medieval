@@ -74,6 +74,13 @@ const UI = (() => {
             zoomLabel: $('zoom-label'),
             resourceBar: $('resource-bar'),
             placeBanner: $('place-banner'),
+            buildFab: $('build-fab'),
+            fabDot: $('fab-dot'),
+            fabIcon: $('fab-icon'),
+            goalChip: $('goal-chip'),
+            goalChipText: $('goal-chip-text'),
+            sheetBackdrop: $('sheet-backdrop'),
+            menuClose: $('menu-close'),
             placeText: $('place-text'),
             placeHint: $('place-hint'),
             placeCancel: $('place-cancel'),
@@ -91,6 +98,11 @@ const UI = (() => {
 
         els.infoClose.addEventListener('click', () => hideInfo());
         els.placeCancel.addEventListener('click', () => deselectBuilding());
+        els.fabIcon.appendChild(Sprites.drawIcon('hammer'));
+        els.buildFab.addEventListener('click', openSheet);
+        els.goalChip.addEventListener('click', openSheet);
+        els.menuClose.addEventListener('click', () => { closeSheet(); AudioSys.play('click'); });
+        els.sheetBackdrop.addEventListener('click', closeSheet);
         els.helpClose.addEventListener('click', () => { els.helpScreen.classList.add('hidden'); AudioSys.play('click'); });
 
         Lang.onChange(onLanguageChanged);
@@ -113,7 +125,7 @@ const UI = (() => {
         // the top bar wraps into two rows on phones: toasts and panels must start below it
         document.documentElement.style.setProperty('--bar-bottom', top + 'px');
         if (isCompact()) {
-            Renderer.setInsets({ top, right: 0, bottom: els.buildingMenu.offsetHeight || 120, left: 0 });
+            Renderer.setInsets({ top, right: 0, bottom: 0, left: 0 });
         } else {
             Renderer.setInsets({ top, right: els.buildingMenu.offsetWidth || 240, bottom: 0, left: 0 });
         }
@@ -152,42 +164,105 @@ const UI = (() => {
     }
 
     // ---------- building menu ----------
+    // Menu groups; the next milestone's building gets a "goal" badge
+    const MENU_GROUPS = [
+        { id: 'core', types: ['castle', 'warehouse'] },
+        { id: 'resources', types: ['lumberjack', 'hunter', 'quarry', 'iron_mine', 'blacksmith'] },
+        { id: 'housing', types: ['house', 'tavern'] },
+    ];
+    const GOAL_BUILDING = {
+        castle: 'castle', warehouse: 'warehouse', lumberjack: 'lumberjack', hunter: 'hunter', quarry: 'quarry',
+        houses2: 'house', workers15: 'house', winter1: 'hunter', iron20: 'iron_mine', smith: 'blacksmith', pop30: 'house',
+    };
+
+    const iconUrls = {};
+    function iconUrl(name) {
+        if (!iconUrls[name]) iconUrls[name] = Sprites.drawIcon(name).toDataURL();
+        return iconUrls[name];
+    }
+    function ic(name) { return `<img class="ic" src="${iconUrl(name)}" alt="">`; }
+
     function buildBuildingMenu() {
         els.buildingList.innerHTML = '';
-        BUILD_ORDER.forEach(type => {
-            const def = BUILDINGS[type];
-            const btn = document.createElement('button');
-            btn.className = 'building-btn';
-            btn.dataset.type = type;
-
-            const thumb = Sprites.getBuildingThumb(type, 40);
-            thumb.className = 'b-thumb';
-
-            const text = document.createElement('div');
-            text.className = 'b-text';
-            text.innerHTML = `
-                <span class="b-name">${bName(def)}<span class="b-key">${def.hotkey}</span></span>
-                <span class="b-cost">${costHtml(def)}</span>
-                <span class="b-info">${infoString(def)}</span>
-            `;
-
-            btn.appendChild(thumb);
-            btn.appendChild(text);
-
-            btn.addEventListener('click', () => {
-                if (btn.classList.contains('disabled')) {
-                    const reason = Game.getUnavailableReason(type);
-                    showNotification(reason || t('g.notavailable'), 'warning');
-                    AudioSys.play('error');
-                    return;
-                }
-                selectBuilding(type);
+        MENU_GROUPS.forEach(group => {
+            const head = document.createElement('div');
+            head.className = 'menu-group';
+            head.textContent = t('cat.' + group.id);
+            els.buildingList.appendChild(head);
+            group.types.forEach(type => {
+                const def = BUILDINGS[type];
+                const btn = document.createElement('button');
+                btn.className = 'building-btn';
+                btn.dataset.type = type;
+                const thumb = Sprites.getBuildingThumb(type, 40);
+                thumb.className = 'b-thumb';
+                const text = document.createElement('div');
+                text.className = 'b-text';
+                text.innerHTML = `
+                    <span class="b-name">${bName(def)}<span class="b-key">${def.hotkey}</span></span>
+                    <span class="b-cost"></span>
+                    <span class="b-info">${infoHtml(def)}</span>
+                    <span class="b-lock"></span>
+                `;
+                const badge = document.createElement('span');
+                badge.className = 'b-badge';
+                badge.textContent = t('b.goal');
+                btn.appendChild(thumb);
+                btn.appendChild(text);
+                btn.appendChild(badge);
+                btn.addEventListener('click', () => {
+                    if (btn.classList.contains('disabled')) {
+                        showNotification(Game.getUnavailableReason(type) || t('g.notavailable'), 'warning');
+                        AudioSys.play('error');
+                        btn.classList.remove('shake'); void btn.offsetWidth; btn.classList.add('shake');
+                        return;
+                    }
+                    selectBuilding(type);
+                });
+                btn.addEventListener('mouseenter', () => showBuildingTooltip(btn, type));
+                btn.addEventListener('mouseleave', hideTooltip);
+                els.buildingList.appendChild(btn);
             });
-            btn.addEventListener('mouseenter', () => showBuildingTooltip(btn, type));
-            btn.addEventListener('mouseleave', hideTooltip);
-            els.buildingList.appendChild(btn);
         });
         updateBuildingButtons();
+    }
+
+    // Cost with resource icons; amounts you cannot pay yet are red
+    function costIconsHtml(type) {
+        const cost = Game.getCost(type);
+        const res = Game.getState().resources;
+        const parts = ['wood', 'stone', 'iron'].filter(r => cost[r] > 0)
+            .map(r => `<span class="ci${res[r] < cost[r] ? ' missing' : ''}">${ic(r)}${cost[r]}</span>`);
+        return parts.length ? parts.join('') : `<span class="c-free">${t('free')}</span>`;
+    }
+
+    // Workers and what the building gives, as compact icon chips
+    function infoHtml(def) {
+        const parts = [];
+        if (def.workers > 0) parts.push(`<span class="ci">${ic('pop')}${def.workers}</span>`);
+        if (def.production) {
+            const p = def.production;
+            parts.push(`<span class="ci up">${ic(p.resource)}+${fmtNum(p.amount * 60 / p.cycle)}/min</span>`);
+        }
+        if (def.provides.populationCap) parts.push(`<span class="ci up">+${def.provides.populationCap} ${ic('pop')}</span>`);
+        if (def.provides.storage) parts.push(`<span class="ci up">${ic('storage')}+${def.provides.storage}</span>`);
+        if (def.provides.productionBonus) parts.push(`<span class="ci up">+${Math.round(def.provides.productionBonus * 100)}% ${ic('hammer')}</span>`);
+        return parts.join('');
+    }
+
+    // Short reason on the card itself (the full one is shown when tapping it)
+    function shortReason(type) {
+        const def = BUILDINGS[type];
+        if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) return t('b.built');
+        if (type !== 'castle' && !Game.hasCastle()) return t('lock.castle');
+        if (type !== 'castle' && type !== 'warehouse' && !Game.hasWarehouse()) return t('lock.warehouse');
+        const cost = Game.getCost(type), res = Game.getState().resources;
+        const missing = ['wood', 'stone', 'iron'].filter(r => cost[r] > res[r])
+            .map(r => `${Math.ceil(cost[r] - res[r])} ${resName(r)}`);
+        if (missing.length) return t('lock.missing', { list: missing.join(', ') });
+        const free = Game.getFreeWorkers();
+        if (def.workers > free) return t('lock.workers', { n: def.workers, have: free });
+        return '';
     }
 
     function costHtml(def) {
@@ -256,6 +331,7 @@ const UI = (() => {
         selectedBuilding = type;
         justPlaced = null;
         pendingTouch = null;
+        closeSheet();
         updatePlaceBanner();
         els.canvas.classList.add('placing');
         AudioSys.play('select');
@@ -277,6 +353,7 @@ const UI = (() => {
 
     function updatePlaceBanner() {
         if (!els.placeBanner) return;
+        document.getElementById('game-container').classList.toggle('is-placing', !!selectedBuilding);
         if (!selectedBuilding) { els.placeBanner.classList.add('hidden'); return; }
         const touch = lastInputTouch || window.matchMedia('(pointer: coarse)').matches;
         els.placeText.textContent = t('pl.placing', { name: bName(selectedBuilding) });
@@ -286,21 +363,46 @@ const UI = (() => {
     }
 
     function updateBuildingButtons() {
-        const btns = els.buildingList.querySelectorAll('.building-btn');
-        btns.forEach(btn => {
+        const next = Game.getNextMilestone();
+        const goalType = next ? GOAL_BUILDING[next.id] : null;
+        let goalReady = false;
+        els.buildingList.querySelectorAll('.building-btn').forEach(btn => {
             const type = btn.dataset.type;
+            const def = BUILDINGS[type];
             const available = Game.isBuildingAvailable(type);
+            const done = def.limit !== null && BuildingManager.countByType(type) >= def.limit;
             btn.classList.toggle('disabled', !available);
-            // Prices can change (e.g. the second warehouse is not free)
-            if (BUILDINGS[type].extraCost) {
-                const costEl = btn.querySelector('.b-cost');
-                const html = costHtml(BUILDINGS[type]);
-                if (costEl && costEl.innerHTML !== html) costEl.innerHTML = html;
-            }
+            btn.classList.toggle('done', done);
             btn.classList.toggle('selected', type === selectedBuilding);
+            btn.classList.toggle('recommended', type === goalType && !done);
+            // the castle disappears from the menu once it stands
+            btn.style.display = (type === 'castle' && done) ? 'none' : '';
+            const costEl = btn.querySelector('.b-cost');
+            const costHtmlNow = costIconsHtml(type);
+            if (costEl.innerHTML !== costHtmlNow) costEl.innerHTML = costHtmlNow;
+            const lockEl = btn.querySelector('.b-lock');
+            const reason = available ? '' : shortReason(type);
+            if (lockEl.textContent !== reason) lockEl.textContent = reason;
+            if (type === goalType && available) goalReady = true;
         });
         const castleBtn = els.buildingList.querySelector('.building-btn[data-type="castle"]');
         if (castleBtn) castleBtn.classList.toggle('pulse', !Game.hasCastle() && selectedBuilding !== 'castle');
+        if (els.fabDot) els.fabDot.classList.toggle('hidden', !goalReady || !!selectedBuilding);
+    }
+
+    // ---------- build sheet (phones) ----------
+    function openSheet() {
+        if (!isCompact()) return;
+        hideInfo();
+        els.buildingMenu.classList.add('open');
+        els.sheetBackdrop.classList.remove('hidden');
+        AudioSys.play('click');
+        updateBuildingButtons();
+    }
+
+    function closeSheet() {
+        els.buildingMenu.classList.remove('open');
+        els.sheetBackdrop.classList.add('hidden');
     }
 
     // ---------- speed / top bar ----------
@@ -510,6 +612,8 @@ const UI = (() => {
         }
 
         function onPointerMove(e) {
+            // Touches that did not start on the map (menu, dialogs) must scroll normally
+            if (e.touches && !isDragging && !pinchDist) return;
             if (e.touches && e.touches.length === 2) {
                 const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 if (pinchDist > 0) {
@@ -892,6 +996,7 @@ const UI = (() => {
         const next = Game.getNextMilestone();
         if (els.goalText) {
             els.goalText.textContent = next ? t('ms.' + next.id) : t('menu.goal.done');
+            if (els.goalChipText) els.goalChipText.textContent = els.goalText.textContent;
             els.goalCount.textContent = `${gs.milestones.length}/${MILESTONES.length}`;
         }
 

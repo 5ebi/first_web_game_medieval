@@ -71,9 +71,21 @@
         <!-- Pause banner -->
         <div id="pause-banner" class="hidden"><span class="pause-title" data-i18n="pause.title">PAUSED</span> <span data-i18n="pause.sub">press Space to continue</span></div>
 
-        <!-- Building Menu -->
+        <!-- Mobile: build button, goal chip and the backdrop behind the build sheet -->
+        <button id="build-fab" aria-haspopup="true">
+            <span class="fab-icon" id="fab-icon"></span>
+            <span data-i18n="menu.build">Build</span>
+            <span class="fab-dot hidden" id="fab-dot"></span>
+        </button>
+        <button id="goal-chip"><span class="goal-chip-label" data-i18n="menu.goal">Next goal</span><span id="goal-chip-text"></span></button>
+        <div id="sheet-backdrop" class="hidden"></div>
+
+        <!-- Building Menu (sidebar on desktop, bottom sheet on phones) -->
         <div id="building-menu">
-            <h3 data-i18n="menu.buildings">Buildings</h3>
+            <div id="menu-head">
+                <h3 data-i18n="menu.buildings">Buildings</h3>
+                <button id="menu-close" data-i18n-title="s.close">&times;</button>
+            </div>
             <div id="building-list"></div>
             <div id="menu-bottom">
                 <div id="goal-box">

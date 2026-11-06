@@ -1297,3 +1297,342 @@ kbd {
     }
     .resource.day { order: 0; }
 }
+
+/* =========================================================
+   Build menu v2: groups, icon costs, lock reasons, goal badge
+   ========================================================= */
+#menu-head {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    flex: 0 0 auto;
+}
+
+#menu-head h3 { flex: 1; }
+
+#menu-close { display: none; }
+
+.menu-group {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-faint);
+    margin: 10px 2px 5px;
+}
+
+.menu-group:first-child { margin-top: 2px; }
+
+.building-btn {
+    position: relative;
+    align-items: flex-start;
+}
+
+.building-btn .b-cost, .building-btn .b-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    align-items: center;
+}
+
+.ci {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.ci.up { color: #a8e090; }
+.ci.missing { color: #ff8a7a; }
+
+.ic {
+    width: 14px;
+    height: 14px;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    flex: 0 0 14px;
+}
+
+.building-btn .b-info { font-size: 10px; }
+
+.b-lock {
+    font-size: 10px;
+    color: #ff9a8a;
+    line-height: 1.2;
+}
+
+.b-lock:empty { display: none; }
+
+.building-btn.done .b-lock { color: var(--ok); }
+
+/* disabled cards stay readable: only the picture and name fade */
+.building-btn.disabled { opacity: 1; }
+.building-btn.disabled .b-thumb,
+.building-btn.disabled .b-name,
+.building-btn.disabled .b-info { opacity: 0.5; }
+
+.b-badge {
+    display: none;
+    position: absolute;
+    top: -6px;
+    right: 6px;
+    background: var(--gold-bright);
+    color: #3a2810;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+
+.building-btn.recommended .b-badge { display: block; }
+.building-btn.recommended:not(.disabled) {
+    border-color: var(--gold-bright);
+    box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+}
+
+.building-btn.shake { animation: shake 0.35s; }
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    50% { transform: translateX(4px); }
+    75% { transform: translateX(-2px); }
+}
+
+/* mobile-only controls are hidden on desktop */
+#build-fab, #goal-chip, #sheet-backdrop { display: none; }
+
+/* =========================================================
+   Phones: floating build button + bottom sheet
+   ========================================================= */
+@media (max-width: 760px) {
+    #build-fab {
+        display: flex;
+        position: absolute;
+        right: 12px;
+        bottom: 14px;
+        z-index: 11;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 18px 10px 12px;
+        border-radius: 28px;
+        border: 2px solid var(--gold-bright);
+        background: linear-gradient(180deg, #a07a18, #6B4F10);
+        color: #fff;
+        font-size: 17px;
+        font-weight: 800;
+        letter-spacing: 1px;
+        text-shadow: 1px 1px 0 rgba(0,0,0,0.5);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.55);
+        cursor: pointer;
+    }
+
+    #build-fab:active { transform: scale(0.96); }
+
+    .fab-icon canvas {
+        width: 26px;
+        height: 26px;
+        image-rendering: pixelated;
+        display: block;
+    }
+
+    .fab-dot {
+        position: absolute;
+        top: -3px;
+        right: -3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #ff5a3a;
+        border: 2px solid #fff;
+        animation: pulse-text 1.2s ease-in-out infinite;
+    }
+
+    #goal-chip {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        position: absolute;
+        left: 10px;
+        bottom: 14px;
+        right: 150px;
+        z-index: 11;
+        background: rgba(30, 20, 10, 0.88);
+        border: 1px solid var(--gold);
+        border-radius: 8px;
+        padding: 5px 10px;
+        color: var(--text);
+        text-align: left;
+        font-size: 12px;
+        line-height: 1.25;
+        cursor: pointer;
+    }
+
+    .goal-chip-label {
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--text-faint);
+    }
+
+    .is-placing #build-fab, .is-placing #goal-chip { display: none; }
+
+    #sheet-backdrop {
+        display: block;
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        z-index: 29;
+    }
+
+    #sheet-backdrop.hidden { display: none; }
+
+    /* the build menu becomes a sheet that slides up from the bottom */
+    #building-menu {
+        position: absolute;
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: auto;
+        height: auto;
+        max-height: 72%;
+        z-index: 30;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+        border: none;
+        border-top: 2px solid var(--gold);
+        border-radius: 16px 16px 0 0;
+        box-shadow: 0 -6px 24px rgba(0,0,0,0.6);
+        transform: translateY(105%);
+        transition: transform 0.22s ease-out;
+    }
+
+    #building-menu.open { transform: translateY(0); }
+
+    #building-menu #menu-head { display: flex; }
+    #building-menu h3 { display: block; border: none; padding: 0; margin: 0; font-size: 16px; }
+
+    #menu-close {
+        display: block;
+        position: absolute;
+        right: 0;
+        top: -4px;
+        width: 36px;
+        height: 36px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid var(--gold);
+        border-radius: 50%;
+        color: var(--text);
+        font-size: 22px;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+    #building-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        overflow-x: hidden;
+        overflow-y: auto;
+        width: 100%;
+        padding: 6px 2px 4px;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+    }
+
+    .menu-group {
+        grid-column: 1 / -1;
+        margin: 6px 2px 0;
+    }
+
+    .building-btn {
+        flex: none;
+        flex-direction: row;
+        align-items: flex-start;
+        height: auto;
+        min-height: 74px;
+        margin: 0;
+        padding: 8px 8px 8px 6px;
+        gap: 8px;
+    }
+
+    .b-thumb { width: 44px; height: 44px; flex-basis: 44px; align-self: flex-start; }
+    .building-btn .b-name { font-size: 13px; }
+    .building-btn .b-cost { font-size: 12px; }
+    .building-btn .b-info { display: flex; font-size: 11px; }
+    .b-lock { font-size: 11px; }
+    .ic { width: 15px; height: 15px; flex-basis: 15px; }
+
+    #place-banner { bottom: calc(12px + env(safe-area-inset-bottom)); }
+    #info-panel { bottom: 76px; }
+}
+
+@media (max-width: 360px) {
+    #building-list { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+    /* definite column widths so wrapped costs are measured correctly */
+    #building-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+    .building-btn { min-width: 0; }
+    .b-text { min-width: 0; flex: 1 1 auto; }
+}
+@media (max-width: 360px) {
+    #building-list { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 760px) {
+    /* card as a 2-column grid: picture | text (buttons with wrapping flex content mis-measure their height) */
+    .building-btn {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr);
+        column-gap: 8px;
+        align-items: start;
+    }
+    .b-text { display: grid; row-gap: 3px; }
+}
+
+@media (max-width: 760px) {
+    /* inline chips wrap like text, so the card height is measured correctly */
+    .b-text { grid-template-columns: minmax(0, 1fr); }
+    .building-btn .b-cost, .building-btn .b-info { display: block; line-height: 1.5; }
+    .building-btn .ci { display: inline-flex; vertical-align: middle; margin-right: 8px; }
+}
+
+@media (max-width: 760px) {
+    /* flex-wrap layout: every card is as tall as its own content */
+    #building-list {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        align-items: stretch;
+        gap: 8px;
+    }
+    .menu-group { flex: 0 0 100%; }
+    .building-btn {
+        display: flex;
+        flex: 0 0 calc(50% - 4px);
+        width: calc(50% - 4px);
+        flex-direction: row;
+        align-items: flex-start;
+        height: auto;
+        min-height: 0;
+    }
+    .b-thumb { flex: 0 0 44px; }
+    .b-text { display: block; flex: 1 1 0; min-width: 0; }
+    .b-text > span { display: block; }
+    .building-btn .b-name { display: flex; margin-bottom: 2px; }
+}
+@media (max-width: 360px) {
+    .building-btn { flex-basis: 100%; width: 100%; }
+}
