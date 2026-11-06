@@ -61,6 +61,51 @@ async function run(browser, name, ctxOpts, touch) {
     const mapVisible = await page.evaluate(([w, h]) => document.elementFromPoint(w / 2, h * 0.4)?.id === 'game-canvas', [vp.width, vp.height]);
     check(mapVisible, `${name}: map visible in the middle of the screen`);
 
+    // top bar: the meat balance per minute is always visible (no hover on phones)
+    const meatRate = await page.evaluate(() => {
+        UI.updateResources();
+        const r = document.querySelector('#res-food .rate');
+        if (!r) return { shown: false, text: '' };
+        const box = r.getBoundingClientRect();
+        return { shown: getComputedStyle(r).display !== 'none' && box.width > 0 && box.height > 0, text: r.textContent };
+    });
+    check(meatRate.shown, `${name}: meat rate visible in the top bar (${meatRate.text})`);
+
+    // tapping / clicking the meat counter shows produced vs. eaten
+    if (touch) await page.tap('#food-res'); else await page.click('#food-res');
+    await page.waitForTimeout(150);
+    const pop = await page.evaluate(() => {
+        const p = document.getElementById('food-pop');
+        return { open: !p.classList.contains('hidden') && p.offsetHeight > 0, rows: p.querySelectorAll('.fp-row .rate').length };
+    });
+    check(pop.open && pop.rows === 3, `${name}: meat breakdown opens on ${touch ? 'tap' : 'click'} (${pop.rows} rows)`);
+    if (pop.open) await page.screenshot({ path: path.join(OUT, `${name}-meat.png`) });
+    if (touch) await page.tap('#food-res'); else await page.click('#food-res');
+    await page.waitForTimeout(100);
+    check(await page.evaluate(() => document.getElementById('food-pop').classList.contains('hidden')), `${name}: meat breakdown closes again`);
+
+    // worst case: every resource has four digits and a rate; the resources must stay on one row
+    const bar = await page.evaluate(() => {
+        const s = Game.getState();
+        const keep = { ...s.resources };
+        s.resources = { wood: 1888, stone: 1888, iron: 1888, food: 1888 };
+        const origRates = Game.getRates;
+        Game.getRates = () => ({ wood: 12.5, stone: 8.5, iron: 3.5, food: 0.5 });
+        UI.updateResources();
+        const items = Array.from(document.querySelectorAll('#resource-bar .resource'))
+            .filter(el => el.offsetParent && !el.classList.contains('day'));
+        // count rows by vertical centre (items differ in height: value + rate line)
+        const mids = items.map(el => { const b = el.getBoundingClientRect(); return b.top + b.height / 2; });
+        const tops = new Set(mids.map(m => Math.round((m - mids[0]) / 12)));
+        const rb = document.getElementById('resource-bar');
+        const res = { rows: tops.size, overflow: rb.scrollWidth > rb.clientWidth + 1 };
+        s.resources = keep;
+        Game.getRates = origRates;
+        UI.updateResources();
+        return res;
+    });
+    check(bar.rows === 1 && !bar.overflow, `${name}: resources fit in one row with rates (rows ${bar.rows}, overflow ${bar.overflow})`);
+
     // click / tap the warehouse -> info panel
     const pos = await page.evaluate(() => {
         const b = BuildingManager.getAll().find(x => x.type === 'warehouse');
