@@ -13,7 +13,8 @@ Inspired by Stronghold, made for phones and desktop.
 
 - **Place your Castle** (it is pre-selected), then the **Warehouse**. Time stands still until the warehouse is built; it brings the starting supplies (50 wood, 20 stone, 20 meat).
 - Nothing grows by itself: **only buildings with workers produce**, in batches (a bar under each building shows the next delivery). The castle gives you 10 villagers.
-- The **lumberjack is always free**, so you can never run out of wood for good.
+- The **lumberjack** costs 10 wood. If you have none and no wood, the first one is free,
+  so you can never run out of wood for good.
 - A **quarry** must stand at least half on a stone field. Lumberjacks and hunters need a forest nearby.
 - Every working villager eats **0.5 meat per minute**. Without meat your people leave after 60 seconds.
 - A **day** (full day/night cycle) lasts 6 minutes at 1x. Each **season** lasts one day: hunting is better in summer and autumn and halved in winter. A warning two minutes before winter tells you how much meat to store.
@@ -30,7 +31,7 @@ Inspired by Stronghold, made for phones and desktop.
 |---|---|---|---|
 | Castle | Free | — | +10 villagers |
 | Warehouse | First free (+ starting supplies), then 30 wood, 20 stone | — | +300 storage |
-| Lumberjack | **Always free** | 2 | 4 wood every 20 s (12/min), near forest |
+| Lumberjack | 10 wood (free if you have none and no wood) | 2 | 4 wood every 20 s (12/min), near forest |
 | Hunter's Hut | 15 wood | 2 | 4 meat every 30 s (8/min), near forest |
 | Stone Quarry | 20 wood | 3 | 4 stone every 30 s (8/min), half on a stone field |
 | House | 15 wood, 10 stone | — | +5 villagers |
