@@ -332,6 +332,57 @@ const Renderer = (() => {
             : Sprites.getBuilding(b.type, { grown: b.grown });
     }
 
+    // ---------- Soldier orders ----------
+    function drawUnitOrders(hoverInfo, nowT) {
+        const sel = Units.getSelected();
+        if (sel.length) {
+            // dotted patrol loops (one per route, shared by the group)
+            ctx.lineWidth = 1 / zoom;
+            ctx.setLineDash([3 / zoom, 3 / zoom]);
+            ctx.strokeStyle = 'rgba(255, 230, 150, 0.7)';
+            sel.forEach(u => {
+                if (u.state !== 'patrol' || !u.patrol) return;
+                const pts = u.patrol.pts;
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pts[0].y);
+                for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+                if (pts.length > 2) ctx.closePath();
+                ctx.stroke();
+            });
+            ctx.setLineDash([]);
+        }
+        // destination marker: a ring that shrinks for a second
+        const m = hoverInfo?.marker;
+        if (m) {
+            const age = (nowT - m.t) / 1000;
+            if (age < 1.1) {
+                const r = 9 - age * 5;
+                ctx.globalAlpha = Math.max(0, 1 - age);
+                ctx.strokeStyle = m.kind === 'patrol' ? '#9ad0ff' : '#ffe080';
+                ctx.lineWidth = 2 / zoom;
+                ctx.beginPath();
+                ctx.ellipse(m.x, m.y, r, r * 0.45, 0, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(m.x, m.y - 2); ctx.lineTo(m.x, m.y - 10 + age * 3);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+        }
+    }
+
+    // Box selection rectangle (screen space)
+    function drawSelectBox(box) {
+        if (!box) return;
+        const x = Math.min(box.x0, box.x1), y = Math.min(box.y0, box.y1);
+        const w = Math.abs(box.x1 - box.x0), h = Math.abs(box.y1 - box.y0);
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.12)';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w), Math.round(h));
+    }
+
     // ---------- Main render ----------
     function render(placementPreview, hoverInfo) {
         const nowT = performance.now();
@@ -484,7 +535,7 @@ const Renderer = (() => {
             });
         });
 
-        // Soldiers standing in formation (same anchoring as villagers)
+        // Soldiers (same anchoring as villagers); selected ones get a ring
         const selUnit = hoverInfo?.unit;
         Units.getAll().forEach(u => {
             if (u.x < vx0 - 20 || u.x > vx1 + 20 || u.y < vy0 - 30 || u.y > vy1 + 20) return;
@@ -496,7 +547,7 @@ const Renderer = (() => {
                 draw: () => {
                     ctx.fillStyle = 'rgba(0,0,0,0.28)';
                     ctx.fillRect(Math.round(u.x) - 3, Math.round(u.y), 7, 1);
-                    if (selUnit === u) {
+                    if (selUnit === u || Units.isSelected(u)) {
                         ctx.strokeStyle = 'rgba(255, 215, 0, 0.95)';
                         ctx.lineWidth = 1;
                         ctx.beginPath();
@@ -538,6 +589,9 @@ const Renderer = (() => {
         // Placement preview
         if (placementPreview) drawPlacementPreview(placementPreview);
 
+        // Patrol routes of the selected soldiers and the last order's destination
+        drawUnitOrders(hoverInfo, nowT);
+
         // Hover highlight on a building (when not placing)
         if (hoverInfo?.building && !placementPreview) {
             const b = hoverInfo.building;
@@ -573,6 +627,9 @@ const Renderer = (() => {
             const def = BUILDINGS[placementPreview.type];
             drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, placementPreview.hint || t('cv.click', { name: bName(def) }), '#c8ffc0');
         }
+        drawSelectBox(hoverInfo?.box);
+        // Waiting for a Move / Patrol target: hint next to the mouse cursor
+        if (hoverInfo?.orderHint && hoverInfo.pointer) drawHint(hoverInfo.pointer.x + 16, hoverInfo.pointer.y + 20, hoverInfo.orderHint, '#c8e4ff');
     }
 
     function drawBuilding(b, nowT, night, hoverInfo) {
