@@ -155,6 +155,205 @@ function iconSharpness() {
     return { count: els.length, blurry };
 }
 
+// A second soldier next to the first one (through the game API)
+function recruitSecond() {
+    const s = Game.getState();
+    const bar = BuildingManager.getAll().find(b => b.type === 'barracks');
+    s.weapons.sword += 1;
+    if (Game.getFreeWorkers() < 1) s.populationCap += 2;
+    const u = Game.recruit(bar.id, 'swordsman');
+    return { ok: !!u, n: Units.getAll().length };
+}
+
+// Screen points around both soldiers (for a box drag) and on each soldier
+function soldierScreen() {
+    Renderer.setZoom(2);
+    const us = Units.getAll();
+    const cx = us.reduce((a, u) => a + u.x, 0) / us.length, cy = us.reduce((a, u) => a + u.y, 0) / us.length;
+    Renderer.centerOn(cx, cy - 10);
+    const xs = us.map(u => u.x), ys = us.map(u => u.y);
+    return {
+        a: Renderer.worldToScreen(Math.min(...xs) - 14, Math.min(...ys) - 30),
+        b: Renderer.worldToScreen(Math.max(...xs) + 14, Math.max(...ys) + 8),
+        on: us.map(u => Renderer.worldToScreen(u.x, u.y - 10)),
+    };
+}
+
+// A target across the castle: the straight line is blocked, the path must go around
+function targetBehindCastle() {
+    Renderer.setZoom(1);
+    const c = BuildingManager.getAll().find(b => b.type === 'castle');
+    const us = Units.getAll();
+    const below = us[0].y > c.pixelY + c.height / 2;
+    const w = { x: c.pixelX + c.width / 2, y: below ? c.pixelY - 24 : c.pixelY + c.height + 24 };
+    Renderer.centerOn(w.x, (w.y + us[0].y) / 2);
+    window.__target = w;
+    return Renderer.worldToScreen(w.x, w.y);
+}
+
+// Runs the soldiers for `sec` game seconds; reports whether one ever stood on water or a building
+function walkUnits(sec) {
+    let bad = 0;
+    for (let tt = 0; tt < sec; tt += 0.1) {
+        Units.update(0.1);
+        Units.getAll().forEach(u => {
+            const tx = Math.floor(u.x / TILE_SIZE), ty = Math.floor((u.y - 1) / TILE_SIZE);
+            if (GameMap.getTerrain(tx, ty) === TERRAIN.WATER) bad++;
+            const b = BuildingManager.getBuildingAt(tx, ty);
+            if (b && b.type !== 'barracks') bad++; // they start at the barracks' edge
+        });
+    }
+    const w = window.__target;
+    return { bad, states: Units.getAll().map(u => u.state), far: Math.max(...Units.getAll().map(u => Math.hypot(u.x - w.x, u.y - w.y))) };
+}
+
+// Touch drag through CDP (Playwright's touchscreen can only tap)
+async function touchDrag(cdp, page, from, to, holdMs = 0) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: from.x, y: from.y }] });
+    if (holdMs) await page.waitForTimeout(holdMs);
+    for (let i = 1; i <= 8; i++) {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x + (to.x - from.x) * i / 8, y: from.y + (to.y - from.y) * i / 8 }] });
+        await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForTimeout(150);
+}
+
+async function soldierControl(page, ctx, name, touch) {
+    const second = await page.evaluate(recruitSecond);
+    check(second.ok && second.n === 2, `${name}: second soldier recruited (${second.n})`);
+    await page.evaluate(() => UI.hideInfo());
+    const nSel = () => page.evaluate(() => Units.getSelected().length);
+
+    if (!touch) {
+        // box select with a left drag
+        let sp = await page.evaluate(soldierScreen);
+        await page.waitForTimeout(150);
+        await page.mouse.move(sp.a.x, sp.a.y);
+        await page.mouse.down();
+        await page.mouse.move((sp.a.x + sp.b.x) / 2, (sp.a.y + sp.b.y) / 2, { steps: 4 });
+        await page.mouse.move(sp.b.x, sp.b.y, { steps: 4 });
+        await page.screenshot({ path: path.join(OUT, `${name}-box.png`) });
+        await page.mouse.up();
+        await page.waitForTimeout(200);
+        const boxed = await page.evaluate(() => ({ n: Units.getSelected().length, title: document.getElementById('info-title').textContent, btns: document.querySelectorAll('#info-controls [data-order]').length }));
+        check(boxed.n === 2 && boxed.btns >= 4, `${name}: box selects both soldiers, selection bar with orders (${JSON.stringify(boxed)})`);
+
+        // click one, shift-click the other, Escape, double click
+        await page.mouse.click(sp.on[0].x, sp.on[0].y);
+        await page.waitForTimeout(450);
+        const one = await nSel();
+        await page.keyboard.down('Shift');
+        await page.mouse.click(sp.on[1].x, sp.on[1].y);
+        await page.keyboard.up('Shift');
+        await page.waitForTimeout(100);
+        const two = await nSel();
+        await page.keyboard.press('Escape');
+        const none = await nSel();
+        await page.mouse.dblclick(sp.on[0].x, sp.on[0].y);
+        await page.waitForTimeout(100);
+        const all = await nSel();
+        check(one === 1 && two === 2 && none === 0 && all === 2, `${name}: click ${one}, shift-click ${two}, Esc ${none}, double click ${all}`);
+
+        // right click behind the castle: they walk around it and arrive
+        const tgt = await page.evaluate(targetBehindCastle);
+        await page.waitForTimeout(150);
+        await page.mouse.click(tgt.x, tgt.y, { button: 'right' });
+        await page.waitForTimeout(800);
+        await page.screenshot({ path: path.join(OUT, `${name}-move.png`) });
+        const moving = await page.evaluate(() => Units.getAll().map(u => u.state));
+        const walked = await page.evaluate(walkUnits, 90);
+        check(moving.every(st => st === 'move'), `${name}: right click sends the selection (${moving})`);
+        check(walked.states.every(st => st === 'idle') && walked.far < 30 && walked.bad === 0,
+            `${name}: soldiers walk around the castle and arrive (${JSON.stringify(walked)})`);
+
+        // right drag still pans the map
+        const cam0 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
+        await page.mouse.move(700, 400);
+        await page.mouse.down({ button: 'right' });
+        await page.mouse.move(600, 350, { steps: 5 });
+        await page.mouse.up({ button: 'right' });
+        const cam1 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
+        check(Math.abs(cam1.x - cam0.x) > 40 && (await nSel()) === 2, `${name}: right drag pans and keeps the selection (dx ${Math.round(cam1.x - cam0.x)})`);
+
+        // patrol: P, then click a point; they turn around at the far end
+        const ptgt = await page.evaluate(() => {
+            const u = Units.getAll()[0];
+            const w = { x: u.x + 96, y: u.y };
+            Renderer.centerOn(u.x + 48, u.y);
+            window.__target = w;
+            return Renderer.worldToScreen(w.x, w.y);
+        });
+        await page.waitForTimeout(150);
+        await page.keyboard.press('p');
+        const mode = await page.evaluate(() => UI.getOrderMode());
+        await page.mouse.click(ptgt.x, ptgt.y);
+        await page.waitForTimeout(150);
+        const pat = await page.evaluate(() => {
+            const u = Units.getAll()[0];
+            const st0 = Units.getAll().map(x => x.state);
+            let turned = false;
+            for (let i = 0; i < 400 && !turned; i++) { Units.update(0.1); if (u.patrol && u.patrol.i === 0) turned = true; }
+            return { st0, turned, pts: u.patrol && u.patrol.pts.length };
+        });
+        check(mode === 'patrol' && pat.st0.every(st => st === 'patrol') && pat.turned && pat.pts === 2,
+            `${name}: patrol between two points turns around (${JSON.stringify({ mode, ...pat })})`);
+        await page.waitForTimeout(300);
+        await page.screenshot({ path: path.join(OUT, `${name}-patrol.png`) });
+    } else {
+        const cdp = await ctx.newCDPSession(page);
+        // one-finger pan without a selection
+        const cam0 = await page.evaluate(() => { Renderer.setZoom(1); return { ...Renderer.getCamera() }; });
+        const vp = page.viewportSize();
+        const mid = { x: vp.width / 2, y: vp.height * 0.35 };
+        await touchDrag(cdp, page, mid, { x: mid.x - 60, y: mid.y - 30 });
+        const cam1 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
+        check(Math.abs(cam1.x - cam0.x) > 30 && (await nSel()) === 0, `${name}: one-finger drag pans the map (dx ${Math.round(cam1.x - cam0.x)})`);
+
+        // tap a soldier, then tap the map: he walks there
+        let sp = await page.evaluate(soldierScreen);
+        await page.waitForTimeout(150);
+        await page.touchscreen.tap(sp.on[0].x, sp.on[0].y);
+        await page.waitForTimeout(450);
+        const one = await nSel();
+        const panelOk = await page.evaluate(() => {
+            const r = document.querySelector('#info-controls [data-order="move"]')?.getBoundingClientRect();
+            return !!r && r.width > 0 && r.bottom <= window.innerHeight;
+        });
+        await page.screenshot({ path: path.join(OUT, `${name}-select.png`) });
+        const dest = { x: sp.on[0].x - 70, y: sp.on[0].y - 10 };
+        await page.touchscreen.tap(dest.x, dest.y);
+        await page.waitForTimeout(150);
+        const st = await page.evaluate(() => Units.getSelected().map(u => u.state));
+        check(one === 1 && panelOk && st.length === 1 && st[0] === 'move', `${name}: tap selects (${one}), order buttons visible (${panelOk}), tap on the map moves (${st})`);
+        // one-finger pan still works with a selection, without giving an order
+        await page.evaluate(() => { for (let i = 0; i < 100; i++) Units.update(0.1); });
+        const cam2 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
+        await touchDrag(cdp, page, mid, { x: mid.x + 120, y: mid.y });
+        const after = await page.evaluate(() => ({ cam: { ...Renderer.getCamera() }, st: Units.getSelected().map(u => u.state) }));
+        check(Math.abs(after.cam.x - cam2.x) > 30 && after.st[0] === 'idle', `${name}: drag with a selection pans, no order (${after.st})`);
+        // Deselect button
+        await press(page, true, '#info-controls [data-order="deselect"]');
+        const none = await nSel();
+        // long press + drag draws a box around both
+        sp = await page.evaluate(soldierScreen);
+        await page.waitForTimeout(150);
+        await touchDrag(cdp, page, sp.a, sp.b, 550);
+        const boxed = await nSel();
+        check(none === 0 && boxed === 2, `${name}: Deselect clears (${none}), long press + drag box selects both (${boxed})`);
+        await page.screenshot({ path: path.join(OUT, `${name}-boxed.png`) });
+        // Patrol button, then tap
+        await press(page, true, '#info-controls [data-order="patrol"]');
+        const ptgt = await page.evaluate(() => { const u = Units.getAll()[0]; Renderer.centerOn(u.x + 30, u.y - 10); return Renderer.worldToScreen(u.x + 60, u.y); });
+        await page.waitForTimeout(150);
+        await page.touchscreen.tap(ptgt.x, ptgt.y);
+        await page.waitForTimeout(150);
+        const pst = await page.evaluate(() => Units.getAll().map(u => u.state));
+        check(pst.every(x => x === 'patrol'), `${name}: Patrol button + tap starts a patrol (${pst})`);
+        await page.evaluate(() => Renderer.setZoom(1));
+    }
+}
+
 async function run(browser, name, ctxOpts, touch) {
     console.log(`\n== ${name}`);
     const ctx = await browser.newContext(ctxOpts);
@@ -320,6 +519,9 @@ async function run(browser, name, ctxOpts, touch) {
     await page.screenshot({ path: path.join(OUT, `${name}-unit.png`) });
     await page.evaluate(() => Renderer.setZoom(1));
 
+    // ---- soldiers: select, move, patrol (issue #16) ----
+    await soldierControl(page, ctx, name, touch);
+
     if (name === 'desktop') {
         await page.evaluate(() => Game.save());
         const before = await page.evaluate(() => BuildingManager.getAll().length);
@@ -332,7 +534,13 @@ async function run(browser, name, ctxOpts, touch) {
         const after = await page.evaluate(() => BuildingManager.getAll().length);
         check(after === before, `desktop: save restores ${before} buildings (got ${after})`);
         const kept = await page.evaluate(() => ({ units: Units.getAll().map(u => u.type).join(','), product: BuildingManager.getAll().find(b => b.type === 'weaponsmith')?.product }));
-        check(kept.units === 'swordsman' && kept.product === 'sword', `desktop: save keeps the soldier and the smith's choice (${JSON.stringify(kept)})`);
+        check(kept.units === 'swordsman,swordsman' && kept.product === 'sword', `desktop: save keeps the soldiers and the smith's choice (${JSON.stringify(kept)})`);
+        const patrol = await page.evaluate(() => {
+            const before = Units.getAll().map(u => u.patrol && u.patrol.pts.length);
+            for (let i = 0; i < 20; i++) Units.update(0.1);
+            return { states: Units.getAll().map(u => u.state), pts: before, moved: Units.getAll().every(u => u.path || u.state !== 'patrol') };
+        });
+        check(patrol.states.every(x => x === 'patrol') && patrol.pts.every(n => n === 2) && patrol.moved, `desktop: save keeps the patrol (${JSON.stringify(patrol)})`);
 
         // An old v3 save with a blacksmith must still load: it is dropped and refunded
         const old = await page.evaluate(() => {

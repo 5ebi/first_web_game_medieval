@@ -36,8 +36,11 @@ _Last updated: 2026-11-06_
   smith** forges bows (wood) or swords (iron), chosen in its info panel; the **barracks**
   turns a free villager plus a weapon into an archer or swordsman. Soldiers count as
   working villagers (they eat). Weapons are data-driven (`WEAPONS` in `constants.js`).
-- Military has no enemies yet: soldiers only stand guard. Selection/movement is next
-  (#16), raids and combat later.
+- Military has no enemies yet. Soldiers can be selected Stronghold style and sent
+  somewhere or put on patrol (#16); paths are A* on tiles around water and buildings.
+  Desktop: left-drag box-selects once you own soldiers, right/middle-drag pans, right-click
+  moves, P patrol, L stop. Phones: tap selects, tap on the map moves, long press + drag
+  draws a box, one-finger drag always pans. Raids and combat later.
 - Save format v4 (same `SAVE_KEY`): v3 saves are migrated (a blacksmith is dropped and
   its cost refunded).
 - Every reply to the owner and every PR body ends with a test link: live
