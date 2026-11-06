@@ -26,7 +26,8 @@ _Last updated: 2026-11-06_
 
 - Time only starts when castle **and** first warehouse stand. A day lasts 6 minutes at
   1×, a season one day, a year 4 days.
-- Only buildings with workers produce, in batches. The lumberjack is always free.
+- Only buildings with workers produce, in batches. The lumberjack costs
+  10 wood; it is free only when none stands and the player can't pay for one.
 - Working villagers eat 0.5 meat/min; 60 s without meat → game over.
 - Quarry must stand at least half on a stone field; lumberjack/hunter need forest,
   iron mine needs stone nearby.
