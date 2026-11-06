@@ -165,10 +165,20 @@ const Game = (() => {
     }
 
     // ---- Placement ----
-    // Current price of the next building of a type (the first warehouse is free)
+    const NO_COST = Object.freeze({ wood: 0, stone: 0, iron: 0 });
+
+    // Emergency rule: no lumberjack stands and the player can't pay for one
+    function isLumberjackFree() {
+        return BuildingManager.countByType('lumberjack') === 0 &&
+               state.resources.wood < BUILDINGS.lumberjack.cost.wood;
+    }
+
+    // Current price of the next building of a type (the first warehouse is free,
+    // a lumberjack only in the emergency case above)
     function getCost(type) {
         const def = BUILDINGS[type];
-        if (!def) return { wood: 0, stone: 0, iron: 0 };
+        if (!def) return NO_COST;
+        if (type === 'lumberjack' && isLumberjackFree()) return NO_COST;
         if (def.extraCost && BuildingManager.countByType(type) > 0) return def.extraCost;
         return def.cost;
     }
@@ -532,6 +542,7 @@ const Game = (() => {
         togglePause,
         canAfford,
         getCost,
+        isLumberjackFree,
         canPlace,
         placeBuilding,
         canDemolish,

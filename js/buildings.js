@@ -96,6 +96,8 @@ const BuildingManager = (() => {
             b.growthProgress = s.growthProgress ?? 0;
             b.buildStart = 0; // loaded buildings are already finished
             if (s.paid) b.paid = s.paid;
+            // saves from before lumberjacks had a price: they cost nothing, so refund nothing
+            else if (s.type === 'lumberjack') b.paid = { wood: 0, stone: 0, iron: 0 };
             b.progress = s.progress || 0;
             nextId = Math.max(nextId, b.id + 1);
         });
