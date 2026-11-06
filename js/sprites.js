@@ -126,6 +126,27 @@ const Sprites = (() => {
                     if (w > 4) { ctx.fillStyle = '#76766e'; ctx.fillRect(x + 2, y + 1, 1, h - 2); } // crack
                 }
                 break;
+            case TERRAIN.ROCKY:
+                // gravel and small stones with tufts of grass between them
+                fill('#66804a');
+                patches(9, ['#6e8650', '#5e7844', '#748a58', '#647a4a'], 6);
+                dots(70, ['#7e8a70', '#56703e', '#8c9282', '#6a7e52', '#9a9a8c']);
+                for (let i = 0; i < 7; i++) {
+                    const w = 2 + Math.floor(rng() * 3), h = 1 + Math.floor(rng() * 2);
+                    const x = Math.floor(rng() * (T - w)), y = Math.floor(rng() * (T - h - 1));
+                    ctx.fillStyle = '#4e5640'; ctx.fillRect(x + 1, y + h, w, 1);
+                    pebble(x, y, w, h, '#98988c', '#b8b8ae', '#6a6a60');
+                }
+                blades(10, '#7aa648', '#4a6a2c');
+                break;
+            case TERRAIN.MEADOW:
+                // sunny, dry meadow: yellow-green with straw-coloured blades
+                fill('#78963f');
+                patches(8, ['#80a044', '#6e8c3a', '#86a24a', '#748e3c'], 6);
+                dots(80, ['#8aa84c', '#6a8636', '#94ac56', '#a0a858']);
+                blades(14, '#b4b464', '#6a8434');
+                blades(8, '#90b450', '#5a7a30');
+                break;
             default:
                 fill('#5a8f3c');
         }
@@ -377,6 +398,42 @@ const Sprites = (() => {
         return c;
     }
 
+    // Wind sway: frame -2..2 shifts each row of the crown sideways, more at the top,
+    // in whole pixels. The trunk base stays put.
+    function getTreeFrame(kind, season, variant, frame) {
+        const base = getTree(kind, season, variant);
+        if (!frame) return base;
+        const key = `sway_${kind}_${season}_${variant}_${frame}`;
+        if (cache[key]) return cache[key];
+        const w = base.width, h = base.height;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+        const pivot = h * (kind === 'pine' ? 0.8 : 0.62);
+        for (let y = 0; y < h; y++) {
+            const k = y >= pivot ? 0 : Math.pow((pivot - y) / pivot, 1.4);
+            const dx = Math.round(frame * k);
+            ctx.drawImage(base, 0, y, w, 1, dx, y, w, 1);
+        }
+        cache[key] = c;
+        return c;
+    }
+
+    // Solid black silhouette of any sprite canvas (for sun shadows)
+    const silCache = new WeakMap();
+    function getSilhouette(src) {
+        if (!src) return null;
+        let c = silCache.get(src);
+        if (c) return c;
+        c = createCanvas(src.width, src.height);
+        const ctx = c.getContext('2d');
+        ctx.drawImage(src, 0, 0);
+        ctx.globalCompositeOperation = 'source-in';
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, c.width, c.height);
+        silCache.set(src, c);
+        return c;
+    }
+
     function drawTree() { return getTree('oak', 'spring', 0); }
     function drawPineTree() { return getTree('pine', 'spring', 0); }
 
@@ -455,60 +512,102 @@ const Sprites = (() => {
     ];
     const HAIR_COLORS = ['#4a2a10', '#2a1a08', '#8a5a2a', '#c8a050', '#3a2418', '#6a3a1a'];
 
-    function drawVillager(frame, palette, flip, tool) {
-        const key = `villager_${frame}_${palette}_${flip ? 1 : 0}_${tool || ''}`;
+    // frame: 0-3 walk cycle (contact, passing, contact, passing), 4 idle,
+    // 5-6 work (tool up / tool down). Facing right; flip mirrors.
+    // The feet always touch the bottom row (y = 23), so the anchor is the ground.
+    function drawVillager(frame, palette, flip, tool, carry) {
+        const key = `villager2_${frame}_${palette}_${flip ? 1 : 0}_${tool || ''}_${carry || ''}`;
         if (cache[key]) return cache[key];
         const c = createCanvas(16, 24);
         const ctx = c.getContext('2d');
         const [tunic, tunicDark, tunicLight] = TUNIC_COLORS[palette % TUNIC_COLORS.length];
         const hair = HAIR_COLORS[(palette * 5 + 1) % HAIR_COLORS.length];
         const skin = '#e8b890', skinDark = '#c8946c';
-        const R = (x, y, w, h, col) => {
-            ctx.fillStyle = col;
-            for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) ctx.fillRect(flip ? 15 - xx : xx, yy, 1, 1);
+        const legNear = '#4e3a28', legFar = '#33261a', boot = '#24160a', bootHi = '#3e2a16';
+        const P = (x, y, col) => { ctx.fillStyle = col; ctx.fillRect(flip ? 15 - x : x, y, 1, 1); };
+        const R = (x, y, w, h, col) => { for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) P(xx, yy, col); };
+        const line = (x0, y0, x1, y1, col, wdt = 1) => {
+            const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+            for (let i = 0; i <= n; i++) R(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), wdt, 1, col);
         };
-        // head
-        R(5, 2, 6, 6, skin);
-        R(10, 3, 1, 5, skinDark);
-        R(5, 1, 6, 2, hair); R(4, 2, 1, 3, hair); R(5, 3, 1, 1, hair);
-        R(8, 5, 1, 1, '#2a1a10');                 // eye (looking in walking direction)
-        R(10, 5, 1, 1, '#2a1a10');
-        R(9, 7, 1, 1, skinDark);                  // mouth shadow
-        R(7, 8, 3, 1, skinDark);                  // neck
-        // body
-        R(4, 9, 8, 6, tunic);
-        R(4, 9, 8, 1, tunicLight);
-        R(10, 10, 2, 5, tunicDark);
-        R(4, 14, 8, 1, '#5a3a1a');                // belt
-        R(7, 14, 1, 1, '#d0a020');                // buckle
-        R(4, 15, 8, 1, tunicDark);                // tunic hem
-        // arms
-        R(3, 10, 1, 4, tunicDark); R(3, 14, 1, 1, skin);
-        R(12, 10, 1, 3, tunic); R(12, 13, 1, 1, skin);
-        // legs + boots (walk cycle)
-        if (frame === 0) {
-            R(5, 16, 2, 5, '#4a3828'); R(9, 16, 2, 5, '#4a3828');
-            R(6, 16, 1, 5, '#3a2a1c'); R(10, 16, 1, 5, '#3a2a1c');
-            R(5, 21, 3, 1, '#2a1a0c'); R(9, 21, 3, 1, '#2a1a0c');
-        } else {
-            R(4, 16, 2, 4, '#4a3828'); R(10, 16, 2, 4, '#4a3828');
-            R(5, 16, 1, 4, '#3a2a1c'); R(11, 16, 1, 4, '#3a2a1c');
-            R(3, 20, 3, 1, '#2a1a0c'); R(10, 20, 3, 1, '#2a1a0c');
+        const leg = (xt, xb, yt, yb, col) => line(xt, yt, xb, yb, col, 2);
+        const foot = (x, y, near) => { R(x, y, 3, 1, boot); P(x + 2, y, near ? bootHi : boot); };
+
+        const walking = frame <= 3;
+        const up = frame === 1 || frame === 3 ? -1 : 0;        // body rises while passing
+        const working = frame === 5 || frame === 6;
+        const lean = frame === 6 ? 1 : 0;
+        const dy = up;
+
+        // ---- legs (far leg first) ----
+        if (frame === 0) { leg(7, 5, 17, 22, legFar); foot(4, 23, false); leg(8, 10, 17, 22, legNear); foot(10, 23, true); }
+        else if (frame === 1) { leg(7, 6, 16, 20, legFar); foot(5, 21, false); leg(8, 8, 16, 22, legNear); foot(8, 23, true); }
+        else if (frame === 2) { leg(7, 9, 17, 22, legFar); foot(9, 23, false); leg(8, 6, 17, 22, legNear); foot(5, 23, true); }
+        else if (frame === 3) { leg(7, 7, 16, 22, legFar); foot(7, 23, false); leg(8, 9, 16, 20, legNear); foot(9, 21, true); }
+        else { leg(6, 6, 17, 22, legFar); foot(6, 23, false); leg(9, 9, 17, 22, legNear); foot(9, 23, true); }
+
+        // ---- far arm (behind the body) ----
+        const shoulderY = 10 + dy;
+        if (walking && !carry) {
+            const swing = frame === 0 ? 2 : frame === 2 ? -2 : 0;
+            line(7, shoulderY, 7 + swing, shoulderY + 4, tunicDark);
         }
-        // tool in the front hand
+
+        // ---- torso ----
+        const ty = 9 + dy;
+        R(5 + lean, ty, 6, 7, tunic);
+        R(5 + lean, ty, 6, 1, tunicLight);
+        R(9 + lean, ty + 1, 2, 6, tunicDark);
+        R(5 + lean, ty + 5, 6, 1, '#5a3a1a');            // belt
+        P(8 + lean, ty + 5, '#d0a020');                  // buckle
+        R(5 + lean, ty + 6, 6, 1, tunicDark);            // hem
+        if (tool === 'hammer') { R(6 + lean, ty + 2, 4, 4, '#6a4a2a'); R(6 + lean, ty + 2, 4, 1, '#7e5a34'); } // smith's apron
+
+        // ---- head ----
+        const hy = 2 + dy;
+        R(6 + lean, hy + 1, 5, 5, skin);
+        R(10 + lean, hy + 2, 1, 4, skinDark);
+        P(11 + lean, hy + 3, skin);                      // nose
+        P(9 + lean, hy + 3, '#2a1a10');                  // eye
+        P(9 + lean, hy + 5, skinDark);                   // mouth
+        R(7 + lean, hy + 6, 3, 1, skinDark);             // neck
+        if (tool === 'bow') { // green hood
+            R(5 + lean, hy, 6, 2, '#3e6a2a'); R(5 + lean, hy + 2, 2, 4, '#3e6a2a'); P(4 + lean, hy + 3, '#2e5220');
+        } else if (tool === 'pick') { // miner's cap
+            R(5 + lean, hy, 6, 2, '#6a5a4a'); P(11 + lean, hy + 1, '#6a5a4a'); P(10 + lean, hy, '#e8d070');
+        } else {
+            R(6 + lean, hy, 5, 1, hair); R(5 + lean, hy + 1, 3, 1, hair); R(5 + lean, hy + 2, 1, 3, hair); P(6 + lean, hy + 2, hair);
+        }
+
+        // ---- near arm, tool or load ----
         const handle = '#7a5230';
-        if (tool === 'axe') {
-            R(13, 7, 1, 8, handle);
-            R(14, 7, 2, 3, '#a8a8b0'); R(15, 7, 1, 3, '#e0e0e8');
-        } else if (tool === 'pick') {
-            R(13, 8, 1, 8, handle);
-            R(11, 7, 5, 1, '#9a9aa4'); R(11, 8, 1, 1, '#9a9aa4'); R(15, 8, 1, 1, '#9a9aa4');
-        } else if (tool === 'bow') {
-            R(14, 6, 1, 1, '#8a5a2a'); R(15, 7, 1, 8, '#8a5a2a'); R(14, 15, 1, 1, '#8a5a2a');
-            R(13, 7, 1, 8, '#e8e0c8');
-        } else if (tool === 'hammer') {
-            R(13, 9, 1, 6, handle);
-            R(12, 7, 3, 2, '#86868e'); R(12, 7, 3, 1, '#a8a8b0');
+        if (carry) {
+            // load on the shoulder, held with the near hand
+            const ly = ty - 2;
+            if (carry === 'wood') { R(3, ly, 10, 2, '#8a5a2a'); R(3, ly, 10, 1, '#a8743c'); R(12, ly, 1, 2, '#d8b070'); R(2, ly, 1, 2, '#d8b070'); }
+            else if (carry === 'stone') { R(6, ly - 2, 5, 4, '#8e8e86'); R(6, ly - 2, 5, 1, '#b6b6ae'); R(10, ly - 1, 1, 3, '#5a5a52'); }
+            else if (carry === 'iron') { R(6, ly - 1, 5, 3, '#4a4e58'); R(6, ly - 1, 5, 1, '#7a808e'); }
+            else if (carry === 'food') { R(6, ly - 1, 5, 3, '#a8443a'); R(6, ly - 1, 5, 1, '#c86a5a'); P(10, ly + 1, '#f0e0d0'); }
+            line(9, shoulderY, 10, ty - 1, tunic); P(10, ty - 1, skin);
+        } else if (working) {
+            // tool swing: raised behind the head, then down in front
+            if (frame === 5) {
+                line(9, shoulderY, 10, shoulderY - 3, tunic); P(10, shoulderY - 4, skin);
+                if (tool) { line(10, shoulderY - 4, 6, shoulderY - 9, handle); R(4, shoulderY - 11, 3, 3, tool === 'hammer' ? '#86868e' : '#a8a8b0'); }
+            } else {
+                line(9 + lean, shoulderY, 12, shoulderY + 3, tunic); P(13, shoulderY + 3, skin);
+                if (tool) { line(13, shoulderY + 3, 15, shoulderY + 8, handle); R(13, shoulderY + 8, 3, 2, tool === 'hammer' ? '#86868e' : '#a8a8b0'); }
+            }
+        } else {
+            const swing = walking ? (frame === 0 ? -2 : frame === 2 ? 2 : 0) : 0;
+            line(9, shoulderY, 9 + swing, shoulderY + 4, tunic);
+            P(9 + swing, shoulderY + 5, skin);
+            // tool carried over the shoulder / at the side
+            if (tool === 'axe') { line(9, shoulderY - 1, 4, shoulderY + 4, handle); R(2, shoulderY + 3, 3, 3, '#a8a8b0'); P(2, shoulderY + 5, '#e0e0e8'); }
+            else if (tool === 'pick') { line(10, shoulderY - 1, 4, shoulderY + 5, handle); R(8, shoulderY - 2, 5, 1, '#9a9aa4'); P(8, shoulderY - 1, '#9a9aa4'); P(12, shoulderY - 1, '#9a9aa4'); }
+            else if (tool === 'bow') { line(4, ty - 1, 4, ty + 7, '#8a5a2a'); P(5, ty - 2, '#8a5a2a'); P(5, ty + 8, '#8a5a2a'); line(5, ty - 1, 5, ty + 7, '#e8e0c8'); }
+            else if (tool === 'hammer') { line(9 + swing, shoulderY + 5, 9 + swing, shoulderY + 8, handle); R(8 + swing, shoulderY + 8, 3, 2, '#86868e'); }
+            else if (tool === 'hoe') { line(10, shoulderY - 2, 10, ty + 10, handle); R(10, shoulderY - 3, 3, 1, '#9a9aa4'); }
         }
         cache[key] = c;
         return c;
@@ -1470,7 +1569,7 @@ const Sprites = (() => {
         const c = createCanvas(T, T);
         const ctx = c.getContext('2d');
         ctx.drawImage(drawTile(type, variant), 0, 0);
-        const green = type === TERRAIN.GRASS || type === TERRAIN.GRASS_DARK || type === TERRAIN.FOREST || type === TERRAIN.FLOWERS;
+        const green = type === TERRAIN.GRASS || type === TERRAIN.GRASS_DARK || type === TERRAIN.FOREST || type === TERRAIN.FLOWERS || type === TERRAIN.MEADOW || type === TERRAIN.ROCKY;
 
         if (season === 'summer' && green) {
             ctx.fillStyle = 'rgba(255, 225, 110, 0.10)';
@@ -1503,7 +1602,7 @@ const Sprites = (() => {
                 }
             } else {
                 // Snow blanket in 1px detail; only a few small patches of ground peek through
-                const patches = { [TERRAIN.STONE_DEPOSIT]: 4, [TERRAIN.SAND]: 2, [TERRAIN.DIRT]: 2, [TERRAIN.FOREST]: 3 }[type] ?? 2;
+                const patches = { [TERRAIN.STONE_DEPOSIT]: 4, [TERRAIN.ROCKY]: 3, [TERRAIN.SAND]: 2, [TERRAIN.DIRT]: 2, [TERRAIN.FOREST]: 3 }[type] ?? 2;
                 const holes = [];
                 for (let i = 0; i < patches; i++) {
                     if (hash2(i, variant, type + 61) < 0.35 && type !== TERRAIN.STONE_DEPOSIT) continue;
@@ -1742,6 +1841,8 @@ const Sprites = (() => {
         getBuildingSeasonal,
         getSeasonalTile,
         getTree,
+        getTreeFrame,
+        getSilhouette,
         getStonePile,
         getBuildingThumb,
         loadAssets,

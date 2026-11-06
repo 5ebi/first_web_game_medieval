@@ -5,6 +5,9 @@
 const UI = (() => {
     let selectedBuilding = null;   // building type to place
     let selectedPlaced = null;     // placed building shown in the info panel
+    let selectedVillager = null;   // villager shown in the info panel
+    let activeCat = 'castle';      // open building category
+    let bodyOpen = true;           // phones: the building strip can be folded away
     let hoveredBuilding = null;
     let placementPreview = null;
     let pointerOverCanvas = false;
@@ -30,8 +33,11 @@ const UI = (() => {
             resDay: $('res-day'),
             dayProgress: $('day-progress'),
             storageLabel: $('res-storage'),
-            buildingList: $('building-list'),
-            buildingMenu: $('building-menu'),
+            commandPanel: $('command-panel'),
+            cpCats: $('cp-cats'),
+            cpBuild: $('cp-build'),
+            cpBody: $('cp-body'),
+            infoPortrait: $('info-portrait'),
             infoPanel: $('info-panel'),
             infoTitle: $('info-title'),
             infoContent: $('info-content'),
@@ -74,13 +80,6 @@ const UI = (() => {
             zoomLabel: $('zoom-label'),
             resourceBar: $('resource-bar'),
             placeBanner: $('place-banner'),
-            buildFab: $('build-fab'),
-            fabDot: $('fab-dot'),
-            fabIcon: $('fab-icon'),
-            goalChip: $('goal-chip'),
-            goalChipText: $('goal-chip-text'),
-            sheetBackdrop: $('sheet-backdrop'),
-            menuClose: $('menu-close'),
             placeText: $('place-text'),
             placeHint: $('place-hint'),
             placeCancel: $('place-cancel'),
@@ -98,11 +97,17 @@ const UI = (() => {
 
         els.infoClose.addEventListener('click', () => hideInfo());
         els.placeCancel.addEventListener('click', () => deselectBuilding());
-        els.fabIcon.appendChild(Sprites.drawIcon('hammer'));
-        els.buildFab.addEventListener('click', openSheet);
-        els.goalChip.addEventListener('click', openSheet);
-        els.menuClose.addEventListener('click', () => { closeSheet(); AudioSys.play('click'); });
-        els.sheetBackdrop.addEventListener('click', closeSheet);
+        if (window.ResizeObserver) new ResizeObserver(updateInsets).observe(els.commandPanel);
+        // links inside the info scroll (e.g. a villager's workplace)
+        els.infoContent.addEventListener('click', (e) => {
+            const go = e.target.closest('[data-goto]');
+            if (!go) return;
+            const b = BuildingManager.getById(Number(go.dataset.goto));
+            if (!b) return;
+            AudioSys.play('click');
+            Renderer.centerOn(b.pixelX + b.width / 2, b.pixelY + b.height / 2);
+            showBuildingInfo(b);
+        });
         els.helpClose.addEventListener('click', () => { els.helpScreen.classList.add('hidden'); AudioSys.play('click'); });
 
         Lang.onChange(onLanguageChanged);
@@ -124,11 +129,9 @@ const UI = (() => {
         const top = els.resourceBar.offsetHeight || 48;
         // the top bar wraps into two rows on phones: toasts and panels must start below it
         document.documentElement.style.setProperty('--bar-bottom', top + 'px');
-        if (isCompact()) {
-            Renderer.setInsets({ top, right: 0, bottom: 0, left: 0 });
-        } else {
-            Renderer.setInsets({ top, right: els.buildingMenu.offsetWidth || 240, bottom: 0, left: 0 });
-        }
+        const bottom = els.commandPanel.offsetHeight || 0;
+        document.documentElement.style.setProperty('--panel-top', bottom + 'px');
+        Renderer.setInsets({ top, right: 0, bottom, left: 0 });
     }
 
     // ---------- language ----------
@@ -164,12 +167,15 @@ const UI = (() => {
     }
 
     // ---------- building menu ----------
-    // Menu groups; the next milestone's building gets a "goal" badge
-    const MENU_GROUPS = [
-        { id: 'core', types: ['castle', 'warehouse'] },
-        { id: 'resources', types: ['lumberjack', 'hunter', 'quarry', 'iron_mine', 'blacksmith'] },
-        { id: 'housing', types: ['house', 'tavern'] },
+    // Categories are always visible as tabs; one click shows their buildings.
+    const CATEGORIES = [
+        { id: 'castle', icon: 'castle', types: ['castle', 'warehouse'] },
+        { id: 'industry', icon: 'wood', types: ['lumberjack', 'quarry', 'iron_mine'] },
+        { id: 'food', icon: 'food', types: ['hunter'] },
+        { id: 'town', icon: 'pop', types: ['house', 'tavern'] },
+        { id: 'crafts', icon: 'hammer', types: ['blacksmith'] },
     ];
+    const catOf = type => (CATEGORIES.find(c => c.types.includes(type)) || CATEGORIES[0]).id;
     const GOAL_BUILDING = {
         castle: 'castle', warehouse: 'warehouse', lumberjack: 'lumberjack', hunter: 'hunter', quarry: 'quarry',
         houses2: 'house', workers15: 'house', winter1: 'hunter', iron20: 'iron_mine', smith: 'blacksmith', pop30: 'house',
@@ -182,49 +188,83 @@ const UI = (() => {
     }
     function ic(name) { return `<img class="ic" src="${iconUrl(name)}" alt="">`; }
 
+    function thumbUrl(type, size) {
+        const key = 'thumb_' + type + size;
+        if (!iconUrls[key]) iconUrls[key] = Sprites.getBuildingThumb(type, size).toDataURL();
+        return iconUrls[key];
+    }
+
     function buildBuildingMenu() {
-        els.buildingList.innerHTML = '';
-        MENU_GROUPS.forEach(group => {
-            const head = document.createElement('div');
-            head.className = 'menu-group';
-            head.textContent = t('cat.' + group.id);
-            els.buildingList.appendChild(head);
-            group.types.forEach(type => {
-                const def = BUILDINGS[type];
-                const btn = document.createElement('button');
-                btn.className = 'building-btn';
-                btn.dataset.type = type;
-                const thumb = Sprites.getBuildingThumb(type, 40);
-                thumb.className = 'b-thumb';
-                const text = document.createElement('div');
-                text.className = 'b-text';
-                text.innerHTML = `
-                    <span class="b-name">${bName(def)}<span class="b-key">${def.hotkey}</span></span>
+        els.cpCats.innerHTML = '';
+        CATEGORIES.forEach(cat => {
+            const tab = document.createElement('button');
+            tab.className = 'cp-cat';
+            tab.dataset.cat = cat.id;
+            tab.setAttribute('role', 'tab');
+            tab.innerHTML = `<img class="cat-ic" src="${cat.id === 'castle' ? thumbUrl('castle', 32) : iconUrl(cat.icon)}" alt=""><span class="cat-name">${t('cat.' + cat.id)}</span><span class="cat-dot"></span>`;
+            tab.addEventListener('click', () => openCategory(cat.id, true));
+            els.cpCats.appendChild(tab);
+        });
+
+        els.cpBuild.innerHTML = '';
+        CATEGORIES.forEach(cat => cat.types.forEach(type => {
+            const def = BUILDINGS[type];
+            const btn = document.createElement('button');
+            btn.className = 'cp-bld';
+            btn.dataset.type = type;
+            btn.dataset.cat = cat.id;
+            btn.innerHTML = `
+                <span class="bld-pic"><img src="${thumbUrl(type, 56)}" alt=""></span>
+                <span class="bld-text">
+                    <span class="bld-name">${bName(def)}<span class="b-key">${def.hotkey}</span></span>
                     <span class="b-cost"></span>
                     <span class="b-info">${infoHtml(def)}</span>
                     <span class="b-lock"></span>
-                `;
-                const badge = document.createElement('span');
-                badge.className = 'b-badge';
-                badge.textContent = t('b.goal');
-                btn.appendChild(thumb);
-                btn.appendChild(text);
-                btn.appendChild(badge);
-                btn.addEventListener('click', () => {
-                    if (btn.classList.contains('disabled')) {
-                        showNotification(Game.getUnavailableReason(type) || t('g.notavailable'), 'warning');
-                        AudioSys.play('error');
-                        btn.classList.remove('shake'); void btn.offsetWidth; btn.classList.add('shake');
-                        return;
-                    }
-                    selectBuilding(type);
-                });
-                btn.addEventListener('mouseenter', () => showBuildingTooltip(btn, type));
-                btn.addEventListener('mouseleave', hideTooltip);
-                els.buildingList.appendChild(btn);
+                </span>
+                <span class="b-badge">${t('b.goal')}</span>`;
+            btn.addEventListener('click', () => {
+                if (btn.classList.contains('disabled')) {
+                    showNotification(Game.getUnavailableReason(type) || t('g.notavailable'), 'warning');
+                    AudioSys.play('error');
+                    btn.classList.remove('shake'); void btn.offsetWidth; btn.classList.add('shake');
+                    return;
+                }
+                selectBuilding(type);
             });
-        });
+            btn.addEventListener('mouseenter', () => showBuildingTooltip(btn, type));
+            btn.addEventListener('mouseleave', hideTooltip);
+            els.cpBuild.appendChild(btn);
+        }));
+        openCategory(activeCat, false);
         updateBuildingButtons();
+    }
+
+    // Show a category's buildings. Clicking the open tab again on a phone folds the strip.
+    function openCategory(id, fromClick) {
+        const infoOpen = !els.infoPanel.classList.contains('hidden');
+        if (fromClick) {
+            AudioSys.play('click');
+            if (isCompact() && id === activeCat && bodyOpen && !infoOpen) bodyOpen = false;
+            else bodyOpen = true;
+            if (infoOpen) hideInfo();
+        }
+        activeCat = id;
+        els.cpCats.querySelectorAll('.cp-cat').forEach(tab => {
+            const on = tab.dataset.cat === id;
+            tab.classList.toggle('active', on && (bodyOpen || !isCompact()));
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        els.cpBuild.querySelectorAll('.cp-bld').forEach(btn => {
+            btn.classList.toggle('in-cat', btn.dataset.cat === id);
+        });
+        syncBody();
+    }
+
+    function syncBody() {
+        const open = bodyOpen || !isCompact() || !els.infoPanel.classList.contains('hidden');
+        els.commandPanel.classList.toggle('folded', !open);
+        els.commandPanel.classList.toggle('info-open', !els.infoPanel.classList.contains('hidden'));
+        updateInsets();
     }
 
     // Cost with resource icons; amounts you cannot pay yet are red
@@ -311,9 +351,8 @@ const UI = (() => {
         const r = btn.getBoundingClientRect();
         const tw = els.tooltip.offsetWidth;
         const th = els.tooltip.offsetHeight;
-        let x = r.left - tw - 10;
-        let y = Math.min(r.top, window.innerHeight - th - 10);
-        if (x < 4) x = r.right + 10;
+        let x = Math.max(6, Math.min(window.innerWidth - tw - 6, r.left + r.width / 2 - tw / 2));
+        let y = Math.max(6, r.top - th - 10);
         els.tooltip.style.left = x + 'px';
         els.tooltip.style.top = y + 'px';
     }
@@ -331,7 +370,8 @@ const UI = (() => {
         selectedBuilding = type;
         justPlaced = null;
         pendingTouch = null;
-        closeSheet();
+        if (catOf(type) !== activeCat) openCategory(catOf(type), false);
+        if (isCompact()) { bodyOpen = false; openCategory(activeCat, false); }
         updatePlaceBanner();
         els.canvas.classList.add('placing');
         AudioSys.play('select');
@@ -365,8 +405,8 @@ const UI = (() => {
     function updateBuildingButtons() {
         const next = Game.getNextMilestone();
         const goalType = next ? GOAL_BUILDING[next.id] : null;
-        let goalReady = false;
-        els.buildingList.querySelectorAll('.building-btn').forEach(btn => {
+        const readyCats = new Set();
+        els.cpBuild.querySelectorAll('.cp-bld').forEach(btn => {
             const type = btn.dataset.type;
             const def = BUILDINGS[type];
             const available = Game.isBuildingAvailable(type);
@@ -375,34 +415,20 @@ const UI = (() => {
             btn.classList.toggle('done', done);
             btn.classList.toggle('selected', type === selectedBuilding);
             btn.classList.toggle('recommended', type === goalType && !done);
+            btn.setAttribute('aria-disabled', available ? 'false' : 'true');
             // the castle disappears from the menu once it stands
-            btn.style.display = (type === 'castle' && done) ? 'none' : '';
+            btn.classList.toggle('gone', type === 'castle' && done);
             const costEl = btn.querySelector('.b-cost');
             const costHtmlNow = costIconsHtml(type);
             if (costEl.innerHTML !== costHtmlNow) costEl.innerHTML = costHtmlNow;
             const lockEl = btn.querySelector('.b-lock');
             const reason = available ? '' : shortReason(type);
             if (lockEl.textContent !== reason) lockEl.textContent = reason;
-            if (type === goalType && available) goalReady = true;
+            if (type === goalType && available) readyCats.add(btn.dataset.cat);
         });
-        const castleBtn = els.buildingList.querySelector('.building-btn[data-type="castle"]');
+        els.cpCats.querySelectorAll('.cp-cat').forEach(tab => tab.classList.toggle('goal', readyCats.has(tab.dataset.cat)));
+        const castleBtn = els.cpBuild.querySelector('.cp-bld[data-type="castle"]');
         if (castleBtn) castleBtn.classList.toggle('pulse', !Game.hasCastle() && selectedBuilding !== 'castle');
-        if (els.fabDot) els.fabDot.classList.toggle('hidden', !goalReady || !!selectedBuilding);
-    }
-
-    // ---------- build sheet (phones) ----------
-    function openSheet() {
-        if (!isCompact()) return;
-        hideInfo();
-        els.buildingMenu.classList.add('open');
-        els.sheetBackdrop.classList.remove('hidden');
-        AudioSys.play('click');
-        updateBuildingButtons();
-    }
-
-    function closeSheet() {
-        els.buildingMenu.classList.remove('open');
-        els.sheetBackdrop.classList.add('hidden');
     }
 
     // ---------- speed / top bar ----------
@@ -706,8 +732,13 @@ const UI = (() => {
                         AudioSys.play('error');
                     }
                 } else {
+                    const w = Renderer.screenToWorld(p.x, p.y);
+                    const villager = Villagers.pick(w.x, w.y);
                     const building = BuildingManager.getBuildingAt(tile.x, tile.y);
-                    if (building) {
+                    if (villager) {
+                        AudioSys.play('click');
+                        showVillagerInfo(villager);
+                    } else if (building) {
                         AudioSys.play('click');
                         showBuildingInfo(building);
                     } else {
@@ -824,6 +855,7 @@ const UI = (() => {
             minimapFrame = (minimapFrame + 1) % 3;
             if (minimapFrame === 0) Renderer.renderMinimap(minimapCtx, els.minimap.width, els.minimap.height);
         }
+        refreshInfo(dtSec);
         const gs = Game.getState();
         if (els.dayProgress) els.dayProgress.style.width = (gs.dayProgress * 100).toFixed(1) + '%';
         updateSky(gs);
@@ -887,46 +919,113 @@ const UI = (() => {
         els.minimap.addEventListener('touchmove', (e) => { moveTo(e); e.preventDefault(); }, { passive: false });
     }
 
-    // ---------- info panel ----------
-    function showBuildingInfo(building) {
-        selectedPlaced = building;
-        els.infoTitle.textContent = bName(building.def);
-        let html = `<p class="info-desc">${bDesc(building.def)}</p>`;
+    // ---------- info panel (replaces the building strip, like a scroll) ----------
+    let infoKey = '';
+    function openInfoView() {
+        els.cpBuild.classList.add('hidden');
+        els.infoPanel.classList.remove('hidden');
+        hideTooltip();
+        syncBody();
+    }
+
+    function setPortrait(canvas, scale) {
+        els.infoPortrait.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = canvas.toDataURL();
+        img.style.width = Math.round(canvas.width * scale) + 'px';
+        img.style.height = Math.round(canvas.height * scale) + 'px';
+        els.infoPortrait.appendChild(img);
+    }
+
+    function stat(label, value, cls = '') {
+        return `<div class="stat"><span class="stat-label">${label}</span><span class="${cls}">${value}</span></div>`;
+    }
+
+    function bar(frac, color, label) {
+        const pct = Math.max(0, Math.min(1, frac)) * 100;
+        return `<div class="pbar"><div class="pbar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></div>${label ? `<span class="pbar-label">${label}</span>` : ''}</div>`;
+    }
+
+    // Goods in store: one row per resource with a fill bar against the capacity
+    function stockHtml() {
+        const gs = Game.getState();
+        const rates = Game.getRates();
+        const net = { wood: rates.wood, stone: rates.stone, iron: rates.iron, food: rates.food - Game.getFoodConsumption() };
+        let html = `<div class="stock-grid">`;
+        ['wood', 'stone', 'iron', 'food'].forEach(r => {
+            const v = Math.floor(gs.resources[r]);
+            const rate = Math.round(net[r] * 10) / 10;
+            const rateHtml = rate > 0 ? `<span class="rate up">+${fmtNum(rate)}/min</span>` : rate < 0 ? `<span class="rate down">${fmtNum(rate)}/min</span>` : '';
+            html += `<div class="stock-item${v >= gs.maxStorage ? ' full' : ''}" title="${t('res.' + r[0].toUpperCase() + r.slice(1))}">
+                <span class="stock-ic">${ic(r)}</span>
+                <span class="stock-name">${t('res.' + r[0].toUpperCase() + r.slice(1))}</span>
+                <span class="stock-val">${v}<span class="stock-max"> / ${gs.maxStorage}</span> ${rateHtml}</span>
+                ${bar(v / gs.maxStorage, COLORS[r] || '#c8a050')}
+            </div>`;
+        });
+        return html + `</div>`;
+    }
+
+    function buildingInfoHtml(building) {
+        const def = building.def;
+        let html = `<p class="info-desc">${bDesc(def)}</p>`;
 
         if (building.maxWorkers > 0) {
-            html += `<div class="stat"><span class="stat-label">${t('info.workers')}</span><span>${building.workers} / ${building.maxWorkers}</span></div>`;
+            let people = '';
+            for (let i = 0; i < building.maxWorkers; i++) people += `<span class="worker${i < building.workers ? '' : ' empty'}">${ic('pop')}</span>`;
+            html += stat(t('info.workers'), `${people} ${building.workers} / ${building.maxWorkers}`);
         }
-        if (building.def.production) {
-            const prod = building.def.production;
+        if (def.production) {
+            const prod = def.production;
             const out = Game.getBuildingOutput(building);
             const resting = prod.resource === 'food' && Game.getSeasonMultiplier(building.type) === 0;
-            const status = !building.active ? `<span class="bad">${t('info.noworkers')}</span>`
+            const status = building.buildStart ? `<span>${t('info.building')}</span>`
+                : !building.active ? `<span class="bad">${t('info.noworkers')}</span>`
                 : resting ? `<span class="bad">${t('season.rest')}</span>`
+                : !Game.isClockRunning() ? `<span class="bad">${t('res.notime')}</span>`
                 : `<span class="ok">${t('info.active')}</span>`;
-            // Show what the building really yields right now (bonuses and season included)
             const base = prod.amount * 60 / prod.cycle;
             const cls = out > base + 0.01 ? 'ok' : out < base - 0.01 ? 'bad' : '';
-            html += `<div class="stat"><span class="stat-label">${t('info.production')}</span><span class="${cls}">${t('menu.prod', { n: fmtNum(out), res: resName(prod.resource) })}</span></div>`;
-            html += `<div class="stat"><span class="stat-label">${t('info.delivery')}</span><span>${t('tt.batch', { a: prod.amount, res: resName(prod.resource), s: prod.cycle })}</span></div>`;
-            html += `<div class="stat"><span class="stat-label">${t('info.status')}</span><span>${status}</span></div>`;
+            html += stat(t('info.production'), `${ic(prod.resource)} ${t('menu.prod', { n: fmtNum(out), res: resName(prod.resource) })}`, cls);
+            html += stat(t('info.status'), status);
+            if (building.active && !resting) {
+                const mult = out / base || 1;
+                const left = Math.max(0, Math.ceil((1 - (building.progress || 0)) * prod.cycle / mult));
+                html += `<div class="stat stat-bar"><span class="stat-label">${t('info.delivery')}</span>${bar(building.progress || 0, COLORS[prod.resource] || '#ffd24a', t('info.next', { a: prod.amount, res: resName(prod.resource), s: left }))}</div>`;
+            }
             if (prod.resource === 'food') {
                 const season = Game.getSeason();
                 const m = Game.getSeasonMultiplier(building.type, season);
-                const cls = m > 1 ? 'ok' : m < 1 ? 'bad' : '';
-                html += `<div class="stat"><span class="stat-label">${t('info.season')}</span><span class="${cls}">${t('season.' + season.id)} ${m === 0 ? '· ' + t('season.rest') : '×' + fmtNum(m)}</span></div>`;
+                html += stat(t('info.season'), `${t('season.' + season.id)} ${m === 0 ? '· ' + t('season.rest') : '×' + fmtNum(m)}`, m > 1 ? 'ok' : m < 1 ? 'bad' : '');
             }
         }
-        if (building.def.provides.populationCap) {
-            html += `<div class="stat"><span class="stat-label">${t('info.housing')}</span><span>${t('menu.villagers', { n: building.def.provides.populationCap })}</span></div>`;
+        if (def.provides.populationCap) {
+            html += stat(t('info.housing'), `${ic('pop')} ${t('menu.villagers', { n: def.provides.populationCap })}`);
         }
-        if (building.def.provides.storage) {
-            html += `<div class="stat"><span class="stat-label">${t('info.storage')}</span><span>+${building.def.provides.storage}</span></div>`;
+        if (def.provides.productionBonus) {
+            html += stat(t('info.bonus'), t('info.bonus.value', { n: Math.round(def.provides.productionBonus * 100) }), 'ok');
         }
-        if (building.def.provides.productionBonus) {
-            html += `<div class="stat"><span class="stat-label">${t('info.bonus')}</span><span>${t('info.bonus.value', { n: Math.round(building.def.provides.productionBonus * 100) })}</span></div>`;
+        // Warehouse and keep show the stockpile
+        if (def.provides.storage || building.type === 'castle') {
+            if (building.type === 'castle') {
+                const gs = Game.getState();
+                html += stat(t('info.people'), `${ic('pop')} ${t('info.people.value', { used: gs.populationUsed, cap: gs.populationCap, free: Game.getFreeWorkers() })}`);
+            }
+            html += `<div class="stock-head">${t('info.stock')}${def.provides.storage ? ` · ${t('info.storage.this', { n: def.provides.storage })}` : ''}</div>`;
+            html += stockHtml();
         }
-        html += `<div class="stat"><span class="stat-label">${t('info.built')}</span><span>${t('info.day', { n: building.dayPlaced })}</span></div>`;
-        els.infoContent.innerHTML = html;
+        html += stat(t('info.built'), t('info.day', { n: building.dayPlaced }));
+        return html;
+    }
+
+    function showBuildingInfo(building) {
+        selectedPlaced = building;
+        selectedVillager = null;
+        els.infoTitle.textContent = bName(building.def);
+        const spr = Sprites.getBuilding(building.type, { grown: building.grown });
+        if (spr) setPortrait(spr, Math.min(1.5, 84 / spr.height, 120 / spr.width));
+        els.infoContent.innerHTML = buildingInfoHtml(building);
+        infoKey = '';
 
         els.infoActions.innerHTML = '';
         if (building.type !== 'castle') {
@@ -941,7 +1040,56 @@ const UI = (() => {
             btn.addEventListener('click', () => tryDemolish(building.id));
             els.infoActions.appendChild(btn);
         }
-        els.infoPanel.classList.remove('hidden');
+        openInfoView();
+        keepInView(building.pixelX + building.width / 2, building.pixelY + building.height / 2, building.height);
+    }
+
+    // The scroll may cover what was clicked: move the camera so it stays visible
+    function keepInView(wx, wy, h = 32) {
+        const s = Renderer.worldToScreen(wx, wy);
+        const panelTop = window.innerHeight - (els.commandPanel.offsetHeight || 0);
+        const z = Renderer.getZoom();
+        if (s.y + h * z / 2 > panelTop - 8 || s.y < (els.resourceBar.offsetHeight || 48) + 8) Renderer.centerOn(wx, wy);
+    }
+
+    function villagerInfoHtml(v) {
+        const b = BuildingManager.getById(v.buildingId);
+        let html = `<p class="info-desc">${t('vil.desc.' + v.job)}</p>`;
+        html += stat(t('vil.activity'), t(Villagers.activity(v)));
+        if (v.carry) html += stat(t('vil.carrying'), `${ic(v.carry)} ${t('res.' + v.carry[0].toUpperCase() + v.carry.slice(1))}`);
+        if (b) html += stat(t('vil.workplace'), `<button class="link-btn" data-goto="${b.id}">${bName(b.def)}</button>`);
+        html += stat(t('vil.eats'), `${ic('food')} ${t('vil.eats.value', { n: fmtNum(FOOD_PER_WORKER_PER_MIN) })}`);
+        return html;
+    }
+
+    function showVillagerInfo(v) {
+        selectedVillager = v;
+        selectedPlaced = null;
+        els.infoTitle.textContent = `${v.name} · ${t('vil.job.' + v.job)}`;
+        setPortrait(Sprites.drawVillager(4, v.palette, false, v.tool), 3.5);
+        els.infoContent.innerHTML = villagerInfoHtml(v);
+        infoKey = '';
+        els.infoActions.innerHTML = '';
+        openInfoView();
+        keepInView(v.x, v.y - 10, 24);
+    }
+
+    // Keep the open scroll up to date (progress bars, stock, what a villager is doing)
+    let infoRefreshT = 0;
+    function refreshInfo(dt) {
+        if (els.infoPanel.classList.contains('hidden')) return;
+        infoRefreshT -= dt;
+        if (infoRefreshT > 0) return;
+        infoRefreshT = 0.25;
+        let html = null;
+        if (selectedPlaced) {
+            if (!BuildingManager.getById(selectedPlaced.id)) { hideInfo(); return; }
+            html = buildingInfoHtml(selectedPlaced);
+        } else if (selectedVillager) {
+            if (!Villagers.getById(selectedVillager.id)) { hideInfo(); return; }
+            html = villagerInfoHtml(selectedVillager);
+        }
+        if (html !== null && html !== infoKey) { els.infoContent.innerHTML = html; infoKey = html; }
     }
 
     function tryDemolish(id) {
@@ -959,7 +1107,10 @@ const UI = (() => {
 
     function hideInfo() {
         selectedPlaced = null;
+        selectedVillager = null;
         els.infoPanel.classList.add('hidden');
+        els.cpBuild.classList.remove('hidden');
+        syncBody();
     }
 
     // ---------- resources ----------
@@ -996,7 +1147,6 @@ const UI = (() => {
         const next = Game.getNextMilestone();
         if (els.goalText) {
             els.goalText.textContent = next ? t('ms.' + next.id) : t('menu.goal.done');
-            if (els.goalChipText) els.goalChipText.textContent = els.goalText.textContent;
             els.goalCount.textContent = `${gs.milestones.length}/${MILESTONES.length}`;
         }
 
@@ -1099,7 +1249,7 @@ const UI = (() => {
     }
 
     function getPlacementPreview() { return placementPreview; }
-    function getHoverInfo() { return { building: hoveredBuilding, selected: selectedPlaced }; }
+    function getHoverInfo() { return { building: hoveredBuilding, selected: selectedPlaced, villager: selectedVillager }; }
 
     function getStartBtn() { return els.startBtn; }
     function getContinueBtn() { return els.continueBtn; }
