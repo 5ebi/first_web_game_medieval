@@ -5,6 +5,7 @@
 //   GAME_URL=http://127.0.0.1:8123/index.html node tests/smoke.js
 const { chromium, devices } = require('playwright');
 const path = require('path');
+const zlib = require('zlib');
 
 const URL = process.env.GAME_URL || 'http://127.0.0.1:8123/index.html';
 const OUT = path.join(__dirname, 'out');
@@ -34,6 +35,32 @@ function buildVillage() {
     return BuildingManager.getAll().map(b => b.type);
 }
 
+// A solid-colour RGBA PNG, used to stand in for a custom icon in assets/icons/
+function solidPng(size, [r, g, b]) {
+    const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+    const crc = buf => { let c = 0xffffffff; for (const x of buf) c = crcTable[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+    const chunk = (type, data) => {
+        const td = Buffer.concat([Buffer.from(type), data]);
+        const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+        const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+        return Buffer.concat([len, td, c]);
+    };
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4); ihdr[8] = 8; ihdr[9] = 6;
+    const row = Buffer.concat([Buffer.from([0]), Buffer.from(Array(size).fill([r, g, b, 255]).flat())]);
+    const raw = Buffer.concat(Array(size).fill(row));
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+// Menu icons and build-card thumbnails must have at least one device pixel per CSS pixel
+function iconSharpness() {
+    const dpr = window.devicePixelRatio || 1;
+    const els = [...document.querySelectorAll('#resource-bar .resource-icon canvas, .cp-cat .cat-ic, .bld-pic img')]
+        .filter(e => e.getBoundingClientRect().width > 0);
+    const blurry = els.filter(e => (e.naturalWidth || e.width) + 1 < e.getBoundingClientRect().width * dpr)
+        .map(e => `${e.className || e.parentNode.id}:${e.naturalWidth || e.width}px<${Math.round(e.getBoundingClientRect().width * dpr)}`);
+    return { count: els.length, blurry };
+}
+
 async function run(browser, name, ctxOpts, touch) {
     console.log(`\n== ${name}`);
     const ctx = await browser.newContext(ctxOpts);
@@ -42,10 +69,25 @@ async function run(browser, name, ctxOpts, touch) {
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 
+    if (name === 'desktop') {
+        // custom art: a plain red assets/icons/wood.png must replace the built-in wood icon
+        await page.route('**/assets/manifest.json', r => r.fulfill({ contentType: 'application/json', body: '["icons/wood.png"]' }));
+        await page.route('**/assets/icons/wood.png', r => r.fulfill({ contentType: 'image/png', body: solidPng(32, [255, 0, 0]) }));
+    }
     await page.goto(URL);
     await page.waitForTimeout(400);
     if (touch) await page.tap('#start-btn'); else await page.click('#start-btn');
     await page.waitForTimeout(400);
+
+    const sharp = await page.evaluate(iconSharpness);
+    check(sharp.count >= 5 && sharp.blurry.length === 0, `${name}: ${sharp.count} menu icons rendered at screen resolution${sharp.blurry.length ? ': ' + sharp.blurry.join(', ') : ''}`);
+    if (name === 'desktop') {
+        const px = await page.evaluate(() => {
+            const c = document.querySelector('#icon-wood canvas');
+            return [...c.getContext('2d').getImageData(c.width / 2, c.height / 2, 1, 1).data];
+        });
+        check(px[0] === 255 && px[1] === 0 && px[2] === 0, `desktop: custom icons/wood.png replaces the wood icon (centre pixel ${px.join(',')})`);
+    }
 
     const types = await page.evaluate(buildVillage);
     check(types.includes('castle') && types.includes('warehouse'), `${name}: castle and warehouse placed (${types.join(', ')})`);
