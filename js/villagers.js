@@ -15,7 +15,7 @@ const Villagers = (() => {
         hunter:     { job: 'hunter', tool: 'bow', resource: 'FOREST', carry: 'food', work: [6, 10], hunt: true },
         quarry:     { job: 'mason', tool: 'pick', resource: 'STONE_DEPOSIT', carry: 'stone', work: [5, 8] },
         iron_mine:  { job: 'miner', tool: 'pick', resource: 'STONE_DEPOSIT', carry: 'iron', work: [6, 9] },
-        blacksmith: { job: 'smith', tool: 'hammer', resource: null, carry: null, work: [4, 7] },
+        weaponsmith: { job: 'smith', tool: 'hammer', resource: null, carry: null, work: [4, 7] },
     };
 
     const NAMES = {
