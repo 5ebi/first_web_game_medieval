@@ -34,6 +34,58 @@ function buildVillage() {
     return BuildingManager.getAll().map(b => b.type);
 }
 
+// Lumberjack price: 10 wood, free only with no lumberjack and not enough wood (issue #9)
+function lumberjackPrice() {
+    const near = (type, cx, cy, r = 25) => {
+        for (let d = 0; d <= r; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+            if (Game.canPlace(type, cx + dx, cy + dy).ok) return { b: Game.placeBuilding(type, cx + dx, cy + dy), x: cx + dx, y: cy + dy };
+        }
+        return null;
+    };
+    const spot = (cx, cy, r = 25) => {
+        for (let d = 0; d <= r; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+            if (GameMap.isBuildable(cx + dx, cy + dy, 2, 2, BuildingManager.getAll()) &&
+                GameMap.hasNearbyResource(cx + dx, cy + dy, 2, 2, 'FOREST')) return [cx + dx, cy + dy];
+        }
+        return null;
+    };
+    const r = {};
+    const cx = Math.floor(MAP_WIDTH / 2) - 2, cy = Math.floor(MAP_HEIGHT / 2) - 2;
+    UI.deselectBuilding(true);
+    near('castle', cx, cy);
+    near('warehouse', cx + 5, cy + 1);
+    const s = Game.getState();
+    r.startWood = s.resources.wood;
+    r.startCost = Game.getCost('lumberjack').wood;
+    const card = () => { UI.updateBuildingButtons(); return document.querySelector('.cp-bld[data-type="lumberjack"] .b-cost').textContent.trim(); };
+    r.cardStart = card();
+    s.resources.wood = 0;
+    const [x, y] = spot(cx, cy + 4);
+    r.emergencyCost = Game.getCost('lumberjack').wood;
+    r.emergencyOk = Game.canPlace('lumberjack', x, y).ok;
+    r.cardEmergency = card();
+    const first = Game.placeBuilding('lumberjack', x, y);
+    r.woodAfterFirst = s.resources.wood;
+    r.firstPaid = first && first.paid.wood;
+    r.secondCost = Game.getCost('lumberjack').wood;
+    r.cardSecond = card();
+    const [x2, y2] = spot(cx, cy + 4);
+    r.secondOk = Game.canPlace('lumberjack', x2, y2).ok;
+    // an emergency lumberjack refunds nothing
+    Game.demolishBuilding(first.id);
+    r.woodAfterDemolish = s.resources.wood;
+    // no lumberjack, but enough wood: normal price
+    s.resources.wood = 40;
+    r.richCost = Game.getCost('lumberjack').wood;
+    // a lumberjack from an old save (no `paid`) loads as one that cost nothing
+    const saved = BuildingManager.serialize().concat([{ id: 999, type: 'lumberjack', tileX: x, tileY: y, workers: 2, active: true }]);
+    BuildingManager.deserialize(saved);
+    r.oldSavePaid = BuildingManager.getById(999)?.paid?.wood;
+    return r;
+}
+
 async function run(browser, name, ctxOpts, touch) {
     console.log(`\n== ${name}`);
     const ctx = await browser.newContext(ctxOpts);
@@ -46,6 +98,22 @@ async function run(browser, name, ctxOpts, touch) {
     await page.waitForTimeout(400);
     if (touch) await page.tap('#start-btn'); else await page.click('#start-btn');
     await page.waitForTimeout(400);
+
+    if (name === 'desktop') {
+        const p = await page.evaluate(lumberjackPrice);
+        const free = await page.evaluate(() => t('free'));
+        check(p.startWood >= 10 && p.startCost === 10 && p.cardStart !== free, `desktop: first lumberjack after the warehouse costs 10 wood (${p.startCost}, card "${p.cardStart}")`);
+        check(p.emergencyCost === 0 && p.emergencyOk && p.cardEmergency === free, `desktop: no lumberjack and no wood -> free (cost ${p.emergencyCost}, ok ${p.emergencyOk}, card "${p.cardEmergency}")`);
+        check(p.woodAfterFirst === 0 && p.firstPaid === 0, `desktop: emergency lumberjack takes no wood (wood ${p.woodAfterFirst}, paid ${p.firstPaid})`);
+        check(p.secondCost === 10 && !p.secondOk && p.cardSecond !== free, `desktop: second lumberjack costs 10 wood and fails with 0 wood (cost ${p.secondCost}, ok ${p.secondOk})`);
+        check(p.woodAfterDemolish === 0, `desktop: emergency lumberjack refunds nothing (wood ${p.woodAfterDemolish})`);
+        check(p.richCost === 10, `desktop: no lumberjack but 40 wood -> costs 10 (${p.richCost})`);
+        check(p.oldSavePaid === 0, `desktop: old-save lumberjack refunds nothing (paid ${p.oldSavePaid})`);
+        await page.reload();
+        await page.waitForTimeout(400);
+        await page.click('#start-btn');
+        await page.waitForTimeout(400);
+    }
 
     const types = await page.evaluate(buildVillage);
     check(types.includes('castle') && types.includes('warehouse'), `${name}: castle and warehouse placed (${types.join(', ')})`);
