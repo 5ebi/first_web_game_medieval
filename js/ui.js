@@ -105,6 +105,14 @@ const UI = (() => {
         if (window.ResizeObserver) new ResizeObserver(updateInsets).observe(els.commandPanel);
         // links inside the info scroll (e.g. a villager's workplace)
         els.infoContent.addEventListener('click', (e) => {
+            const only = e.target.closest('[data-seltype]');
+            if (only) {
+                // narrow the selection to one kind of soldier
+                Units.select(Units.getSelected().filter(u => u.type === only.dataset.seltype).map(u => u.id));
+                AudioSys.play('click');
+                showSelection();
+                return;
+            }
             const go = e.target.closest('[data-goto]');
             if (!go) return;
             const b = BuildingManager.getById(Number(go.dataset.goto));
@@ -116,13 +124,18 @@ const UI = (() => {
         // smith product toggle and barracks recruit buttons
         els.infoControls.addEventListener('click', (e) => {
             const btn = e.target.closest('button');
+            if (btn && btn.dataset.order) { onOrderButton(btn.dataset.order); return; }
             if (!btn || !selectedPlaced) return;
             if (btn.dataset.product) {
                 if (Game.setSmithProduct(selectedPlaced.id, btn.dataset.product)) AudioSys.play('click');
             } else if (btn.dataset.recruit) {
                 const reason = Game.getRecruitReason(btn.dataset.recruit);
                 if (reason) { showNotification(reason, 'warning'); AudioSys.play('error'); return; }
-                if (Game.recruit(selectedPlaced.id, btn.dataset.recruit)) AudioSys.play('buildDone');
+                if (Game.recruit(selectedPlaced.id, btn.dataset.recruit)) {
+                    AudioSys.play('buildDone');
+                    // the first soldier: tell how to command him
+                    if (Units.getAll().length === 1) showNotification(t(lastInputTouch ? 'sel.tip.touch' : 'sel.tip.mouse'), 'info');
+                }
             }
             refreshControls(true);
             infoRefreshT = 0;
@@ -160,7 +173,7 @@ const UI = (() => {
         updateResources();
         updateMuteButton();
         if (selectedPlaced) showBuildingInfo(selectedPlaced);
-        else if (selectedUnit) showUnitInfo(selectedUnit);
+        else if (unitView) showSelection();
         if (!els.welcome.classList.contains('hidden')) showWelcome();
         syncSettingsUI();
         hideTooltip();
@@ -629,18 +642,76 @@ const UI = (() => {
         return !els.welcome.classList.contains('hidden') || !els.gameOver.classList.contains('hidden');
     }
 
+    // ---------- soldiers: selection and orders ----------
+    // Desktop: click / shift-click / double-click / left-drag box select, right-click moves,
+    // right- or middle-drag pans (left-drag pans too while you have no soldiers).
+    // Phones: tap selects, double tap selects the type, long press + drag draws a box,
+    // tap on the ground moves, one-finger drag always pans.
+    let orderMode = null;      // null | 'move' | 'patrol' | 'patrolAdd': waits for a target point
+    let unitView = false;      // the info scroll shows the soldier selection
+    let selBox = null;         // { x0, y0, x1, y1 } screen rect while box-selecting
+    let orderMarker = null;    // { x, y, t, kind } last order's destination
+    let lastClick = { t: 0, x: 0, y: 0, type: null };
+
+    function setOrderMode(mode) {
+        orderMode = mode;
+        els.canvas.classList.toggle('ordering', !!mode);
+        if (unitView) { refreshControls(true); infoRefreshT = 0; }
+    }
+
+    // Visible part of the map in world coordinates (between the top bar and the panel)
+    function visibleWorldRect() {
+        const top = els.resourceBar.offsetHeight || 0;
+        const bottom = window.innerHeight - (els.commandPanel.offsetHeight || 0);
+        const a = Renderer.screenToWorld(0, top), b = Renderer.screenToWorld(window.innerWidth, Math.max(top + 1, bottom));
+        return [a.x, a.y, b.x, b.y];
+    }
+
+    function selectTypeOnScreen(type, add) {
+        const ids = Units.inRect(...visibleWorldRect()).filter(u => u.type === type).map(u => u.id);
+        Units.select(ids, add);
+    }
+
+    function issueOrder(kind, w, keep) {
+        const sel = Units.getSelected();
+        if (!sel.length) { setOrderMode(null); return false; }
+        let n;
+        if (kind === 'stop') { Units.stop(); AudioSys.play('click'); setOrderMode(null); infoRefreshT = 0; return true; }
+        if (kind === 'patrol' || kind === 'patrolAdd') n = Units.patrolTo(null, w.x, w.y, kind === 'patrolAdd');
+        else n = Units.moveTo(null, w.x, w.y);
+        if (!n) {
+            AudioSys.play('error');
+            showNotification(t('sel.noway'), 'warning');
+        } else {
+            AudioSys.play('click');
+            orderMarker = { x: w.x, y: w.y, t: performance.now(), kind: kind === 'move' ? 'move' : 'patrol' };
+        }
+        // shift keeps adding patrol points
+        setOrderMode(keep && kind !== 'move' ? 'patrolAdd' : null);
+        infoRefreshT = 0;
+        return n > 0;
+    }
+
     function setupEventListeners() {
         let isDragging = false;
+        let dragMode = 'pan';      // 'pan' | 'box'
         let dragStart = { x: 0, y: 0 };
         let cameraStart = { x: 0, y: 0 };
         let dragDistance = 0;
         let pinchDist = 0;
+        let longPress = null;
+        let dragButton = 0;
+
+        function cancelLongPress() { if (longPress) { clearTimeout(longPress); longPress = null; } }
 
         function onPointerDown(e) {
-            if (e.button !== undefined && e.button !== 0) return;
+            const btn = e.button === undefined ? 0 : e.button;
+            if (btn > 2) return;
             if (e.touches && e.touches.length === 2) {
                 pinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 isDragging = false;
+                selBox = null;
+                cancelLongPress();
                 e.preventDefault();
                 return;
             }
@@ -651,10 +722,26 @@ const UI = (() => {
             isDragging = true;
             dragStart = p;
             dragDistance = 0;
+            dragButton = btn;
+            // Mouse: left-drag draws a selection box once you have soldiers (Stronghold style)
+            dragMode = !e.touches && btn === 0 && !selectedBuilding && !orderMode && Units.getAll().length > 0 ? 'box' : 'pan';
             const cam = Renderer.getCamera();
             cameraStart = { x: cam.x, y: cam.y };
             pointerOverCanvas = true;
             lastPointer = p;
+            cancelLongPress();
+            if (e.touches && !selectedBuilding && Units.getAll().length > 0) {
+                // Touch: hold still, then drag, to draw a selection box
+                longPress = setTimeout(() => {
+                    longPress = null;
+                    if (!isDragging || dragDistance >= 8) return;
+                    dragMode = 'box';
+                    selBox = { x0: dragStart.x, y0: dragStart.y, x1: dragStart.x, y1: dragStart.y };
+                    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) { /* not allowed */ } }
+                    AudioSys.play('select');
+                }, 420);
+            }
+            if (btn === 1) e.preventDefault();
             if (e.touches) e.preventDefault();
         }
 
@@ -686,14 +773,19 @@ const UI = (() => {
                 const dx = dragStart.x - p.x;
                 const dy = dragStart.y - p.y;
                 dragDistance = Math.sqrt(dx * dx + dy * dy);
-                const z = Renderer.getZoom();
-                Renderer.setCamera(cameraStart.x + dx / z, cameraStart.y + dy / z);
-                if (dragDistance > 8) els.canvas.classList.add('dragging');
+                if (dragDistance >= 8) cancelLongPress();
+                if (dragMode === 'box') {
+                    if (dragDistance >= 8 || selBox) selBox = { x0: dragStart.x, y0: dragStart.y, x1: p.x, y1: p.y };
+                } else {
+                    const z = Renderer.getZoom();
+                    Renderer.setCamera(cameraStart.x + dx / z, cameraStart.y + dy / z);
+                    if (dragDistance > 8) els.canvas.classList.add('dragging');
+                }
             }
 
             if (pointerOverCanvas) {
                 const tile = Renderer.screenToTile(p.x, p.y);
-                hoveredBuilding = selectedBuilding ? null : (BuildingManager.getBuildingAt(tile.x, tile.y) || null);
+                hoveredBuilding = selectedBuilding || orderMode ? null : (BuildingManager.getBuildingAt(tile.x, tile.y) || null);
             } else {
                 hoveredBuilding = null;
             }
@@ -701,12 +793,26 @@ const UI = (() => {
             if (e.touches) e.preventDefault();
         }
 
+        function finishBox(e) {
+            const a = Renderer.screenToWorld(selBox.x0, selBox.y0), b = Renderer.screenToWorld(selBox.x1, selBox.y1);
+            selBox = null;
+            const ids = Units.inRect(a.x, a.y, b.x, b.y).map(u => u.id);
+            const add = e.shiftKey || e.ctrlKey || e.metaKey;
+            Units.select(ids, add);
+            if (Units.getSelected().length) { AudioSys.play('click'); showSelection(); }
+            else if (unitView) hideInfo();
+        }
+
         function onPointerUp(e) {
             if (e.touches && e.touches.length > 0) return;
             pinchDist = 0;
+            cancelLongPress();
             if (!isDragging) return;
             isDragging = false;
             els.canvas.classList.remove('dragging');
+            const btn = dragButton;
+
+            if (selBox) { finishBox(e); return; }
 
             if (dragDistance < 8) {
                 const p = getPointerPos(e);
@@ -714,6 +820,16 @@ const UI = (() => {
                 pointerOverCanvas = true;
                 refreshPreview();
                 const tile = Renderer.screenToTile(p.x, p.y);
+
+                if (btn !== 0) {
+                    // right click: move the selected soldiers, otherwise cancel
+                    if (btn === 2) {
+                        if (Units.getSelected().length && !selectedBuilding) issueOrder('move', Renderer.screenToWorld(p.x, p.y));
+                        else if (selectedBuilding) deselectBuilding();
+                        else hideInfo();
+                    }
+                    return;
+                }
 
                 if (selectedBuilding) {
                     const def0 = BUILDINGS[selectedBuilding];
@@ -754,13 +870,25 @@ const UI = (() => {
                     }
                 } else {
                     const w = Renderer.screenToWorld(p.x, p.y);
+                    const add = e.shiftKey || e.ctrlKey || e.metaKey;
+                    if (orderMode) { issueOrder(orderMode, w, add && !e.changedTouches); return; }
                     const unit = Units.pick(w.x, w.y);
-                    const villager = unit ? null : Villagers.pick(w.x, w.y);
-                    const building = BuildingManager.getBuildingAt(tile.x, tile.y);
                     if (unit) {
+                        const now = performance.now();
+                        const dbl = now - lastClick.t < 380 && Math.hypot(p.x - lastClick.x, p.y - lastClick.y) < 24 && lastClick.type === unit.type;
+                        lastClick = { t: dbl ? 0 : now, x: p.x, y: p.y, type: unit.type };
+                        if (dbl) selectTypeOnScreen(unit.type, add);
+                        else if (add) Units.toggle(unit.id);
+                        else Units.select([unit.id]);
                         AudioSys.play('click');
-                        showUnitInfo(unit);
-                    } else if (villager) {
+                        showSelection();
+                        return;
+                    }
+                    // Phones: with soldiers selected, a tap on the map sends them there
+                    if (e.changedTouches && Units.getSelected().length) { issueOrder('move', w); return; }
+                    const villager = Villagers.pick(w.x, w.y);
+                    const building = BuildingManager.getBuildingAt(tile.x, tile.y);
+                    if (villager) {
                         AudioSys.play('click');
                         showVillagerInfo(villager);
                     } else if (building) {
@@ -807,11 +935,9 @@ const UI = (() => {
             refreshPreview();
         }, { passive: false });
 
-        els.canvas.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            if (selectedBuilding) deselectBuilding();
-            else hideInfo();
-        });
+        // right click is handled on mouse up (it can also be a drag that pans the map)
+        els.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        els.canvas.addEventListener('auxclick', (e) => e.preventDefault());
 
         document.addEventListener('keydown', (e) => {
             if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
@@ -828,7 +954,13 @@ const UI = (() => {
 
             if (k === 'Escape') {
                 if (selectedBuilding) deselectBuilding();
+                else if (orderMode) setOrderMode(null);
                 else hideInfo();
+            } else if ((k === 'p' || k === 'P') && Units.getSelected().length) {
+                setOrderMode(orderMode === 'patrol' ? null : 'patrol');
+                AudioSys.play('click');
+            } else if ((k === 'l' || k === 'L') && Units.getSelected().length) {
+                issueOrder('stop');
             } else if (k === ' ') {
                 e.preventDefault();
                 Game.togglePause();
@@ -1051,6 +1183,7 @@ const UI = (() => {
     // Only rebuilt when they change, so a click is never lost to a refresh.
     let controlsKey = '';
     function controlsHtml(b) {
+        if (unitView) return orderButtonsHtml();
         if (!b) return '';
         if (b.def.crafts) {
             const cur = Game.getProduct(b);
@@ -1128,9 +1261,9 @@ const UI = (() => {
     }
 
     function showBuildingInfo(building) {
+        leaveUnitView();
         selectedPlaced = building;
         selectedVillager = null;
-        selectedUnit = null;
         els.infoTitle.textContent = bName(building.def);
         refreshControls(true);
         const spr = Sprites.getBuilding(building.type, { grown: building.grown });
@@ -1174,9 +1307,9 @@ const UI = (() => {
     }
 
     function showVillagerInfo(v) {
+        leaveUnitView();
         selectedVillager = v;
         selectedPlaced = null;
-        selectedUnit = null;
         refreshControls(true);
         els.infoTitle.textContent = `${v.name} · ${t('vil.job.' + v.job)}`;
         setPortrait(Sprites.drawVillager(4, v.palette, false, v.tool), 3.5);
@@ -1199,18 +1332,65 @@ const UI = (() => {
         return html;
     }
 
-    function showUnitInfo(u) {
-        selectedUnit = u;
+    // ---------- soldier selection scroll ----------
+    function leaveUnitView() {
+        unitView = false;
+        Units.clearSelection();
+        setOrderMode(null);
+        selBox = null;
+    }
+
+    function orderButtonsHtml() {
+        const sel = Units.getSelected();
+        const patrolling = sel.some(u => u.state === 'patrol');
+        // keyboard hints are hidden on touch screens (css .hk)
+        const b = (order, label, title, active, key) =>
+            `<button class="ctl-btn order${active ? ' active' : ''}" data-order="${order}" aria-pressed="${!!active}" title="${title}">${label}${key ? ` <span class="hk">${key}</span>` : ''}</button>`;
+        return b('move', t('sel.move'), t('sel.move.title'), orderMode === 'move') +
+            b('patrol', t('sel.patrol'), t('sel.patrol.title'), orderMode === 'patrol', 'P') +
+            (patrolling ? b('patrolAdd', t('sel.addpoint'), t('sel.addpoint.title'), orderMode === 'patrolAdd') : '') +
+            b('stop', t('sel.stop'), t('sel.stop.title'), false, 'L') +
+            b('deselect', t('sel.deselect'), t('sel.deselect.title'), false, 'Esc');
+    }
+
+    function onOrderButton(order) {
+        if (order === 'deselect') { AudioSys.play('deselect'); hideInfo(); return; }
+        if (order === 'stop') { issueOrder('stop'); return; }
+        setOrderMode(orderMode === order ? null : order);
+        AudioSys.play('click');
+    }
+
+    function selectionHtml() {
+        const sel = Units.getSelected();
+        let html = '';
+        if (orderMode) html += `<p class="order-hint">${t(orderMode === 'move' ? 'sel.pick.move' : orderMode === 'patrol' ? 'sel.pick.patrol' : 'sel.pick.add')}</p>`;
+        if (sel.length === 1) return html + unitInfoHtml(sel[0]);
+        const types = Object.keys(WEAPONS).map(w => WEAPONS[w].unit);
+        const chips = types.map(ty => [ty, sel.filter(u => u.type === ty).length]).filter(([, n]) => n > 0)
+            .map(([ty, n]) => `<button class="link-btn sel-chip" data-seltype="${ty}" title="${t('sel.only')}">${ic(UNIT_WEAPON[ty])} ${t('unit.' + ty)} ×${n}</button>`).join(' ');
+        html += stat(t('sel.units'), chips);
+        const states = ['idle', 'move', 'patrol'].map(st => [st, sel.filter(u => u.state === st).length]).filter(([, n]) => n > 0)
+            .map(([st, n]) => `${t('unit.state.' + st)} ${n}`).join(' · ');
+        html += stat(t('unit.state'), states);
+        return html;
+    }
+
+    function showSelection() {
+        const sel = Units.getSelected();
+        if (!sel.length) { hideInfo(); return; }
         selectedPlaced = null;
         selectedVillager = null;
+        selectedUnit = sel.length === 1 ? sel[0] : null;
+        unitView = true;
         refreshControls(true);
-        els.infoTitle.textContent = t('unit.' + u.type);
-        setPortrait(Sprites.drawSoldier(u.type, 0, false), 3.5);
-        els.infoContent.innerHTML = unitInfoHtml(u);
+        els.infoTitle.textContent = sel.length === 1 ? t('unit.' + sel[0].type) : t('sel.title', { n: sel.length });
+        setPortrait(Sprites.drawSoldier(sel[0].type, 0, false), 3.5);
+        els.infoContent.innerHTML = selectionHtml();
         infoKey = '';
         els.infoActions.innerHTML = '';
         openInfoView();
-        keepInView(u.x, u.y - 10, 24);
+        const cx = sel.reduce((a, u) => a + u.x, 0) / sel.length, cy = sel.reduce((a, u) => a + u.y, 0) / sel.length;
+        keepInView(cx, cy - 10, 24);
     }
 
     // Keep the open scroll up to date (progress bars, stock, what a villager is doing)
@@ -1225,9 +1405,10 @@ const UI = (() => {
             if (!BuildingManager.getById(selectedPlaced.id)) { hideInfo(); return; }
             html = buildingInfoHtml(selectedPlaced);
             refreshControls();
-        } else if (selectedUnit) {
-            if (!Units.getById(selectedUnit.id)) { hideInfo(); return; }
-            html = unitInfoHtml(selectedUnit);
+        } else if (unitView) {
+            if (!Units.getSelected().length) { hideInfo(); return; }
+            html = selectionHtml();
+            refreshControls();
         } else if (selectedVillager) {
             if (!Villagers.getById(selectedVillager.id)) { hideInfo(); return; }
             html = villagerInfoHtml(selectedVillager);
@@ -1249,6 +1430,7 @@ const UI = (() => {
     }
 
     function hideInfo() {
+        leaveUnitView();
         selectedPlaced = null;
         selectedVillager = null;
         selectedUnit = null;
@@ -1454,7 +1636,19 @@ const UI = (() => {
     }
 
     function getPlacementPreview() { return placementPreview; }
-    function getHoverInfo() { return { building: hoveredBuilding, selected: selectedPlaced, villager: selectedVillager, unit: selectedUnit }; }
+    const hoverInfo = {};
+    function getHoverInfo() {
+        hoverInfo.building = hoveredBuilding;
+        hoverInfo.selected = selectedPlaced;
+        hoverInfo.villager = selectedVillager;
+        hoverInfo.unit = selectedUnit;
+        hoverInfo.box = selBox;
+        hoverInfo.marker = orderMarker;
+        hoverInfo.orderHint = orderMode && pointerOverCanvas && !lastInputTouch
+            ? t(orderMode === 'move' ? 'sel.pick.move' : orderMode === 'patrol' ? 'sel.pick.patrol' : 'sel.pick.add') : null;
+        hoverInfo.pointer = lastPointer;
+        return hoverInfo;
+    }
 
     function getStartBtn() { return els.startBtn; }
     function getContinueBtn() { return els.continueBtn; }
@@ -1475,6 +1669,8 @@ const UI = (() => {
         hideWelcome,
         showWelcome,
         hideInfo,
+        showSelection,
+        getOrderMode: () => orderMode,
         getPlacementPreview,
         getHoverInfo,
         getStartBtn,

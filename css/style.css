@@ -64,7 +64,8 @@ button {
     touch-action: none;
 }
 
-#game-canvas.placing {
+#game-canvas.placing,
+#game-canvas.ordering {
     cursor: crosshair;
 }
 
@@ -1431,6 +1432,13 @@ kbd {
 .ctl-btn.recruit:hover { background: linear-gradient(180deg, #dceaff, #9ab8e0); }
 .ctl-btn.off { opacity: 0.6; filter: grayscale(0.6); cursor: not-allowed; }
 .ctl-btn small { display: block; font-size: 10.5px; font-weight: 600; color: #6a2a18; line-height: 1.15; }
+/* soldier orders: Move / Patrol / Stop / Deselect */
+.ctl-btn.order { padding: 3px 10px; }
+.ctl-btn .hk { font-size: 10px; font-weight: 700; opacity: 0.6; border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; margin-left: 2px; }
+@media (hover: none) { .ctl-btn .hk { display: none; } }
+.order-hint { margin: 0 0 4px; font-size: 12px; font-weight: 700; color: #2a4a7a; }
+.sel-chip { margin-right: 4px; white-space: nowrap; }
+.sel-chip .ic { width: 16px; height: 16px; image-rendering: pixelated; vertical-align: -3px; }
 #info-content .nowrap { white-space: nowrap; }
 #info-actions { display: flex; flex-direction: column; gap: 6px; align-self: end; }
 #info-actions:empty { display: none; }
