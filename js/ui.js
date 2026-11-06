@@ -6,6 +6,7 @@ const UI = (() => {
     let selectedBuilding = null;   // building type to place
     let selectedPlaced = null;     // placed building shown in the info panel
     let selectedVillager = null;   // villager shown in the info panel
+    let selectedUnit = null;       // soldier shown in the info panel
     let activeCat = 'castle';      // open building category
     let bodyOpen = true;           // phones: the building strip can be folded away
     let hoveredBuilding = null;
@@ -45,6 +46,7 @@ const UI = (() => {
             infoContent: $('info-content'),
             infoClose: $('info-close'),
             infoActions: $('info-actions'),
+            infoControls: $('info-controls'),
             tooltip: $('tooltip'),
             notifications: $('notifications'),
             gameOver: $('game-over'),
@@ -111,6 +113,20 @@ const UI = (() => {
             Renderer.centerOn(b.pixelX + b.width / 2, b.pixelY + b.height / 2);
             showBuildingInfo(b);
         });
+        // smith product toggle and barracks recruit buttons
+        els.infoControls.addEventListener('click', (e) => {
+            const btn = e.target.closest('button');
+            if (!btn || !selectedPlaced) return;
+            if (btn.dataset.product) {
+                if (Game.setSmithProduct(selectedPlaced.id, btn.dataset.product)) AudioSys.play('click');
+            } else if (btn.dataset.recruit) {
+                const reason = Game.getRecruitReason(btn.dataset.recruit);
+                if (reason) { showNotification(reason, 'warning'); AudioSys.play('error'); return; }
+                if (Game.recruit(selectedPlaced.id, btn.dataset.recruit)) AudioSys.play('buildDone');
+            }
+            refreshControls(true);
+            infoRefreshT = 0;
+        });
         els.helpClose.addEventListener('click', () => { els.helpScreen.classList.add('hidden'); AudioSys.play('click'); });
 
         Lang.onChange(onLanguageChanged);
@@ -144,6 +160,7 @@ const UI = (() => {
         updateResources();
         updateMuteButton();
         if (selectedPlaced) showBuildingInfo(selectedPlaced);
+        else if (selectedUnit) showUnitInfo(selectedUnit);
         if (!els.welcome.classList.contains('hidden')) showWelcome();
         syncSettingsUI();
         hideTooltip();
@@ -176,12 +193,12 @@ const UI = (() => {
         { id: 'industry', icon: 'wood', types: ['lumberjack', 'quarry', 'iron_mine'] },
         { id: 'food', icon: 'food', types: ['hunter'] },
         { id: 'town', icon: 'pop', types: ['house', 'tavern'] },
-        { id: 'crafts', icon: 'hammer', types: ['blacksmith'] },
+        { id: 'military', icon: 'sword', types: ['weaponsmith', 'barracks'] },
     ];
     const catOf = type => (CATEGORIES.find(c => c.types.includes(type)) || CATEGORIES[0]).id;
     const GOAL_BUILDING = {
         castle: 'castle', warehouse: 'warehouse', lumberjack: 'lumberjack', hunter: 'hunter', quarry: 'quarry',
-        houses2: 'house', workers15: 'house', winter1: 'hunter', iron20: 'iron_mine', smith: 'blacksmith', pop30: 'house',
+        houses2: 'house', workers15: 'house', winter1: 'hunter', iron20: 'iron_mine', weaponsmith: 'weaponsmith', soldier1: 'barracks', pop30: 'house',
     };
 
     const iconUrls = {};
@@ -289,7 +306,8 @@ const UI = (() => {
         }
         if (def.provides.populationCap) parts.push(`<span class="ci up">+${def.provides.populationCap} ${ic('pop')}</span>`);
         if (def.provides.storage) parts.push(`<span class="ci up">${ic('storage')}+${def.provides.storage}</span>`);
-        if (def.provides.productionBonus) parts.push(`<span class="ci up">+${Math.round(def.provides.productionBonus * 100)}% ${ic('hammer')}</span>`);
+        if (def.crafts) parts.push(`<span class="ci up">${Object.keys(WEAPONS).map(w => ic(w)).join('')}</span>`);
+        if (def.recruits) parts.push(`<span class="ci up">${ic('shield')}</span>`);
         return parts.join('');
     }
 
@@ -322,7 +340,7 @@ const UI = (() => {
         if (def.workers > 0) parts.push(t(def.workers > 1 ? 'menu.workers' : 'menu.worker', { n: def.workers }));
         if (def.provides.populationCap) parts.push(t('menu.villagers', { n: def.provides.populationCap }));
         if (def.provides.storage) parts.push(t('menu.storage', { n: def.provides.storage }));
-        if (def.provides.productionBonus) parts.push(t('menu.bonus', { n: Math.round(def.provides.productionBonus * 100) }));
+        if (def.crafts) parts.push(`${t('info.forges')}: ${Object.keys(WEAPONS).map(w => wName(w, 2)).join(', ')}`);
         if (def.production) {
             parts.push(t('menu.prod', { n: fmtNum(def.production.amount * 60 / def.production.cycle), res: resName(def.production.resource) }));
         }
@@ -736,9 +754,13 @@ const UI = (() => {
                     }
                 } else {
                     const w = Renderer.screenToWorld(p.x, p.y);
-                    const villager = Villagers.pick(w.x, w.y);
+                    const unit = Units.pick(w.x, w.y);
+                    const villager = unit ? null : Villagers.pick(w.x, w.y);
                     const building = BuildingManager.getBuildingAt(tile.x, tile.y);
-                    if (villager) {
+                    if (unit) {
+                        AudioSys.play('click');
+                        showUnitInfo(unit);
+                    } else if (villager) {
                         AudioSys.play('click');
                         showVillagerInfo(villager);
                     } else if (building) {
@@ -966,7 +988,92 @@ const UI = (() => {
                 ${bar(v / gs.maxStorage, COLORS[r] || '#c8a050')}
             </div>`;
         });
+        Object.keys(WEAPONS).forEach(w => {
+            const v = gs.weapons[w] || 0;
+            html += `<div class="stock-item${v >= WEAPON_STOCK_MAX ? ' full' : ''}" title="${cap(wName(w, 2))}">
+                <span class="stock-ic">${ic(w)}</span>
+                <span class="stock-name">${cap(wName(w, 2))}</span>
+                <span class="stock-val">${v}<span class="stock-max"> / ${WEAPON_STOCK_MAX}</span></span>
+                ${bar(v / WEAPON_STOCK_MAX, '#9aa4b8')}
+            </div>`;
+        });
         return html + `</div>`;
+    }
+
+    function cap(str) { return str ? str[0].toUpperCase() + str.slice(1) : str; }
+
+    // "3 bows · 1 sword" with icons
+    function weaponsInline() {
+        const gs = Game.getState();
+        return Object.keys(WEAPONS).map(w => `<span class="nowrap">${ic(w)} ${gs.weapons[w] || 0}</span>`).join(' &nbsp;');
+    }
+
+    function weaponCostHtml(w) {
+        const cost = WEAPONS[w].cost, res = Game.getState().resources;
+        return Object.keys(cost).map(r => `<span class="${res[r] < cost[r] ? 'bad' : ''}">${ic(r)} ${cost[r]} ${resName(r)}</span>`).join(' ');
+    }
+
+    function smithInfoHtml(b) {
+        const w = Game.getProduct(b);
+        const wd = WEAPONS[w];
+        const st = Game.getSmithStatus(b);
+        let status;
+        if (b.buildStart && st === 'working') status = `<span>${t('info.building')}</span>`;
+        else if (st === 'noworkers') status = `<span class="bad">${t('info.noworkers')}</span>`;
+        else if (st === 'full') status = `<span class="bad">${t('smith.full', { max: WEAPON_STOCK_MAX })}</span>`;
+        else if (st === 'noinput') {
+            const res = Game.getState().resources;
+            const list = Object.entries(wd.cost).filter(([r, a]) => res[r] < a).map(([r, a]) => `${Math.ceil(a - res[r])} ${resName(r)}`).join(', ');
+            status = `<span class="bad">${t('smith.noinput', { list })}</span>`;
+        } else if (st === 'notime') status = `<span class="bad">${t('res.notime')}</span>`;
+        else status = `<span class="ok">${t('smith.working')}</span>`;
+        let html = stat(t('info.forges'), `${ic(w)} ${cap(wName(w, 1))}`);
+        html += stat(t('info.weaponcost'), weaponCostHtml(w));
+        html += stat(t('info.status'), status);
+        if (st === 'working' || b.inputPaid) {
+            const left = Math.max(0, Math.ceil((1 - (b.progress || 0)) * wd.cycle));
+            html += `<div class="stat stat-bar"><span class="stat-label">${t('info.delivery')}</span>${bar(b.progress || 0, '#9aa4b8', t('smith.next', { w: wName(w, 1), s: left }))}</div>`;
+        }
+        html += stat(t('info.weapons'), weaponsInline());
+        return html;
+    }
+
+    function barracksInfoHtml() {
+        let html = stat(t('info.weapons'), weaponsInline());
+        html += stat(t('info.free'), `${ic('pop')} ${Game.getFreeWorkers()}`, Game.getFreeWorkers() > 0 ? '' : 'bad');
+        const soldiers = Object.keys(WEAPONS).map(w => WEAPONS[w].unit)
+            .map(u => `<span class="nowrap">${t('unit.' + u)} ${Units.countByType(u)}</span>`).join(' · ');
+        html += stat(t('info.soldiers'), soldiers);
+        return html;
+    }
+
+    // Buttons above the info text: the smith's product, the barracks' recruits.
+    // Only rebuilt when they change, so a click is never lost to a refresh.
+    let controlsKey = '';
+    function controlsHtml(b) {
+        if (!b) return '';
+        if (b.def.crafts) {
+            const cur = Game.getProduct(b);
+            return `<span class="ctl-label">${t('info.choose')}</span>` + Object.keys(WEAPONS).map(w =>
+                `<button class="ctl-btn${w === cur ? ' active' : ''}" data-product="${w}" aria-pressed="${w === cur}">${ic(w)} ${cap(wName(w, 1))}</button>`).join('');
+        }
+        if (b.def.recruits) {
+            return Object.keys(WEAPONS).map(w => {
+                const unit = WEAPONS[w].unit;
+                const reason = Game.getRecruitReason(unit);
+                const short = !reason ? '' : Game.getFreeWorkers() < 1 ? t('recruit.nofree') : t('recruit.noweapon', { w: wName(w, 1) });
+                return `<button class="ctl-btn recruit${reason ? ' off' : ''}" data-recruit="${unit}"${reason ? ` aria-disabled="true" title="${reason}"` : ''}>` +
+                    `${ic(w)} <span>${t('recruit.btn', { name: t('unit.' + unit), w: wName(w, 1) })}${short ? `<small>${short}</small>` : ''}</span></button>`;
+            }).join('');
+        }
+        return '';
+    }
+
+    function refreshControls(force) {
+        const html = controlsHtml(selectedPlaced);
+        if (!force && html === controlsKey) return;
+        controlsKey = html;
+        els.infoControls.innerHTML = html;
     }
 
     function buildingInfoHtml(building) {
@@ -1005,9 +1112,8 @@ const UI = (() => {
         if (def.provides.populationCap) {
             html += stat(t('info.housing'), `${ic('pop')} ${t('menu.villagers', { n: def.provides.populationCap })}`);
         }
-        if (def.provides.productionBonus) {
-            html += stat(t('info.bonus'), t('info.bonus.value', { n: Math.round(def.provides.productionBonus * 100) }), 'ok');
-        }
+        if (def.crafts) html += smithInfoHtml(building);
+        if (def.recruits) html += barracksInfoHtml();
         // Warehouse and keep show the stockpile
         if (def.provides.storage || building.type === 'castle') {
             if (building.type === 'castle') {
@@ -1024,7 +1130,9 @@ const UI = (() => {
     function showBuildingInfo(building) {
         selectedPlaced = building;
         selectedVillager = null;
+        selectedUnit = null;
         els.infoTitle.textContent = bName(building.def);
+        refreshControls(true);
         const spr = Sprites.getBuilding(building.type, { grown: building.grown });
         if (spr) setPortrait(spr, Math.min(1.5, 84 / spr.height, 120 / spr.width));
         els.infoContent.innerHTML = buildingInfoHtml(building);
@@ -1068,6 +1176,8 @@ const UI = (() => {
     function showVillagerInfo(v) {
         selectedVillager = v;
         selectedPlaced = null;
+        selectedUnit = null;
+        refreshControls(true);
         els.infoTitle.textContent = `${v.name} · ${t('vil.job.' + v.job)}`;
         setPortrait(Sprites.drawVillager(4, v.palette, false, v.tool), 3.5);
         els.infoContent.innerHTML = villagerInfoHtml(v);
@@ -1075,6 +1185,32 @@ const UI = (() => {
         els.infoActions.innerHTML = '';
         openInfoView();
         keepInView(v.x, v.y - 10, 24);
+    }
+
+    function unitInfoHtml(u) {
+        let html = `<p class="info-desc">${t('unit.' + u.type + '.desc')}</p>`;
+        html += `<div class="stat stat-bar"><span class="stat-label">${t('unit.hp')}</span>${bar(u.hp / u.maxHp, '#c84a3a', `${Math.ceil(u.hp)} / ${u.maxHp}`)}</div>`;
+        html += stat(t('unit.state'), t('unit.state.' + u.state));
+        const w = UNIT_WEAPON[u.type];
+        html += stat(t('info.weapons'), `${ic(w)} ${cap(wName(w, 1))}`);
+        const b = BuildingManager.getById(u.barracksId);
+        if (b) html += stat(t('unit.from'), `<button class="link-btn" data-goto="${b.id}">${bName(b.def)}</button>`);
+        html += stat(t('vil.eats'), `${ic('food')} ${t('vil.eats.value', { n: fmtNum(FOOD_PER_WORKER_PER_MIN) })}`);
+        return html;
+    }
+
+    function showUnitInfo(u) {
+        selectedUnit = u;
+        selectedPlaced = null;
+        selectedVillager = null;
+        refreshControls(true);
+        els.infoTitle.textContent = t('unit.' + u.type);
+        setPortrait(Sprites.drawSoldier(u.type, 0, false), 3.5);
+        els.infoContent.innerHTML = unitInfoHtml(u);
+        infoKey = '';
+        els.infoActions.innerHTML = '';
+        openInfoView();
+        keepInView(u.x, u.y - 10, 24);
     }
 
     // Keep the open scroll up to date (progress bars, stock, what a villager is doing)
@@ -1088,6 +1224,10 @@ const UI = (() => {
         if (selectedPlaced) {
             if (!BuildingManager.getById(selectedPlaced.id)) { hideInfo(); return; }
             html = buildingInfoHtml(selectedPlaced);
+            refreshControls();
+        } else if (selectedUnit) {
+            if (!Units.getById(selectedUnit.id)) { hideInfo(); return; }
+            html = unitInfoHtml(selectedUnit);
         } else if (selectedVillager) {
             if (!Villagers.getById(selectedVillager.id)) { hideInfo(); return; }
             html = villagerInfoHtml(selectedVillager);
@@ -1111,6 +1251,8 @@ const UI = (() => {
     function hideInfo() {
         selectedPlaced = null;
         selectedVillager = null;
+        selectedUnit = null;
+        refreshControls(true);
         els.infoPanel.classList.add('hidden');
         els.cpBuild.classList.remove('hidden');
         syncBody();
@@ -1312,7 +1454,7 @@ const UI = (() => {
     }
 
     function getPlacementPreview() { return placementPreview; }
-    function getHoverInfo() { return { building: hoveredBuilding, selected: selectedPlaced, villager: selectedVillager }; }
+    function getHoverInfo() { return { building: hoveredBuilding, selected: selectedPlaced, villager: selectedVillager, unit: selectedUnit }; }
 
     function getStartBtn() { return els.startBtn; }
     function getContinueBtn() { return els.continueBtn; }

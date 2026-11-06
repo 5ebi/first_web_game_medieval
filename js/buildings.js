@@ -33,6 +33,10 @@ const BuildingManager = (() => {
             growthProgress: 0,
             buildStart: performance.now(), // construction animation (cosmetic)
         };
+        if (def.crafts) {
+            building.product = Object.keys(WEAPONS)[0]; // weapon smith: what it forges
+            building.inputPaid = false;                // material for the current weapon taken
+        }
 
         placedBuildings.push(building);
         return building;
@@ -79,6 +83,8 @@ const BuildingManager = (() => {
             growthProgress: b.growthProgress,
             paid: b.paid,
             progress: b.progress || 0,
+            product: b.product,
+            inputPaid: b.inputPaid,
         }));
     }
 
@@ -99,6 +105,10 @@ const BuildingManager = (() => {
             // saves from before lumberjacks had a price: they cost nothing, so refund nothing
             else if (s.type === 'lumberjack') b.paid = { wood: 0, stone: 0, iron: 0 };
             b.progress = s.progress || 0;
+            if (b.def.crafts) {
+                if (WEAPONS[s.product]) b.product = s.product;
+                b.inputPaid = !!s.inputPaid;
+            }
             nextId = Math.max(nextId, b.id + 1);
         });
     }

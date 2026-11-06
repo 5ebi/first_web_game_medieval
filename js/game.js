@@ -4,7 +4,15 @@
 // cycle completes, workers eat continuously. Rates are "per minute" at 1x.
 // ============================================
 
+const SAVE_VERSION = 4;  // 4: weapon smith, barracks and units (v3 saves are migrated)
+
 const Game = (() => {
+    function freshWeapons() {
+        const w = {};
+        Object.keys(WEAPONS).forEach(k => { w[k] = 0; });
+        return w;
+    }
+
     function freshState() {
         return {
             started: false,
@@ -16,6 +24,7 @@ const Game = (() => {
             day: 1,
             dayProgress: 0,       // 0 to 1
             resources: { wood: 0, stone: 0, iron: 0, food: 0 },
+            weapons: freshWeapons(), // weapon stock (bows, swords, ...), WEAPON_STOCK_MAX each
             maxStorage: BASE_STORAGE,
             populationCap: 0,
             populationUsed: 0,
@@ -48,6 +57,7 @@ const Game = (() => {
     function reset() {
         state = freshState();
         BuildingManager.reset();
+        Units.reset();
     }
 
     function getState() { return state; }
@@ -91,15 +101,6 @@ const Game = (() => {
         return (START_HOUR + state.dayProgress * 24) % 24;
     }
 
-    function getProductionMultiplier(resource) {
-        if (resource === 'food') return 1;
-        let bonus = 0;
-        BuildingManager.getAll().forEach(b => {
-            if (b.def.provides?.productionBonus && b.active) bonus += b.def.provides.productionBonus;
-        });
-        return 1 + bonus;
-    }
-
     // ---- Seasons ----
     function getSeason(day = state.day) {
         let d = (Math.max(1, day) - 1) % YEAR_DAYS;
@@ -130,12 +131,10 @@ const Game = (() => {
         return m === undefined ? 1 : m;
     }
 
-    // Speed factor of a building's work cycle (blacksmith bonus, season for hunters)
+    // Speed factor of a building's work cycle (season for hunters)
     function getCycleFactor(b, season) {
-        const res = b.def.production.resource;
-        let f = getProductionMultiplier(res);
-        if (res === 'food') f *= getSeasonMultiplier(b.type, season || getSeason());
-        return f;
+        if (b.def.production.resource === 'food') return getSeasonMultiplier(b.type, season || getSeason());
+        return 1;
     }
 
     // Production of one building in units per minute
@@ -351,6 +350,96 @@ const Game = (() => {
         return true;
     }
 
+    // ---- Weapon smith ----
+    // Each smith forges its chosen weapon: the input is taken when work on a weapon
+    // starts, the weapon goes into the stock when the cycle completes.
+    function getProduct(b) {
+        return WEAPONS[b.product] ? b.product : Object.keys(WEAPONS)[0];
+    }
+
+    function canPayWeapon(wkey) {
+        const cost = WEAPONS[wkey].cost;
+        return Object.keys(cost).every(r => state.resources[r] >= cost[r]);
+    }
+
+    // 'building' | 'noworkers' | 'full' | 'noinput' | 'notime' | 'working'
+    function getSmithStatus(b) {
+        if (!b.active || b.workers <= 0) return 'noworkers';
+        const w = getProduct(b);
+        if (!b.inputPaid && state.weapons[w] >= WEAPON_STOCK_MAX) return 'full';
+        if (!b.inputPaid && !canPayWeapon(w)) return 'noinput';
+        if (!state.clockStarted) return 'notime';
+        return 'working';
+    }
+
+    function setSmithProduct(id, wkey) {
+        const b = BuildingManager.getById(id);
+        if (!b || !b.def.crafts || !WEAPONS[wkey] || getProduct(b) === wkey) return false;
+        // Material already taken for the old weapon goes back into the store
+        if (b.inputPaid) {
+            const cost = WEAPONS[getProduct(b)].cost;
+            Object.keys(cost).forEach(r => { state.resources[r] = Math.min(state.maxStorage, state.resources[r] + cost[r]); });
+        }
+        b.product = wkey;
+        b.inputPaid = false;
+        b.progress = 0;
+        if (callbacks.onResourceChange) callbacks.onResourceChange();
+        save();
+        return true;
+    }
+
+    function simulateSmiths(dt) {
+        let changed = false;
+        BuildingManager.getAll().forEach(b => {
+            if (!b.def.crafts || !b.active || b.workers <= 0) return;
+            const w = getProduct(b);
+            const wd = WEAPONS[w];
+            if (!b.inputPaid) {
+                if (state.weapons[w] >= WEAPON_STOCK_MAX || !canPayWeapon(w)) return;
+                Object.keys(wd.cost).forEach(r => { state.resources[r] -= wd.cost[r]; });
+                b.inputPaid = true;
+                changed = true;
+            }
+            b.progress = (b.progress || 0) + dt * (b.workers / b.maxWorkers) / wd.cycle;
+            if (b.progress >= 1) {
+                b.progress = 0;
+                b.inputPaid = false;
+                state.weapons[w] = Math.min(WEAPON_STOCK_MAX, state.weapons[w] + 1);
+                changed = true;
+                if (callbacks.onForge) callbacks.onForge(b, w);
+                if (state.weapons[w] >= WEAPON_STOCK_MAX) notify(t('g.weaponsfull', { w: wName(w, 2) }), 'warning');
+            }
+        });
+        return changed;
+    }
+
+    // ---- Barracks ----
+    // Why a soldier of this type can't be recruited right now (null = ok)
+    function getRecruitReason(unitType) {
+        const w = UNIT_WEAPON[unitType];
+        if (!w) return t('g.unknown');
+        if (getFreeWorkers() < 1) return t('g.nofree');
+        if (state.weapons[w] < 1) return t('g.noweapon', { w: wName(w, 1) });
+        return null;
+    }
+
+    function recruit(barracksId, unitType) {
+        const b = BuildingManager.getById(barracksId);
+        if (!b || !b.def.recruits) return null;
+        const reason = getRecruitReason(unitType);
+        if (reason) { notify(reason, 'warning'); return null; }
+        const unit = Units.add(unitType, b);
+        if (!unit) return null;
+        state.weapons[UNIT_WEAPON[unitType]] -= 1;
+        state.populationUsed += 1;   // a soldier is a working villager: he eats
+        state.stats.maxPop = Math.max(state.stats.maxPop, state.populationUsed);
+        notify(t('g.recruited', { name: t('unit.' + unitType) }), 'success');
+        if (callbacks.onResourceChange) callbacks.onResourceChange();
+        checkMilestones();
+        save();
+        return unit;
+    }
+
     // ---- Simulation ----
     function update(deltaMs) {
         if (!state.started || state.paused || state.gameOver || !state.clockStarted) return;
@@ -394,6 +483,8 @@ const Game = (() => {
                 }
             }
         });
+
+        if (simulateSmiths(dt)) changed = true;
 
         // Workers eat continuously
         const eat = getFoodConsumption() / 60 * dt;
@@ -486,10 +577,11 @@ const Game = (() => {
         if (!state.started || state.gameOver) return;
         try {
             const data = {
-                version: 3,
+                version: SAVE_VERSION,
                 seed: GameMap.getSeed(),
                 state: Object.assign({}, state, { started: true }),
                 buildings: BuildingManager.serialize(),
+                units: Units.serialize(),
                 savedAt: Date.now(),
             };
             localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -514,19 +606,39 @@ const Game = (() => {
             const raw = localStorage.getItem(SAVE_KEY);
             if (!raw) return false;
             const data = JSON.parse(raw);
-            if (!data || data.version !== 3) return false;
+            if (!data || !(data.version === 3 || data.version === SAVE_VERSION)) return false;
+            if (data.version === 3) migrateV3(data);
             GameMap.generate(data.seed);
             state = Object.assign(freshState(), data.state);
+            state.weapons = Object.assign(freshWeapons(), data.state.weapons);
+            state.milestones = (state.milestones || []).filter(id => MILESTONES.some(m => m.id === id));
             state.paused = false;
             state.speed = state.lastSpeed || 1;
             state.gameOver = false;
             state.started = true;
             BuildingManager.deserialize(data.buildings);
             BuildingManager.getAll().forEach(clearUnder);
+            Units.deserialize(data.units);
             return true;
         } catch (e) {
             return false;
         }
+    }
+
+    // v3 -> v4: the blacksmith is gone. Drop it, give back what it cost and free its smith.
+    function migrateV3(data) {
+        const st = data.state || (data.state = {});
+        const res = st.resources || (st.resources = { wood: 0, stone: 0, iron: 0, food: 0 });
+        const cap = st.maxStorage || BASE_STORAGE;
+        data.buildings = (data.buildings || []).filter(b => {
+            if (b.type !== 'blacksmith') return true;
+            const paid = b.paid || { wood: 30, stone: 20, iron: 10 };
+            ['wood', 'stone', 'iron'].forEach(r => { res[r] = Math.min(cap, (res[r] || 0) + (paid[r] || 0)); });
+            st.populationUsed = Math.max(0, (st.populationUsed || 0) - (b.workers || 0));
+            return false;
+        });
+        data.units = [];
+        data.version = SAVE_VERSION;
     }
 
     function clearSave() {
@@ -557,7 +669,11 @@ const Game = (() => {
         getSeason,
         getSeasonMultiplier,
         getFoodNetForSeason,
-        getProductionMultiplier,
+        getSmithStatus,
+        getProduct,
+        setSmithProduct,
+        getRecruitReason,
+        recruit,
         getNextMilestone,
         getHour,
         hasCastle,
