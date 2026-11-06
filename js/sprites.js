@@ -613,7 +613,8 @@ const Sprites = (() => {
         return c;
     }
 
-    // Soldiers (16x24, feet on the bottom row like villagers). frame 0/1: breathing.
+    // Soldiers (16x24, feet on the bottom row like villagers). frame 0/1: breathing,
+    // 2-5: walk cycle (contact, passing, contact, passing; same stride as villagers).
     // Archer: green hood, quiver, bow at the side. Swordsman: helmet, mail, shield, sword.
     function drawSoldier(type, frame, flip) {
         const key = `soldier_${type}_${frame}_${flip ? 1 : 0}`;
@@ -626,11 +627,25 @@ const Sprites = (() => {
         const archer = type === 'archer';
         const tunic = archer ? '#4f7a34' : '#8a8e98', tunicDark = archer ? '#3a5a26' : '#686c76', tunicLight = archer ? '#68944a' : '#aab0bc';
         const legs = archer ? '#5a4630' : '#4a4a52', boot = '#24160a';
-        const b = frame ? 1 : 0; // chest rises by one pixel
+        const wf = frame >= 2 ? frame - 2 : -1;       // walk frame or -1 when standing
+        const b = wf >= 0 ? (wf % 2) : (frame ? 1 : 0); // chest rises by one pixel (breath / passing step)
 
-        // legs, standing at ease
-        R(6, 17, 2, 6, legs); R(9, 17, 2, 6, legs);
-        R(5, 23, 3, 1, boot); R(9, 23, 3, 1, boot);
+        if (wf < 0) {
+            // legs, standing at ease
+            R(6, 17, 2, 6, legs); R(9, 17, 2, 6, legs);
+            R(5, 23, 3, 1, boot); R(9, 23, 3, 1, boot);
+        } else {
+            const legFar = archer ? '#3e3020' : '#34343a';
+            const line = (x0, y0, x1, y1, col) => {
+                const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+                for (let i = 0; i <= n; i++) R(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), 2, 1, col);
+            };
+            const foot = (x, y) => R(x, y, 3, 1, boot);
+            if (wf === 0) { line(7, 17, 5, 22, legFar); foot(4, 23); line(8, 17, 10, 22, legs); foot(10, 23); }
+            else if (wf === 1) { line(7, 16, 6, 20, legFar); foot(5, 21); line(8, 16, 8, 22, legs); foot(8, 23); }
+            else if (wf === 2) { line(7, 17, 9, 22, legFar); foot(9, 23); line(8, 17, 6, 22, legs); foot(5, 23); }
+            else { line(7, 16, 7, 22, legFar); foot(7, 23); line(8, 16, 9, 20, legs); foot(9, 21); }
+        }
 
         // quiver on the back (archer)
         if (archer) { R(4, 7 - b, 2, 7, '#7a4a22'); P(4, 6 - b, '#e8e0c8'); P(5, 5 - b, '#e8e0c8'); P(5, 6 - b, '#b82820'); }
