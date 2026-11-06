@@ -346,6 +346,7 @@ const Renderer = (() => {
         updateConstruction(nowT);
         Villagers.sync(BuildingManager.getAll());
         Villagers.update(simDt);
+        Units.update(simDt);
         Effects.update(simRunning ? simDt : dt * 0.3);
         const night = nightAmount(gs);
         season = Game.getSeason().id;
@@ -454,7 +455,7 @@ const Renderer = (() => {
                     Effects.smoke(sx0 + b.def.chimney[0], sy0 + b.def.chimney[1]);
                 }
             }
-            if (b.type === 'blacksmith' && !b.buildStart && b.active && simRunning && Math.random() < simDt * 1.5) {
+            if (b.def.crafts && !b.buildStart && b.active && simRunning && Math.random() < simDt * 1.5) {
                 Effects.sparks(b.pixelX + 32, b.pixelY + 40);
             }
         });
@@ -476,6 +477,30 @@ const Renderer = (() => {
                         ctx.lineWidth = 1;
                         ctx.beginPath();
                         ctx.ellipse(Math.round(v.x) + 0.5, Math.round(v.y) + 0.5, 6, 2.5, 0, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                    ctx.drawImage(sprite, ox, oy);
+                },
+            });
+        });
+
+        // Soldiers standing in formation (same anchoring as villagers)
+        const selUnit = hoverInfo?.unit;
+        Units.getAll().forEach(u => {
+            if (u.x < vx0 - 20 || u.x > vx1 + 20 || u.y < vy0 - 30 || u.y > vy1 + 20) return;
+            const sprite = Sprites.drawSoldier(u.type, u.frame, u.flip);
+            const ox = Math.round(u.x - sprite.width / 2), oy = Math.round(u.y) - sprite.height + 1;
+            drawables.push({
+                y: u.y,
+                shadow: () => castShadow(sprite, ox, oy, Math.round(u.y) + 1, sun),
+                draw: () => {
+                    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+                    ctx.fillRect(Math.round(u.x) - 3, Math.round(u.y), 7, 1);
+                    if (selUnit === u) {
+                        ctx.strokeStyle = 'rgba(255, 215, 0, 0.95)';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.ellipse(Math.round(u.x) + 0.5, Math.round(u.y) + 0.5, 6, 2.5, 0, 0, Math.PI * 2);
                         ctx.stroke();
                     }
                     ctx.drawImage(sprite, ox, oy);
@@ -669,7 +694,6 @@ const Renderer = (() => {
         let text = null;
         if (d.provides.populationCap) text = t('menu.villagers', { n: d.provides.populationCap });
         else if (d.provides.storage) text = t('menu.storage', { n: d.provides.storage });
-        else if (d.provides.productionBonus) text = t('menu.bonus', { n: Math.round(d.provides.productionBonus * 100) });
         else if (d.production) text = t('menu.prod', { n: Math.round(d.production.amount * 60 / d.production.cycle), res: resName(d.production.resource) });
         if (text) Effects.floatText(b.pixelX + b.width / 2, b.pixelY - 6, text, '#ffe08a');
     }

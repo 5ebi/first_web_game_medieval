@@ -613,6 +613,75 @@ const Sprites = (() => {
         return c;
     }
 
+    // Soldiers (16x24, feet on the bottom row like villagers). frame 0/1: breathing.
+    // Archer: green hood, quiver, bow at the side. Swordsman: helmet, mail, shield, sword.
+    function drawSoldier(type, frame, flip) {
+        const key = `soldier_${type}_${frame}_${flip ? 1 : 0}`;
+        if (cache[key]) return cache[key];
+        const c = createCanvas(16, 24);
+        const ctx = c.getContext('2d');
+        const P = (x, y, col) => { ctx.fillStyle = col; ctx.fillRect(flip ? 15 - x : x, y, 1, 1); };
+        const R = (x, y, w, h, col) => { for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) P(xx, yy, col); };
+        const skin = '#e8b890', skinDark = '#c8946c';
+        const archer = type === 'archer';
+        const tunic = archer ? '#4f7a34' : '#8a8e98', tunicDark = archer ? '#3a5a26' : '#686c76', tunicLight = archer ? '#68944a' : '#aab0bc';
+        const legs = archer ? '#5a4630' : '#4a4a52', boot = '#24160a';
+        const b = frame ? 1 : 0; // chest rises by one pixel
+
+        // legs, standing at ease
+        R(6, 17, 2, 6, legs); R(9, 17, 2, 6, legs);
+        R(5, 23, 3, 1, boot); R(9, 23, 3, 1, boot);
+
+        // quiver on the back (archer)
+        if (archer) { R(4, 7 - b, 2, 7, '#7a4a22'); P(4, 6 - b, '#e8e0c8'); P(5, 5 - b, '#e8e0c8'); P(5, 6 - b, '#b82820'); }
+
+        // torso
+        const ty = 9 - b;
+        R(5, ty, 6, 8 + b, tunic);
+        R(5, ty, 6, 1, tunicLight);
+        R(9, ty + 1, 2, 7 + b, tunicDark);
+        if (archer) { R(5, ty + 5 + b, 6, 1, '#5a3a1a'); P(8, ty + 5 + b, '#d0a020'); }
+        else {
+            // red tabard over the mail, mail rings
+            R(6, ty + 1, 4, 7 + b, '#a82c22'); R(7, ty + 2, 2, 2, '#e8d070');
+            for (let yy = ty + 1; yy < ty + 8; yy += 2) P(5, yy, '#6a6e78');
+        }
+
+        // head
+        const hy = 2 - b;
+        R(6, hy + 1, 5, 5, skin);
+        R(10, hy + 2, 1, 4, skinDark);
+        P(11, hy + 3, skin);
+        P(9, hy + 3, '#2a1a10');
+        R(7, hy + 6, 3, 1, skinDark);
+        if (archer) {
+            R(5, hy, 6, 2, '#3e6a2a'); R(5, hy + 2, 2, 4, '#3e6a2a'); P(4, hy + 3, '#2e5220'); P(4, hy + 4, '#2e5220');
+        } else {
+            // steel helmet with nose guard
+            R(5, hy - 1, 7, 3, '#9aa0ac'); R(6, hy - 2, 5, 1, '#b8bec8'); R(5, hy + 2, 1, 3, '#9aa0ac');
+            R(5, hy - 1, 7, 1, '#c8ced8'); P(10, hy + 2, '#7a808c'); P(10, hy + 3, '#7a808c');
+        }
+
+        // near arm and weapon
+        const sy = 10 - b;
+        if (archer) {
+            R(9, sy, 2, 5, tunic); P(10, sy + 5, skin);
+            // bow held upright in front
+            R(12, sy - 4, 1, 1, '#8a5a2a'); R(13, sy - 3, 1, 12, '#8a5a2a'); R(12, sy + 9, 1, 1, '#8a5a2a');
+            R(11, sy - 3, 1, 12, '#e8e0c8');
+            P(11, sy + 5, skin);
+        } else {
+            // sword upright in the hand, shield on the far arm in front of the body
+            R(10, sy, 2, 4, tunic); P(11, sy + 4, skin);
+            R(12, sy - 6, 1, 9, '#d0d6e4'); P(12, sy - 7, '#e8ecf4');
+            R(11, sy + 3, 3, 1, '#c8a040'); R(12, sy + 4, 1, 2, '#5a3418');
+            R(3, sy, 5, 7, '#3c6fb0'); R(4, sy + 7, 3, 1, '#3c6fb0');
+            R(3, sy, 5, 1, '#8aa8d8'); R(5, sy + 1, 1, 6, '#e8d070'); R(3, sy + 3, 5, 1, '#e8d070');
+        }
+        cache[key] = c;
+        return c;
+    }
+
     // ============================================
     // RESOURCE ICONS (16x16, scale 2 -> 32x32 shown at 20px)
     // ============================================
@@ -668,6 +737,27 @@ const Sprites = (() => {
                 R(4, 6, 8, 6, '#3c6fb0');
                 R(3, 7, 1, 3, '#e8b890'); R(12, 7, 1, 3, '#e8b890');
                 R(4, 12, 8, 1, '#2a4f80');
+                break;
+            case 'bow':
+                // drawn bow with arrow
+                R(4, 2, 2, 1, '#a8743c'); R(3, 3, 1, 10, '#a8743c'); R(4, 13, 2, 1, '#a8743c');
+                R(6, 1, 1, 1, '#7a4a22'); R(6, 14, 1, 1, '#7a4a22');
+                R(4, 3, 1, 10, '#7a4a22');
+                for (let i = 0; i < 6; i++) { P(6 + i, 2 + i, '#e8e0c8'); P(6 + i, 13 - i, '#e8e0c8'); }
+                R(4, 7, 10, 1, '#8a5a2a'); R(13, 6, 2, 3, '#c8c8d0'); R(4, 6, 2, 1, '#b82820'); R(4, 8, 2, 1, '#b82820');
+                break;
+            case 'sword':
+                // diagonal sword: blade, guard, grip, pommel
+                for (let i = 0; i < 9; i++) { P(4 + i, 11 - i, '#d0d6e4'); P(5 + i, 11 - i, '#9aa4b8'); }
+                P(13, 2, '#f0f4fa'); P(14, 1, '#f0f4fa');
+                for (let i = 0; i < 5; i++) P(1 + i, 8 + i, '#c8a040');
+                P(3, 12, '#5a3418'); P(2, 13, '#5a3418'); P(4, 13, '#5a3418');
+                R(1, 14, 2, 1, '#c8a040'); P(1, 13, '#c8a040');
+                break;
+            case 'shield':
+                R(3, 2, 10, 7, '#3c6fb0'); R(4, 9, 8, 2, '#3c6fb0'); R(5, 11, 6, 2, '#3c6fb0'); R(7, 13, 2, 1, '#3c6fb0');
+                R(3, 2, 10, 1, '#8aa8d8'); R(7, 3, 2, 10, '#e8d070'); R(4, 6, 8, 1, '#e8d070');
+                R(12, 3, 1, 6, '#2a5288');
                 break;
             case 'hammer':
                 R(7, 6, 2, 9, '#a07040'); R(7, 6, 1, 9, '#c8945a');
@@ -1222,60 +1312,143 @@ const Sprites = (() => {
         return c;
     }
 
-    function drawBlacksmith() {
-        const key = 'blacksmith';
+    // Weapon smith: stone forge with a tall chimney, glowing hearth, anvil and a
+    // rack with finished bows and swords
+    function drawWeaponsmith() {
+        const key = 'weaponsmith';
         if (cache[key]) return cache[key];
         const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
         const c = createCanvas(w, h);
         const ctx = c.getContext('2d');
+        const R = (x, y, ww, hh, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, ww, hh); };
 
         // Stone building
-        ctx.fillStyle = '#8a8070';
-        ctx.fillRect(6, 18, w - 12, h - 22);
+        R(6, 18, w - 12, h - 22, '#8a8070');
         for (let y = 20; y < h - 6; y += 6) {
             for (let x = 6; x < w - 8; x += 10) {
                 const off = (Math.floor(y / 6) % 2) * 5;
-                ctx.fillStyle = '#706858';
-                ctx.fillRect(x + off, y, 1, 6);
-                ctx.fillStyle = '#9a9080';
-                ctx.fillRect(x + off + 1, y, 9, 1);
+                R(x + off, y, 1, 6, '#706858');
+                R(x + off + 1, y, 9, 1, '#9a9080');
             }
         }
-        // Chimney (tall)
-        ctx.fillStyle = '#5a5040';
-        ctx.fillRect(46, 2, 8, 20);
-        ctx.fillStyle = '#4a4030';
-        ctx.fillRect(45, 1, 10, 2);
+        // Chimney (tall) with a soot-blackened top
+        R(46, 2, 8, 20, '#5a5040');
+        R(47, 4, 1, 16, '#6a6050');
+        R(45, 1, 10, 2, '#4a4030');
+        R(46, 3, 8, 2, '#2e2820');
 
-        // Roof (dark slate)
-        ctx.fillStyle = '#3a3a48';
-        ctx.fillRect(2, 14, w - 4, 6);
-        ctx.fillStyle = '#4a4a5a';
-        ctx.fillRect(4, 10, w - 8, 5);
-        ctx.fillStyle = '#5a5a6a';
-        ctx.fillRect(6, 8, w - 12, 3);
+        // Roof (dark slate) with ridge
+        R(2, 14, w - 4, 6, '#3a3a48');
+        R(4, 10, w - 8, 5, '#4a4a5a');
+        R(6, 8, w - 12, 3, '#5a5a6a');
+        R(6, 8, w - 12, 1, '#6c6c7e');
+        for (let x = 6; x < w - 6; x += 6) R(x, 15, 1, 5, '#2e2e3a');
 
         // Open forge front with glowing fire
-        ctx.fillStyle = '#2a2018';
-        ctx.fillRect(22, 28, 20, 16);
-        ctx.fillStyle = '#ff6a1a';
-        ctx.fillRect(26, 34, 12, 8);
-        ctx.fillStyle = '#ffd040';
-        ctx.fillRect(29, 36, 6, 5);
-        ctx.fillStyle = '#ff9a2a';
-        ctx.fillRect(30, 33, 4, 2);
+        R(22, 28, 20, 16, '#2a2018');
+        R(21, 27, 22, 2, '#5a5040');
+        R(26, 34, 12, 8, '#ff6a1a');
+        R(29, 36, 6, 5, '#ffd040');
+        R(30, 33, 4, 2, '#ff9a2a');
+        R(24, 42, 16, 2, '#4a3a2a');
 
-        // Anvil outside
-        ctx.fillStyle = '#404048';
-        ctx.fillRect(8, h - 12, 12, 4);
-        ctx.fillRect(11, h - 8, 6, 5);
-        ctx.fillStyle = '#6a6a78';
-        ctx.fillRect(8, h - 12, 12, 1);
-        // Hammer
-        ctx.fillStyle = '#6b4226';
-        ctx.fillRect(w - 14, h - 16, 2, 12);
-        ctx.fillStyle = '#8a8a9a';
-        ctx.fillRect(w - 17, h - 18, 8, 4);
+        // Weapon rack on the right wall: two bows and a sword
+        R(44, 30, 14, 2, '#6b4226');
+        R(44, 42, 14, 2, '#6b4226');
+        R(45, 30, 1, 14, '#5a3418'); R(56, 30, 1, 14, '#5a3418');
+        // bows (curved staves with strings)
+        R(47, 31, 1, 1, '#a8743c'); R(46, 32, 1, 8, '#a8743c'); R(47, 40, 1, 1, '#a8743c'); R(48, 32, 1, 8, '#e8e0c8');
+        R(51, 31, 1, 1, '#a8743c'); R(50, 32, 1, 8, '#a8743c'); R(51, 40, 1, 1, '#a8743c'); R(52, 32, 1, 8, '#e8e0c8');
+        // sword (blade, cross guard, grip)
+        R(54, 31, 1, 7, '#d0d6e4'); R(55, 31, 1, 7, '#9aa4b8');
+        R(53, 38, 4, 1, '#c8a040'); R(54, 39, 2, 3, '#5a3418'); R(54, 42, 2, 1, '#c8a040');
+
+        // Anvil outside on a wooden block
+        R(9, h - 7, 8, 4, '#6b4226');
+        R(7, h - 13, 13, 4, '#404048');
+        R(5, h - 12, 3, 2, '#404048');
+        R(11, h - 9, 6, 2, '#34343c');
+        R(7, h - 13, 13, 1, '#6a6a78');
+        // a glowing blade on the anvil
+        R(9, h - 14, 7, 1, '#ff9a3a');
+        // Hammer leaning on the wall
+        R(w - 14, h - 16, 2, 12, '#6b4226');
+        R(w - 17, h - 18, 8, 4, '#8a8a9a');
+        R(w - 17, h - 18, 8, 1, '#b0b0c0');
+
+        cache[key] = c;
+        return c;
+    }
+
+    // Barracks: a long timber hall on a stone base with a banner, a training
+    // dummy and a weapon stand in the yard
+    function drawBarracks() {
+        const key = 'barracks';
+        if (cache[key]) return cache[key];
+        const w = 3 * TILE_SIZE, h = 2 * TILE_SIZE;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+        const R = (x, y, ww, hh, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, ww, hh); };
+
+        // Packed earth yard in front
+        R(4, h - 12, w - 8, 10, '#9a8460');
+        for (let i = 0; i < 14; i++) R(6 + (i * 13) % (w - 12), h - 10 + (i * 5) % 7, 2, 1, '#86704e');
+
+        // Stone base
+        R(8, 34, w - 16, 14, '#8a8272');
+        for (let x = 8; x < w - 8; x += 8) R(x + ((x / 8) % 2) * 4, 34, 1, 14, '#6e6658');
+        R(8, 40, w - 16, 1, '#6e6658');
+        R(8, 34, w - 16, 1, '#a49c8c');
+
+        // Timber-framed upper wall
+        R(8, 20, w - 16, 14, '#d8c8a0');
+        R(8, 20, w - 16, 2, '#5a3a1e');
+        R(8, 32, w - 16, 2, '#5a3a1e');
+        for (let x = 8; x <= w - 10; x += 14) R(x, 20, 2, 14, '#5a3a1e');
+        for (let x = 8; x < w - 22; x += 28) { // diagonal braces
+            for (let i = 0; i < 12; i++) R(x + 2 + i, 22 + i, 2, 1, '#5a3a1e');
+        }
+
+        // Roof: red-brown tiles in rows
+        R(2, 14, w - 4, 7, '#8a3a24');
+        R(5, 9, w - 10, 6, '#9a4428');
+        R(8, 5, w - 16, 5, '#a84e2e');
+        R(8, 5, w - 16, 1, '#c86a44');
+        for (let y = 7; y < 21; y += 3) for (let x = 4 + (y % 2) * 3; x < w - 4; x += 6) R(x, y, 1, 2, '#6e2a18');
+
+        // Door and windows
+        R(42, 36, 12, 12, '#3a2410');
+        R(43, 37, 10, 11, '#5a3a1e');
+        R(47, 37, 1, 11, '#3a2410');
+        R(51, 42, 1, 2, '#c8a040');
+        R(20, 30, 6, 8, '#2a2018'); R(70, 30, 6, 8, '#2a2018');
+        R(22, 30, 1, 8, '#5a3a1e'); R(72, 30, 1, 8, '#5a3a1e');
+
+        // Shields hung on the wall
+        [[30, 23], [58, 23]].forEach(([x, y]) => {
+            R(x, y, 6, 6, '#3c6fb0'); R(x + 1, y + 6, 4, 1, '#3c6fb0'); R(x + 2, y + 7, 2, 1, '#3c6fb0');
+            R(x + 2, y, 2, 7, '#e8d070'); R(x, y, 6, 1, '#8aa8d8');
+        });
+
+        // Banner pole with a red flag
+        R(w - 10, 0, 2, h - 12, '#6b4226');
+        R(w - 10, 0, 2, 1, '#c8a040');
+        R(w - 8, 2, 8, 10, '#b82820');
+        R(w - 8, 2, 8, 1, '#d84838');
+        R(w - 6, 5, 4, 4, '#e8d070');
+        R(w - 8, 12, 3, 2, '#b82820'); R(w - 3, 12, 3, 2, '#b82820');
+
+        // Training dummy (straw on a post)
+        R(10, h - 22, 2, 18, '#6b4226');
+        R(6, h - 18, 10, 2, '#6b4226');
+        R(8, h - 20, 6, 8, '#d8b860');
+        R(8, h - 20, 6, 1, '#e8cc80');
+        R(9, h - 25, 4, 5, '#d8b860');
+        R(10, h - 14, 2, 1, '#a82418');
+
+        // Spear stand
+        R(w - 26, h - 8, 12, 2, '#5a3418');
+        for (let i = 0; i < 3; i++) { R(w - 24 + i * 4, h - 28, 1, 20, '#8a5a2a'); R(w - 24 + i * 4, h - 30, 1, 2, '#c8c8d0'); }
 
         cache[key] = c;
         return c;
@@ -1529,7 +1702,8 @@ const Sprites = (() => {
             case 'lumberjack': return drawLumberjack();
             case 'quarry': return drawQuarry();
             case 'iron_mine': return drawIronMine();
-            case 'blacksmith': return drawBlacksmith();
+            case 'weaponsmith': return drawWeaponsmith();
+            case 'barracks': return drawBarracks();
             case 'hunter': return drawHunter();
             case 'chicken_hut': return drawChickenHut();
             case 'apple_orchard': return drawAppleOrchard(grown);
@@ -1835,6 +2009,7 @@ const Sprites = (() => {
         drawStonePile,
         drawFlowers,
         drawVillager,
+        drawSoldier,
         drawIcon,
         getBuilding,
         getBuildingShadow,
