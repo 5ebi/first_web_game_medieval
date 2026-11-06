@@ -31,6 +31,10 @@ _Last updated: 2026-11-06_
 - Quarry must stand at least half on a stone field; lumberjack/hunter need forest,
   iron mine needs stone nearby.
 - Villagers are cosmetic (they don't carry the economy), but they must look plausible.
+- Every reply to the owner and every PR body ends with a test link: live
+  `https://5ebi.github.io/first_web_game_medieval/`, or for an unmerged branch
+  `https://raw.githack.com/5ebi/first_web_game_medieval/<branch>/index.html`
+  (githack caches; a fresh push can take a few minutes to appear).
 - Music and sound are synthesized; no database. Saves live in `localStorage`. A DB
   only becomes relevant for accounts, cloud saves or leaderboards.
 
