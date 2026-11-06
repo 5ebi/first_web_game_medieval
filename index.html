@@ -13,6 +13,9 @@
     <div id="game-container">
         <canvas id="game-canvas"></canvas>
 
+        <!-- Meat breakdown (opened by clicking / tapping the meat counter) -->
+        <div id="food-pop" class="hidden" role="dialog" aria-live="polite"></div>
+
         <!-- Resource Bar -->
         <div id="resource-bar">
             <div class="resource" data-i18n-title="res.Wood">
@@ -27,7 +30,7 @@
                 <span class="resource-icon" id="icon-iron"></span>
                 <span class="resource-value" id="res-iron">0</span>
             </div>
-            <div class="resource" data-i18n-title="res.Food">
+            <div class="resource food" id="food-res" data-i18n-title="res.Food" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-controls="food-pop">
                 <span class="resource-icon" id="icon-food"></span>
                 <span class="resource-value" id="res-food">0</span>
             </div>

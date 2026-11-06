@@ -29,6 +29,8 @@ const UI = (() => {
             resStone: $('res-stone'),
             resIron: $('res-iron'),
             resFood: $('res-food'),
+            foodRes: $('food-res'),
+            foodPop: $('food-pop'),
             resPop: $('res-pop'),
             resDay: $('res-day'),
             dayProgress: $('day-progress'),
@@ -92,6 +94,7 @@ const UI = (() => {
         setupSettings();
         setupEventListeners();
         setupMinimap();
+        setupFoodPop();
         updateInsets();
         window.addEventListener('resize', updateInsets);
 
@@ -1119,19 +1122,19 @@ const UI = (() => {
         const rates = Game.getRates();
         const foodNet = rates.food - Game.getFoodConsumption();
 
-        function fmt(val, rate) {
-            const v = Math.floor(val);
-            let s = `${v}`;
+        // value plus its net rate per minute; the rate is always visible (phones drop the "/min")
+        function fmt(val, rate, always) {
             const r = Math.round(rate * 10) / 10;
-            if (r > 0) s += ` <span class="rate up">+${fmtNum(r)}/min</span>`;
-            else if (r < 0) s += ` <span class="rate down">${fmtNum(r)}/min</span>`;
+            let s = `<span class="num">${Math.floor(val)}</span>`;
+            if (r !== 0 || always) s += ' ' + rateHtml(r);
             return s;
         }
 
         els.resWood.innerHTML = fmt(gs.resources.wood, rates.wood);
         els.resStone.innerHTML = fmt(gs.resources.stone, rates.stone);
         els.resIron.innerHTML = fmt(gs.resources.iron, rates.iron);
-        els.resFood.innerHTML = fmt(gs.resources.food, foodNet);
+        // meat: the net balance is shown even at zero once anyone produces or eats
+        els.resFood.innerHTML = fmt(gs.resources.food, foodNet, rates.food > 0 || Game.getFoodConsumption() > 0);
         els.resPop.textContent = `${gs.populationUsed} / ${gs.populationCap}`;
         els.resDay.textContent = Game.isClockRunning() ? t('res.daytime', { n: gs.day, time: clockText() }) : t('res.notime');
         if (els.storageLabel) els.storageLabel.textContent = `${gs.maxStorage}`;
@@ -1141,6 +1144,8 @@ const UI = (() => {
             el.parentElement.classList.toggle('full', gs.resources[r] >= gs.maxStorage - 0.01);
             el.parentElement.title = t('res.storage.value', { name: t('res.' + r[0].toUpperCase() + r.slice(1)), v: Math.floor(gs.resources[r]), max: gs.maxStorage });
         });
+        els.foodRes.title = t('res.storage.value', { name: t('res.Food'), v: Math.floor(gs.resources.food), max: gs.maxStorage }) + '\n' + t('res.food.more');
+        if (foodPopOpen) renderFoodPop();
         els.resFood.parentElement.classList.toggle('danger', gs.starving > 0 || (foodNet < 0 && gs.resources.food < -foodNet * 2));
         els.resPop.parentElement.title = t('res.pop.title', { used: gs.populationUsed, cap: gs.populationCap, free: Game.getFreeWorkers() });
 
@@ -1155,6 +1160,64 @@ const UI = (() => {
         if (els.resourceBar.offsetHeight !== lastBarHeight) { lastBarHeight = els.resourceBar.offsetHeight; updateInsets(); }
     }
     let lastBarHeight = 0;
+
+    // "+1.5/min", "−2/min" (real minus sign) or "±0/min"; the unit is hidden on phones
+    function rateHtml(r) {
+        const cls = r > 0 ? 'up' : r < 0 ? 'down' : 'zero';
+        const sign = r > 0 ? '+' : r < 0 ? '\u2212' : '\u00b1';
+        return `<span class="rate ${cls}">${sign}${fmtNum(Math.abs(r))}<span class="rate-unit">/min</span></span>`;
+    }
+
+    // ---------- meat breakdown popover (click / tap on the meat counter) ----------
+    let foodPopOpen = false;
+    function setupFoodPop() {
+        const toggle = () => { AudioSys.play('click'); setFoodPop(!foodPopOpen); };
+        els.foodRes.addEventListener('click', toggle);
+        els.foodRes.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+        // any press outside closes it (the canvas stays usable underneath)
+        document.addEventListener('pointerdown', (e) => {
+            if (foodPopOpen && !els.foodRes.contains(e.target) && !els.foodPop.contains(e.target)) setFoodPop(false);
+        }, true);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && foodPopOpen) setFoodPop(false); });
+        window.addEventListener('resize', () => { if (foodPopOpen) placeFoodPop(); });
+    }
+
+    function setFoodPop(open) {
+        foodPopOpen = open;
+        els.foodPop.classList.toggle('hidden', !open);
+        els.foodRes.classList.toggle('open', open);
+        els.foodRes.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) renderFoodPop();
+    }
+
+    function renderFoodPop() {
+        const gs = Game.getState();
+        const made = Game.getRates().food;
+        const eaten = Game.getFoodConsumption();
+        const net = made - eaten;
+        const hunters = BuildingManager.getProductionBuildings().filter(b => b.def.production.resource === 'food').length;
+        const r1 = (x) => Math.round(x * 10) / 10;
+        let html = `<div class="fp-title">${t('food.pop.title')}</div>`
+            + `<div class="fp-row"><span>${t('food.pop.made', { n: hunters })}</span>${rateHtml(r1(made))}</div>`
+            + `<div class="fp-row"><span>${t('food.pop.eaten', { n: gs.populationUsed })}</span>${rateHtml(-r1(eaten))}</div>`
+            + `<div class="fp-row fp-net"><span>${t('food.pop.net')}</span>${rateHtml(r1(net))}</div>`;
+        if (net < 0) html += `<div class="fp-warn">${t('food.pop.lasts', { m: fmtNum(Math.max(0, gs.resources.food) / -net) })}</div>`;
+        html += `<div class="fp-hint">${t('food.pop.hint', { f: fmtNum(FOOD_PER_WORKER_PER_MIN) })}</div>`;
+        els.foodPop.innerHTML = html;
+        placeFoodPop();
+    }
+
+    // below the bar, centred on the meat counter, kept on screen
+    function placeFoodPop() {
+        const r = els.foodRes.getBoundingClientRect();
+        const bar = els.resourceBar.getBoundingClientRect();
+        const w = els.foodPop.offsetWidth;
+        const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2));
+        els.foodPop.style.left = Math.round(left) + 'px';
+        els.foodPop.style.top = Math.round(bar.bottom + 6) + 'px';
+    }
 
     // ---------- notifications ----------
     const notifSounds = { warning: 'warning', danger: 'warning', success: null, grown: 'grown', info: null };
