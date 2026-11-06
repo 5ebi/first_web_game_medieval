@@ -24,6 +24,19 @@ A `SessionStart` hook (`.claude/hooks/session-start.sh`) repeats this rule at st
 - **Override**: only if the owner explicitly says so in a message ("mach das direkt hier"),
   work directly in the session.
 
+## Test link (end every reply with it)
+
+The owner wants to tap a link and play. Every reply to the owner (planner and worker)
+and every PR body ends with a test link:
+
+- Live build of `main` (GitHub Pages): https://5ebi.github.io/first_web_game_medieval/
+- Unmerged branch preview: `https://raw.githack.com/5ebi/first_web_game_medieval/<branch>/index.html`
+  (the repo is public; githack serves proper content types, so scripts and `assets/`
+  load). A fresh push can take a few minutes to show up there because of caching.
+
+Workers give the branch preview (plus the live link once merged); the planner gives the
+live link plus previews of PRs that are ready to look at.
+
 ## Run
 
 ```sh

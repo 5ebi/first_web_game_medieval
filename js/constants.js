@@ -95,7 +95,9 @@ const BUILDINGS = {
     },
     lumberjack: {
         width: 2, height: 2,
-        cost: { wood: 0, stone: 0, iron: 0 },   // always buildable, so wood can never run out for good
+        // Normal price. Emergency rule in Game.getCost: with no lumberjack and not enough
+        // wood to pay, the next one is free, so wood can never run out for good.
+        cost: { wood: 10, stone: 0, iron: 0 },
         workers: 2,
         provides: {},
         production: { resource: 'wood', amount: 4, cycle: 20, requires: 'FOREST' },

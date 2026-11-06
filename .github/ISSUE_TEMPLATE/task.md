@@ -21,6 +21,7 @@ labels: task
 - [ ] 
 - [ ] `sh tests/run-all.sh` passes; desktop, phone portrait, phone landscape screenshots checked
 - [ ] Strings in `en` and `de`
+- [ ] PR body ends with a preview link of its branch and the live link
 
 ## Base
 `main`
