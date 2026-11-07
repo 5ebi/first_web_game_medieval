@@ -219,6 +219,68 @@ async function touchDrag(cdp, page, from, to, holdMs = 0) {
     await page.waitForTimeout(150);
 }
 
+// Issue #20: no tab looks open while the info scroll is shown, one tap on a tab goes back
+// to building; desktop edge scrolling (and its setting), never on touch.
+// Expects the warehouse info to be open.
+async function tabStateAndEdgeScroll(page, name, touch) {
+    const tabs = () => page.evaluate(() => ({
+        active: [...document.querySelectorAll('#cp-cats .cp-cat.active')].map(t => t.dataset.cat),
+        info: !document.getElementById('info-panel').classList.contains('hidden'),
+        strip: [...document.querySelectorAll('#cp-build .cp-bld.in-cat')].filter(b => b.offsetParent).length,
+    }));
+    const withInfo = await tabs();
+    check(withInfo.info && withInfo.active.length === 0, `${name}: no tab looks open while the info is shown (${withInfo.active})`);
+    await press(page, touch, '#cp-cats .cp-cat[data-cat="industry"]');
+    const back = await tabs();
+    check(!back.info && back.active.join() === 'industry' && back.strip > 0, `${name}: one tap on a tab closes the info and opens it (${JSON.stringify(back)})`);
+    await press(page, touch, '#cp-cats .cp-cat[data-cat="castle"]');
+
+    const vp = page.viewportSize();
+    const camAfter = async (x, y, ms = 500) => {
+        const c0 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
+        if (!touch) await page.mouse.move(x, y);
+        await page.waitForTimeout(ms);
+        const c1 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
+        return { dx: Math.round(c1.x - c0.x), dy: Math.round(c1.y - c0.y) };
+    };
+    await page.evaluate(() => { Renderer.setZoom(2); Renderer.centerOn(MAP_PIXEL_W / 2, MAP_PIXEL_H / 2); });
+    const mapArea = await page.evaluate(() => ({
+        top: document.getElementById('resource-bar').offsetHeight,
+        bottom: innerHeight - document.getElementById('command-panel').offsetHeight,
+    }));
+    const midY = Math.round((mapArea.top + mapArea.bottom) / 2);
+    if (touch) {
+        // a tap near the edge leaves the camera where it is
+        await page.touchscreen.tap(4, midY);
+        const still = await camAfter(0, 0);
+        check(still.dx === 0 && still.dy === 0, `${name}: no edge scrolling on touch (${JSON.stringify(still)})`);
+    } else {
+        await page.mouse.move(vp.width / 2, midY);
+        const left = await camAfter(2, midY);
+        const right = await camAfter(vp.width - 2, midY);
+        const up = await camAfter(vp.width / 2, mapArea.top + 2);
+        const down = await camAfter(vp.width / 2, mapArea.bottom - 2);
+        const centre = await camAfter(vp.width / 2, midY);
+        check(left.dx < -20 && right.dx > 20 && up.dy < -20 && down.dy > 20 && !centre.dx && !centre.dy,
+            `${name}: mouse at the map edge scrolls (left ${left.dx}, right ${right.dx}, up ${up.dy}, down ${down.dy}, centre ${centre.dx}/${centre.dy})`);
+        // over the bottom panel: no scrolling
+        const overPanel = await camAfter(vp.width / 2, vp.height - 4);
+        check(overPanel.dx === 0 && overPanel.dy === 0, `${name}: no edge scrolling over the panel (${JSON.stringify(overPanel)})`);
+        // the setting turns it off and is saved
+        await page.mouse.move(vp.width / 2, midY);
+        await press(page, false, '#settings-btn');
+        const rowShown = await page.isVisible('#toggle-edge');
+        await press(page, false, '#toggle-edge');
+        const saved = await page.evaluate(() => JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}').edgeScroll);
+        await press(page, false, '#settings-close');
+        const off = await camAfter(2, midY);
+        check(rowShown && saved === false && off.dx === 0, `${name}: edge scroll setting shown, saved (${saved}) and respected (dx ${off.dx})`);
+        await page.mouse.move(vp.width / 2, midY);
+        await page.evaluate(() => Settings.set('edgeScroll', true));
+    }
+    await page.evaluate(() => Renderer.setZoom(1));
+}
+
 async function soldierControl(page, ctx, name, touch) {
     const second = await page.evaluate(recruitSecond);
     check(second.ok && second.n === 2, `${name}: second soldier recruited (${second.n})`);
@@ -341,6 +403,13 @@ async function soldierControl(page, ctx, name, touch) {
         await touchDrag(cdp, page, sp.a, sp.b, 550);
         const boxed = await nSel();
         check(none === 0 && boxed === 2, `${name}: Deselect clears (${none}), long press + drag box selects both (${boxed})`);
+        // iOS: the long press must not select text or open a callout (issue #20)
+        const noSel = await page.evaluate(() => {
+            const cs = getComputedStyle(document.getElementById('game-canvas'));
+            return { text: String(window.getSelection() || ''), callout: cs.webkitTouchCallout || cs.getPropertyValue('-webkit-touch-callout'), sel: cs.webkitUserSelect || cs.userSelect };
+        });
+        check(noSel.text === '' && noSel.sel === 'none' && (noSel.callout === 'none' || noSel.callout === ''),
+            `${name}: long press selects no text, canvas blocks callout/selection (${JSON.stringify(noSel)})`);
         await page.screenshot({ path: path.join(OUT, `${name}-boxed.png`) });
         // Patrol button, then tap
         await press(page, true, '#info-controls [data-order="patrol"]');
@@ -473,6 +542,7 @@ async function run(browser, name, ctxOpts, touch) {
     });
     check(info.open && info.title.length > 0, `${name}: building info opens (${info.title})`);
     await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+    await tabStateAndEdgeScroll(page, name, touch);
 
     // ---- military: weapon smith -> swords -> barracks -> swordsman ----
     const mil = await page.evaluate(buildMilitary);
