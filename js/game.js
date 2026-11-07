@@ -323,9 +323,14 @@ const Game = (() => {
             return false;
         }
         const def = b.def;
+        // A smith mid-forge already took the material for its weapon: that comes
+        // back in full, on top of the usual share of the building cost.
+        const held = (def.crafts && b.inputPaid) ? WEAPONS[getProduct(b)].cost : {};
+        b.inputPaid = false;
+        b.progress = 0;
         const refund = {};
         ['wood', 'stone', 'iron'].forEach(r => {
-            const amt = Math.floor((b.paid || def.cost)[r] * DEMOLISH_REFUND);
+            const amt = Math.floor(((b.paid || def.cost)[r] || 0) * DEMOLISH_REFUND) + (held[r] || 0);
             if (amt > 0) {
                 refund[r] = amt;
                 state.resources[r] = Math.min(state.maxStorage, state.resources[r] + amt);

@@ -573,6 +573,30 @@ async function run(browser, name, ctxOpts, touch) {
         }));
         check(loaded.started && !loaded.smith && loaded.count === old.count && loaded.used === old.used && loaded.sword === 0,
             `desktop: old save with a blacksmith loads without it (${JSON.stringify(loaded)})`);
+
+        // Demolishing a smith mid-forge returns the material it took (issue #22)
+        const razed = await page.evaluate(() => {
+            const s = Game.getState();
+            s.resources.wood = 200; s.resources.stone = 200; s.resources.iron = 20;
+            s.maxStorage = Math.max(s.maxStorage, 400);
+            s.weapons.sword = 0;
+            const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+            let smith = null;
+            for (let d = 0; d <= 30 && !smith; d++) for (let dy = -d; dy <= d && !smith; dy++) for (let dx = -d; dx <= d && !smith; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+                if (Game.canPlace('weaponsmith', castle.tileX + dx, castle.tileY + dy).ok) smith = Game.placeBuilding('weaponsmith', castle.tileX + dx, castle.tileY + dy);
+            }
+            if (!smith) return { placed: false };
+            Game.setSmithProduct(smith.id, 'sword');
+            Game.update(1000);
+            const forging = smith.inputPaid && smith.progress > 0 && smith.progress < 1;
+            const ironTaken = s.resources.iron;          // 2 iron already went into the sword
+            const expected = Math.min(s.maxStorage, ironTaken + WEAPONS.sword.cost.iron + Math.floor(BUILDINGS.weaponsmith.cost.iron * DEMOLISH_REFUND));
+            const ok = Game.demolishBuilding(smith.id);
+            return { placed: true, forging, ok, ironTaken, expected, iron: s.resources.iron };
+        });
+        check(razed.placed && razed.forging && razed.ok && razed.iron === razed.expected,
+            `desktop: demolishing a forging smith returns its iron plus the refund (${JSON.stringify(razed)})`);
     }
 
     check(errors.length === 0, `${name}: no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
