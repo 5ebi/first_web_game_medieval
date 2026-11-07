@@ -354,6 +354,54 @@ async function soldierControl(page, ctx, name, touch) {
     }
 }
 
+// Soldiers never stand on top of each other (issue #21): two groups to one point,
+// six recruits at one barracks, three soldiers dropped on the same spot
+function unitSeparation() {
+    const minGap = us => {
+        let m = 1e9;
+        for (let i = 0; i < us.length; i++) for (let j = i + 1; j < us.length; j++) m = Math.min(m, Math.hypot(us[i].x - us[j].x, us[i].y - us[j].y));
+        return Math.round(m * 10) / 10;
+    };
+    const offMap = () => Units.getAll().filter(u => !Units.canStand(u.x, u.y)).length;
+    const settle = () => { for (let i = 0; i < 3000 && Units.getAll().some(u => u.state !== 'idle'); i++) Units.update(0.1); for (let i = 0; i < 50; i++) Units.update(0.1); };
+    const s = Game.getState();
+    const bar = BuildingManager.getAll().find(b => b.type === 'barracks');
+    const recruit = () => { s.weapons.sword += 1; if (Game.getFreeWorkers() < 1) s.populationCap += 2; return Game.recruit(bar.id, 'swordsman'); };
+    Units.stop();
+    while (Units.getAll().length < 4) recruit();
+    // an open patch of land near the barracks (3x3 standable tiles) the soldiers can reach
+    const u0 = Units.getAll()[0];
+    let w = null;
+    for (let r = 2; r < 14 && !w; r++) for (let a = 0; a < 16 && !w; a++) {
+        const x = bar.pixelX + bar.width / 2 + Math.cos(a / 16 * 6.283) * r * TILE_SIZE, y = bar.pixelY + bar.height + Math.sin(a / 16 * 6.283) * r * TILE_SIZE;
+        let open = true;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (!Units.canStand(x + dx * TILE_SIZE, y + dy * TILE_SIZE)) open = false;
+        const tp = Units.findPath(Math.floor(u0.x / TILE_SIZE), Math.floor((u0.y - 1) / TILE_SIZE), Math.floor(x / TILE_SIZE), Math.floor((y - 1) / TILE_SIZE));
+        if (open && tp) w = { x, y };
+    }
+    const ids = Units.getAll().slice(0, 4).map(u => u.id);
+    Units.moveTo(ids.slice(0, 2), w.x, w.y);
+    Units.moveTo(ids.slice(2, 4), w.x, w.y);
+    settle();
+    const groups = { gap: minGap(Units.getAll()), bad: offMap(), idle: Units.getAll().every(u => u.state === 'idle'),
+        near: Math.max(...Units.getAll().slice(0, 4).map(u => Math.hypot(u.x - w.x, u.y - w.y))) };
+    // a third group to the same point while the first four stand there
+    const extra = [recruit(), recruit()].filter(Boolean).map(u => u.id);
+    Units.moveTo(extra, w.x, w.y);
+    settle();
+    const third = { gap: minGap(Units.getAll()), bad: offMap() };
+    // six recruits at one barracks: free spots right away
+    const fresh = [];
+    for (let i = 0; i < 6; i++) { const u = recruit(); if (u) fresh.push(u); }
+    const recruits = { n: fresh.length, gap: minGap(Units.getAll()), bad: offMap() };
+    // dropped on one spot (e.g. an old save): they step apart, stay on land
+    const drop = Units.getAll().slice(0, 3);
+    drop.forEach(u => { u.x = w.x; u.y = w.y; });
+    settle();
+    const dropped = { gap: minGap(Units.getAll()), bad: offMap() };
+    return { w, groups, third, recruits, dropped, total: Units.getAll().length };
+}
+
 async function run(browser, name, ctxOpts, touch) {
     console.log(`\n== ${name}`);
     const ctx = await browser.newContext(ctxOpts);
@@ -521,6 +569,17 @@ async function run(browser, name, ctxOpts, touch) {
 
     // ---- soldiers: select, move, patrol (issue #16) ----
     await soldierControl(page, ctx, name, touch);
+    if (name === 'phone-portrait') {
+        const sep = await page.evaluate(unitSeparation);
+        check(sep.groups.idle && sep.groups.gap >= 8 && sep.groups.bad === 0 && sep.groups.near < 40,
+            `${name}: two groups sent to one point stand side by side (${JSON.stringify(sep.groups)})`);
+        check(sep.third.gap >= 8 && sep.third.bad === 0, `${name}: a group arriving where soldiers stand finds free spots (${JSON.stringify(sep.third)})`);
+        check(sep.recruits.n === 6 && sep.recruits.gap >= 8 && sep.recruits.bad === 0, `${name}: six recruits at one barracks don't overlap (${JSON.stringify(sep.recruits)})`);
+        check(sep.dropped.gap >= 8 && sep.dropped.bad === 0, `${name}: soldiers on one spot step apart (${JSON.stringify(sep.dropped)})`);
+        await page.evaluate(() => { const u = Units.getAll()[0]; Renderer.setZoom(2); Renderer.centerOn(u.x, u.y - 10); });
+        await page.waitForTimeout(300);
+        await page.screenshot({ path: path.join(OUT, `${name}-separation.png`) });
+    }
 
     if (name === 'desktop') {
         await page.evaluate(() => Game.save());
