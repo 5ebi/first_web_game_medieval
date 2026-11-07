@@ -39,6 +39,7 @@ body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-touch-callout: none;   /* iOS: no callout on a long press anywhere in the game */
     -webkit-tap-highlight-color: transparent;
     color: var(--text);
 }
@@ -62,6 +63,10 @@ button {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
     touch-action: none;
+    /* long press + drag draws a selection box: no callout, magnifier or text selection */
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
 #game-canvas.placing,
@@ -1435,7 +1440,7 @@ kbd {
 /* soldier orders: Move / Patrol / Stop / Deselect */
 .ctl-btn.order { padding: 3px 10px; }
 .ctl-btn .hk { font-size: 10px; font-weight: 700; opacity: 0.6; border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; margin-left: 2px; }
-@media (hover: none) { .ctl-btn .hk { display: none; } }
+@media (hover: none) { .ctl-btn .hk { display: none; } .mouse-only { display: none; } }
 .order-hint { margin: 0 0 4px; font-size: 12px; font-weight: 700; color: #2a4a7a; }
 .sel-chip { margin-right: 4px; white-space: nowrap; }
 .sel-chip .ic { width: 16px; height: 16px; image-rendering: pixelated; vertical-align: -3px; }

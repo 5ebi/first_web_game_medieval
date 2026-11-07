@@ -1,5 +1,5 @@
 // ============================================
-// Settings - persisted user preferences (language, audio)
+// Settings - persisted user preferences (language, audio, input)
 // ============================================
 
 const Settings = (() => {
@@ -9,6 +9,7 @@ const Settings = (() => {
         musicOn: true,
         sfxOn: true,
         fxOn: true,
+        edgeScroll: true,   // desktop: mouse at the map edge scrolls
     };
     let data = Object.assign({}, defaults);
 

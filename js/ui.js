@@ -17,7 +17,11 @@ const UI = (() => {
     let lastInputTouch = false;
     let wheelAcc = 0, wheelT = 0;
     let lastPointer = { x: 0, y: 0 };
+    let isDragging = false;     // a mouse button / finger is down on the map
     const keys = new Set();
+    const EDGE_PX = 12;         // mouse this close to the map area's edge scrolls the camera
+    const EDGE_SPEED = 700;     // screen px per second at the very edge
+    const noHover = window.matchMedia ? window.matchMedia('(hover: none)') : { matches: false };
 
     // DOM elements
     let els = {};
@@ -67,6 +71,7 @@ const UI = (() => {
             toggleMusic: $('toggle-music'),
             toggleSfx: $('toggle-sfx'),
             toggleFx: $('toggle-fx'),
+            toggleEdge: $('toggle-edge'),
             dayRes: $('day-res'),
             iconDay: $('icon-day'),
             seasonRes: $('season-res'),
@@ -282,11 +287,6 @@ const UI = (() => {
             if (infoOpen) hideInfo();
         }
         activeCat = id;
-        els.cpCats.querySelectorAll('.cp-cat').forEach(tab => {
-            const on = tab.dataset.cat === id;
-            tab.classList.toggle('active', on && (bodyOpen || !isCompact()));
-            tab.setAttribute('aria-selected', on ? 'true' : 'false');
-        });
         els.cpBuild.querySelectorAll('.cp-bld').forEach(btn => {
             btn.classList.toggle('in-cat', btn.dataset.cat === id);
         });
@@ -294,10 +294,22 @@ const UI = (() => {
     }
 
     function syncBody() {
-        const open = bodyOpen || !isCompact() || !els.infoPanel.classList.contains('hidden');
+        const infoOpen = !els.infoPanel.classList.contains('hidden');
+        const open = bodyOpen || !isCompact() || infoOpen;
         els.commandPanel.classList.toggle('folded', !open);
-        els.commandPanel.classList.toggle('info-open', !els.infoPanel.classList.contains('hidden'));
+        els.commandPanel.classList.toggle('info-open', infoOpen);
+        syncTabs(infoOpen);
         updateInsets();
+    }
+
+    // While the scroll shows a building, villager or soldiers no category is open,
+    // so no tab may look open either (one tap on any tab goes back to building).
+    function syncTabs(infoOpen) {
+        els.cpCats.querySelectorAll('.cp-cat').forEach(tab => {
+            const on = tab.dataset.cat === activeCat && !infoOpen && (bodyOpen || !isCompact());
+            tab.classList.toggle('active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
     }
 
     // Cost with resource icons; amounts you cannot pay yet are red
@@ -558,6 +570,11 @@ const UI = (() => {
             AudioSys.play('click');
             syncSettingsUI();
         });
+        els.toggleEdge.addEventListener('click', () => {
+            Settings.set('edgeScroll', !Settings.get('edgeScroll'));
+            AudioSys.play('click');
+            syncSettingsUI();
+        });
         els.toggleSfx.addEventListener('click', () => {
             AudioSys.init();
             AudioSys.toggleSfx();
@@ -580,6 +597,7 @@ const UI = (() => {
         setToggle(els.toggleMusic, AudioSys.isMusicOn());
         setToggle(els.toggleSfx, AudioSys.isSfxOn());
         setToggle(els.toggleFx, Atmosphere.isEnabled());
+        setToggle(els.toggleEdge, !!Settings.get('edgeScroll'));
     }
 
     function setToggle(btn, on) {
@@ -693,7 +711,7 @@ const UI = (() => {
     }
 
     function setupEventListeners() {
-        let isDragging = false;
+        isDragging = false;
         let dragMode = 'pan';      // 'pan' | 'box'
         let dragStart = { x: 0, y: 0 };
         let cameraStart = { x: 0, y: 0 };
@@ -737,6 +755,7 @@ const UI = (() => {
                     if (!isDragging || dragDistance >= 8) return;
                     dragMode = 'box';
                     selBox = { x0: dragStart.x, y0: dragStart.y, x1: dragStart.x, y1: dragStart.y };
+                    try { window.getSelection()?.removeAllRanges(); } catch (_) { /* no selection API */ }
                     if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) { /* not allowed */ } }
                     AudioSys.play('select');
                 }, 420);
@@ -937,6 +956,11 @@ const UI = (() => {
 
         // right click is handled on mouse up (it can also be a drag that pans the map)
         els.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        // iOS: a long press must never select text or open the callout (it draws a box)
+        els.canvas.addEventListener('selectstart', (e) => e.preventDefault());
+        document.addEventListener('selectstart', (e) => { if (isDragging) e.preventDefault(); });
+        window.addEventListener('blur', () => { pointerOverCanvas = false; });
+        document.addEventListener('mouseleave', () => { pointerOverCanvas = false; });
         els.canvas.addEventListener('auxclick', (e) => e.preventDefault());
 
         document.addEventListener('keydown', (e) => {
@@ -995,6 +1019,31 @@ const UI = (() => {
         window.addEventListener('blur', () => keys.clear());
     }
 
+    // Desktop edge scrolling: the mouse within EDGE_PX of the visible map area (screen sides,
+    // just below the top bar, just above the panel) moves the camera that way, faster the
+    // closer it is. Mouse only: never on touch, while dragging, over UI or outside the window.
+    function edgeDir(pos, lo, hi) {
+        if (pos < lo + EDGE_PX) return -Math.min(1, (lo + EDGE_PX - pos) / EDGE_PX);
+        if (pos > hi - EDGE_PX) return Math.min(1, (pos - (hi - EDGE_PX)) / EDGE_PX);
+        return 0;
+    }
+    function edgeScrollActive() {
+        return !!Settings.get('edgeScroll') && pointerOverCanvas && !isDragging && !lastInputTouch && !noHover.matches
+            && !anyOverlayOpen() && els.settingsScreen.classList.contains('hidden');
+    }
+    function edgeScroll(dtSec) {
+        if (!edgeScrollActive()) return;
+        const top = els.resourceBar.offsetHeight || 0;
+        const bottom = window.innerHeight - (els.commandPanel.offsetHeight || 0);
+        const ex = edgeDir(lastPointer.x, 0, window.innerWidth);
+        const ey = edgeDir(lastPointer.y, top, bottom);
+        if (!ex && !ey) return;
+        // moveCamera divides by zoom: the map slides by the same screen distance at any zoom
+        const step = EDGE_SPEED * Math.min(dtSec, 0.1);
+        Renderer.moveCamera(ex * (0.4 + 0.6 * Math.abs(ex)) * step, ey * (0.4 + 0.6 * Math.abs(ey)) * step);
+        refreshPreview();
+    }
+
     // Called every frame: keyboard panning, minimap, day bar
     function tick(dtSec) {
         let dx = 0, dy = 0;
@@ -1007,6 +1056,8 @@ const UI = (() => {
             const speed = 600 * dtSec;
             Renderer.moveCamera(dx * speed, dy * speed);
             refreshPreview();
+        } else {
+            edgeScroll(dtSec);
         }
         if (els.minimap && !els.minimap.classList.contains('hidden')) {
             minimapFrame = (minimapFrame + 1) % 3;
