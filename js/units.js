@@ -15,6 +15,9 @@ const Units = (() => {
     const SPACING_X = 12, SPACING_Y = 11;
     const SPEED = 24;        // px per game second (villagers walk ~20)
     const SPREAD = 12;       // px between soldiers of a group at the destination
+    const MIN_GAP = 10;      // px a new target / spawn spot keeps from other soldiers
+    const MIN_SEP = 10;      // px: standing soldiers closer than this push apart
+    const PUSH_SPEED = 18;   // px per game second while pushing apart
     const selected = new Set();
 
     function reset() {
@@ -23,16 +26,24 @@ const Units = (() => {
         selected.clear();
     }
 
-    // Free spot in the formation in front of (below) a barracks
+    // Free spot in the formation in front of (below) a barracks: skips slots
+    // that are taken, under water or a building, or where a soldier stands
     function slotNear(b) {
-        const taken = list.filter(u => u.barracksId === b.id).map(u => u.slot);
-        let slot = 0;
-        while (taken.includes(slot)) slot++;
+        const taken = new Set(list.filter(u => u.barracksId === b.id).map(u => u.slot));
+        const g = getGrid();
+        const reserved = reservedSpots(null);
         const cols = Math.max(COLS, Math.floor((b.width - 8) / SPACING_X));
         const x0 = b.pixelX + Math.round((b.width - (cols - 1) * SPACING_X) / 2);
-        const x = x0 + (slot % cols) * SPACING_X + (Math.floor(slot / cols) % 2) * 5;
-        const y = b.pixelY + b.height + 9 + Math.floor(slot / cols) * SPACING_Y;
-        return { slot, x: Math.max(4, Math.min(MAP_PIXEL_W - 4, x)), y: Math.max(4, Math.min(MAP_PIXEL_H - 4, y)) };
+        let first = null;
+        for (let slot = 0; slot < 80; slot++) {
+            if (taken.has(slot)) continue;
+            const x = x0 + (slot % cols) * SPACING_X + (Math.floor(slot / cols) % 2) * 5;
+            const y = b.pixelY + b.height + 9 + Math.floor(slot / cols) * SPACING_Y;
+            const spot = { slot, x: clampX(x), y: clampY(y) };
+            if (!first) first = spot;
+            if (spotFree(g, spot.x, spot.y, reserved)) return spot;
+        }
+        return first; // crowded: the separation step in update() sorts it out
     }
 
     function makeUnit(type, x, y, hp) {
@@ -247,23 +258,71 @@ const Units = (() => {
     }
 
     // ---------- orders ----------
-    // Loose block formation around the target: the closest soldier takes the centre
+    // ---------- free spots ----------
+    // Where soldiers stand or are about to stand (idle position, move target).
+    // Patrolling soldiers keep walking, so they reserve nothing.
+    function reservedSpots(exclude) {
+        const out = [];
+        for (let i = 0; i < list.length; i++) {
+            const u = list[i];
+            if (exclude && exclude.has(u)) continue;
+            if (u.state === 'idle') out.push({ x: u.x, y: u.y });
+            else if (u.state === 'move' && u.dest) out.push(u.dest);
+        }
+        return out;
+    }
+
+    // Feet on a walkable tile (same tile rule as planWalk)
+    function walkableAt(g, x, y) {
+        return !blocked(g, Math.floor(x / TILE_SIZE), Math.floor((y - 1) / TILE_SIZE));
+    }
+
+    function spotFree(g, x, y, reserved) {
+        if (!walkableAt(g, x, y)) return false;
+        for (let i = 0; i < reserved.length; i++) {
+            const dx = reserved[i].x - x, dy = reserved[i].y - y;
+            if (dx * dx + dy * dy < MIN_GAP * MIN_GAP) return false;
+        }
+        return true;
+    }
+
+    // Loose block formation around the target, on free walkable spots only:
+    // the nearest free grid spots win, then soldiers take them left to right
     function formation(units, wx, wy) {
         const n = units.length;
-        const cols = Math.ceil(Math.sqrt(n));
-        const rows = Math.ceil(n / cols);
-        const spots = [];
-        for (let i = 0; i < n; i++) {
-            const c = i % cols, r = Math.floor(i / cols);
-            spots.push({
-                x: wx + (c - (cols - 1) / 2) * SPREAD + (r % 2) * 3,
-                y: wy + (r - (rows - 1) / 2) * (SPREAD - 2),
-            });
+        if (!n) return [];
+        const g = getGrid();
+        let cx = clampX(wx), cy = clampY(wy);
+        let ct = { x: Math.floor(cx / TILE_SIZE), y: Math.floor((cy - 1) / TILE_SIZE) };
+        if (blocked(g, ct.x, ct.y)) {
+            const f = nearestFree(g, ct.x, ct.y);
+            if (f) { ct = f; cx = f.x * TILE_SIZE + 16; cy = f.y * TILE_SIZE + 20; }
         }
+        const reserved = reservedSpots(new Set(units));
+        const spots = [];
+        for (let R = 3; R <= 12 && spots.length < n; R += 3) {
+            spots.length = 0;
+            const cands = [];
+            for (let r = -R; r <= R; r++) for (let c = -R; c <= R; c++) {
+                cands.push({ x: clampX(cx + c * SPREAD + (r & 1) * 3), y: clampY(cy + r * (SPREAD - 2)), d: c * c + r * r * 1.3 });
+            }
+            cands.sort((a, b) => a.d - b.d);
+            const used = reserved.slice();
+            for (let i = 0; i < cands.length && spots.length < n; i++) {
+                const p = cands[i];
+                if (!spotFree(g, p.x, p.y, used)) continue;
+                const pt = { x: Math.floor(p.x / TILE_SIZE), y: Math.floor((p.y - 1) / TILE_SIZE) };
+                // same side of a river or wall as the target, not across it
+                if ((pt.x !== ct.x || pt.y !== ct.y) && !lineFree(g, ct, pt)) continue;
+                spots.push({ x: p.x, y: p.y });
+                used.push(p);
+            }
+        }
+        while (spots.length < n) spots.push({ x: cx, y: cy }); // no room at all: separation spreads them
         // assign spots by left-to-right order so paths don't cross much
         const us = units.slice().sort((a, b) => (a.x - b.x) || (a.y - b.y));
-        const ss = spots.slice().sort((a, b) => (a.x - b.x) || (a.y - b.y));
-        return us.map((u, i) => ({ u, x: clampX(ss[i].x), y: clampY(ss[i].y) }));
+        const ss = spots.sort((a, b) => (a.x - b.x) || (a.y - b.y));
+        return us.map((u, i) => ({ u, x: ss[i].x, y: ss[i].y }));
     }
     function clampX(x) { return Math.max(4, Math.min(MAP_PIXEL_W - 4, x)); }
     function clampY(y) { return Math.max(6, Math.min(MAP_PIXEL_H - 2, y)); }
@@ -338,6 +397,55 @@ const Units = (() => {
             }
             walk(u, dtSec);
         }
+        separate(dtSec);
+    }
+
+    // Soldiers that stand (or are about to stop) as obstacles; walkers pass through
+    function settled(u) {
+        if (u.state === 'idle') return true;
+        if (u.state !== 'move' || !u.path || u.pathI !== u.path.length - 1) return false;
+        const p = u.path[u.pathI];
+        return Math.abs(p.x - u.x) + Math.abs(p.y - u.y) < 16;
+    }
+
+    // Idle soldiers that stand too close step apart gently. Patrols and walkers
+    // are never pushed (no jitter on routes); never onto water or buildings.
+    // O(n²) over a few dozen soldiers with an early out: cheap, no allocations.
+    function separate(dtSec) {
+        const n = list.length;
+        if (n < 2) return;
+        const g = getGrid();
+        const maxStep = PUSH_SPEED * dtSec;
+        for (let i = 0; i < n; i++) {
+            const u = list[i];
+            if (u.state !== 'idle') continue;
+            let px = 0, py = 0;
+            for (let j = 0; j < n; j++) {
+                if (j === i) continue;
+                const v = list[j];
+                const dx = u.x - v.x;
+                if (dx > MIN_SEP || dx < -MIN_SEP) continue;
+                const dy = u.y - v.y;
+                if (dy > MIN_SEP || dy < -MIN_SEP || !settled(v)) continue;
+                const d = Math.hypot(dx, dy);
+                if (d >= MIN_SEP) continue;
+                // the idle one gives way to an arriving walker; two idle ones share it
+                const share = v.state === 'idle' ? 0.5 : 1;
+                if (d < 0.01) {
+                    const a = (u.id - v.id) * 2.39996; // golden angle: same spot, different ways
+                    px += Math.cos(a) * MIN_SEP * share; py += Math.sin(a) * MIN_SEP * share;
+                } else {
+                    px += dx / d * (MIN_SEP - d) * share; py += dy / d * (MIN_SEP - d) * share;
+                }
+            }
+            if (px === 0 && py === 0) continue;
+            const len = Math.hypot(px, py);
+            if (len > maxStep) { px = px / len * maxStep; py = py / len * maxStep; }
+            const nx = clampX(u.x + px), ny = clampY(u.y + py);
+            if (walkableAt(g, nx, ny)) { u.x = nx; u.y = ny; }
+            else if (walkableAt(g, nx, u.y)) u.x = nx;
+            else if (walkableAt(g, u.x, ny)) u.y = ny;
+        }
     }
 
     // Standing: breathing, now and then a look to the other side
@@ -392,6 +500,8 @@ const Units = (() => {
     function getAll() { return list; }
     function getById(id) { return list.find(u => u.id === id) || null; }
     function countByType(type) { return list.filter(u => u.type === type).length; }
+    // Could a soldier stand at this world point? (not water, not a building)
+    function canStand(wx, wy) { return walkableAt(getGrid(), wx, wy); }
 
     // ---- Save / load ----
     const pt = p => p ? { x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10 } : null;
@@ -424,7 +534,7 @@ const Units = (() => {
 
     return {
         reset, add, remove, update, pick, getAll, getById, countByType, serialize, deserialize,
-        moveTo, patrolTo, stop, findPath,
+        moveTo, patrolTo, stop, findPath, canStand,
         select, toggle, clearSelection, isSelected, getSelected, inRect,
     };
 })();
