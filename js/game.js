@@ -4,7 +4,8 @@
 // cycle completes, workers eat continuously. Rates are "per minute" at 1x.
 // ============================================
 
-const SAVE_VERSION = 4;  // 4: weapon smith, barracks and units (v3 saves are migrated)
+const SAVE_VERSION = 5;  // 5: buildings at free pixel positions (v4 tile positions are migrated)
+                         // 4: weapon smith, barracks and units (v3 saves are migrated)
 
 const Game = (() => {
     function freshWeapons() {
@@ -209,42 +210,31 @@ const Game = (() => {
         return null;
     }
 
-    function countStoneTiles(tileX, tileY, w, h) {
-        let n = 0;
-        for (let dy = 0; dy < h; dy++) {
-            for (let dx = 0; dx < w; dx++) {
-                if (GameMap.getTerrain(tileX + dx, tileY + dy) === TERRAIN.STONE_DEPOSIT) n++;
-            }
-        }
-        return n;
-    }
+    // Placement is free: (x, y) is the top-left of the footprint in world pixels,
+    // snapped to whole pixels so the art stays crisp. Terrain stays a tile grid.
+    function snapPos(x, y) { return { x: Math.round(x), y: Math.round(y) }; }
 
-    function canPlace(type, tileX, tileY) {
+    function canPlace(type, x, y) {
         const def = BUILDINGS[type];
         if (!def) return { ok: false, reason: t('g.unknown') };
 
         const reason = getUnavailableReason(type);
         if (reason) return { ok: false, reason };
 
-        if (!GameMap.isBuildable(tileX, tileY, def.width, def.height, BuildingManager.getAll())) {
-            let water = false;
-            for (let dy = 0; dy < def.height && !water; dy++) {
-                for (let dx = 0; dx < def.width; dx++) {
-                    const tt = GameMap.getTerrain(tileX + dx, tileY + dy);
-                    if (tt === TERRAIN.WATER || tt === TERRAIN.SAND) { water = true; break; }
-                }
-            }
+        ({ x, y } = snapPos(x, y));
+        const w = def.width * TILE_SIZE, h = def.height * TILE_SIZE;
+        if (!GameMap.isBuildable(x, y, w, h, BuildingManager.getAll())) {
+            const water = GameMap.rectHasTerrain(x, y, w, h, [TERRAIN.WATER, TERRAIN.SAND]);
             return { ok: false, reason: water ? t('g.water') : t('g.occupied') };
         }
 
-        // Quarries must stand (at least partly) on a stone field
+        // Quarries must stand (at least partly) on a stone field, measured by covered area
         if (def.onStone) {
-            const need = Math.ceil(def.width * def.height * def.onStone);
-            if (countStoneTiles(tileX, tileY, def.width, def.height) < need) return { ok: false, reason: t('g.onstone') };
+            if (GameMap.terrainArea(x, y, w, h, TERRAIN.STONE_DEPOSIT) < w * h * def.onStone) return { ok: false, reason: t('g.onstone') };
         }
 
         if (def.production?.requires) {
-            if (!GameMap.hasNearbyResource(tileX, tileY, def.width, def.height, def.production.requires)) {
+            if (!GameMap.hasNearbyResource(x, y, w, h, def.production.requires)) {
                 return { ok: false, reason: def.production.requires === 'FOREST' ? t('g.nearforest') : t('g.nearstone') };
             }
         }
@@ -252,11 +242,12 @@ const Game = (() => {
     }
 
     function clearUnder(b) {
-        return GameMap.clearArea(b.tileX, b.tileY, b.def.width, b.def.height, { keepStone: !!b.def.onStone });
+        return GameMap.clearArea(b.pixelX, b.pixelY, b.width, b.height, { keepStone: !!b.def.onStone });
     }
 
-    function placeBuilding(type, tileX, tileY) {
-        const check = canPlace(type, tileX, tileY);
+    function placeBuilding(type, x, y) {
+        ({ x, y } = snapPos(x, y));
+        const check = canPlace(type, x, y);
         if (!check.ok) {
             notify(check.reason, 'warning');
             return null;
@@ -267,7 +258,7 @@ const Game = (() => {
         state.resources.stone -= cost.stone;
         state.resources.iron -= cost.iron;
 
-        const building = BuildingManager.place(type, tileX, tileY);
+        const building = BuildingManager.place(type, x, y);
         building.dayPlaced = state.day;
         building.paid = { ...cost };
         building.progress = 0;
@@ -611,8 +602,9 @@ const Game = (() => {
             const raw = localStorage.getItem(SAVE_KEY);
             if (!raw) return false;
             const data = JSON.parse(raw);
-            if (!data || !(data.version === 3 || data.version === SAVE_VERSION)) return false;
+            if (!data || !(data.version >= 3 && data.version <= SAVE_VERSION)) return false;
             if (data.version === 3) migrateV3(data);
+            // v3/v4 buildings carry tileX/tileY: BuildingManager.deserialize turns them into pixels
             GameMap.generate(data.seed);
             state = Object.assign(freshState(), data.state);
             state.weapons = Object.assign(freshWeapons(), data.state.weapons);

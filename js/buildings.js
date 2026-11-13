@@ -11,7 +11,9 @@ const BuildingManager = (() => {
         nextId = 1;
     }
 
-    function place(type, tileX, tileY) {
+    // (x, y): top-left of the footprint in world pixels. pixelX/pixelY are the one
+    // source of truth for the position; tiles are derived from them when needed.
+    function place(type, x, y) {
         const def = BUILDINGS[type];
         if (!def) return null;
 
@@ -19,10 +21,8 @@ const BuildingManager = (() => {
             id: nextId++,
             type: type,
             def: def,
-            tileX: tileX,
-            tileY: tileY,
-            pixelX: tileX * TILE_SIZE,
-            pixelY: tileY * TILE_SIZE,
+            pixelX: Math.round(x),
+            pixelY: Math.round(y),
             width: def.width * TILE_SIZE,
             height: def.height * TILE_SIZE,
             workers: 0,
@@ -54,10 +54,11 @@ const BuildingManager = (() => {
         return placedBuildings.find(b => b.id === id);
     }
 
-    function getBuildingAt(tileX, tileY) {
+    // Building whose footprint contains a world point
+    function getBuildingAt(wx, wy) {
         return placedBuildings.find(b =>
-            tileX >= b.tileX && tileX < b.tileX + b.def.width &&
-            tileY >= b.tileY && tileY < b.tileY + b.def.height
+            wx >= b.pixelX && wx < b.pixelX + b.width &&
+            wy >= b.pixelY && wy < b.pixelY + b.height
         );
     }
 
@@ -74,8 +75,8 @@ const BuildingManager = (() => {
         return placedBuildings.map(b => ({
             id: b.id,
             type: b.type,
-            tileX: b.tileX,
-            tileY: b.tileY,
+            x: b.pixelX,
+            y: b.pixelY,
             workers: b.workers,
             active: b.active,
             dayPlaced: b.dayPlaced,
@@ -92,7 +93,10 @@ const BuildingManager = (() => {
         reset();
         (list || []).forEach(s => {
             if (!BUILDINGS[s.type]) return;
-            const b = place(s.type, s.tileX, s.tileY);
+            // saves before v5 stored tile positions
+            const x = Number.isFinite(s.x) ? s.x : (s.tileX || 0) * TILE_SIZE;
+            const y = Number.isFinite(s.y) ? s.y : (s.tileY || 0) * TILE_SIZE;
+            const b = place(s.type, x, y);
             if (!b) return;
             b.id = s.id ?? b.id;
             b.workers = s.workers ?? 0;
