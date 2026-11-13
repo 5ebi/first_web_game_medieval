@@ -64,7 +64,7 @@ accessibility tree. Add a check to `tests/smoke.js` when you change behaviour.
 | `js/constants.js` | balance | map size, `TERRAIN`, `BUILDINGS` (cost, workers, production), `WEAPONS` (smith products → soldier types), `SEASONS`, `MILESTONES`, `SAVE_KEY` |
 | `js/settings.js` | settings | persisted options (`lotk_settings_v1`) |
 | `js/i18n.js` | text | `t(key, vars)`, `bName`, `resName`; every UI string in `en` **and** `de` |
-| `js/audio.js` | audio | `AudioSys`: synthesized SFX, ambience (wind, rain, birds), procedural music |
+| `js/audio.js` | audio | `AudioSys`: music playlist from `assets/music/*.mp3` (procedural music as offline fallback, `getMusicState()`), synthesized SFX, ambience (wind, rain, birds) |
 | `js/sprites.js` | art | `Sprites`: procedural pixel art (tiles, trees, buildings, villagers, icons), caches, custom PNG loading from `assets/` |
 | `js/map.js` | world gen | `GameMap`: seeded terrain, trees, stones, elevation |
 | `js/buildings.js` | state | `BuildingManager`: placed buildings, save/load of buildings |

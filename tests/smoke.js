@@ -471,6 +471,106 @@ function unitSeparation() {
     return { w, groups, third, recruits, dropped, total: Units.getAll().length };
 }
 
+// Music (issue #28): serve each track cut to its first ~2.5 s, so "track ends -> pause ->
+// next track" happens within the test. Cut at an MP3 frame header.
+function shortTrack(route) {
+    const file = path.join(__dirname, '..', 'assets', 'music', decodeURIComponent(route.request().url().split('/').pop()));
+    const d = require('fs').readFileSync(file);
+    let i = 40000;
+    while (i < d.length - 1 && !(d[i] === 0xff && (d[i + 1] & 0xe0) === 0xe0)) i++;
+    return route.fulfill({ contentType: 'audio/mpeg', body: d.subarray(0, i) });
+}
+
+// A real track plays after the first gesture, only one file is fetched, the settings
+// toggle fades it out and back in, and the credits are shown.
+async function musicChecks(page, name, touch, musicReqs) {
+    await page.waitForFunction(() => AudioSys.getMusicState().playing, null, { timeout: 8000 }).catch(() => {});
+    const m = await page.evaluate(() => AudioSys.getMusicState());
+    check(m.mode === 'tracks' && m.playing && !!m.track && !m.synthRunning,
+        `${name}: a recorded track plays after the first tap (${m.track}, mode ${m.mode}, synth ${m.synthRunning})`);
+    check(musicReqs.length === 1, `${name}: only the current track is downloaded (${musicReqs.join(', ')})`);
+
+    await press(page, touch, '#settings-btn');
+    const credits = await page.evaluate(() => {
+        const el = document.querySelector('.settings-credits');
+        const box = el && el.getBoundingClientRect();
+        return { shown: !!el && box.width > 0 && box.height > 0 && box.bottom <= innerHeight + 1, text: el ? el.textContent : '' };
+    });
+    check(credits.shown && credits.text.includes('Epidemic Sound'), `${name}: music credits visible in the settings (${credits.text})`);
+    await page.screenshot({ path: path.join(OUT, `${name}-settings.png`) });
+    await press(page, touch, '#toggle-music');
+    await page.waitForTimeout(900);
+    const off = await page.evaluate(() => AudioSys.getMusicState());
+    await press(page, touch, '#toggle-music');
+    await page.waitForTimeout(900);
+    const on = await page.evaluate(() => AudioSys.getMusicState());
+    await press(page, touch, '#settings-close');
+    check(!off.playing && off.gain < 0.02 && on.playing && on.gain > 0.25 && on.track === m.track,
+        `${name}: music toggle fades the track out and back in (off ${off.playing}/${off.gain.toFixed(3)}, on ${on.playing}/${on.gain.toFixed(3)})`);
+
+    if (name === 'desktop') {
+        // hidden tab pauses the track, coming back resumes it
+        const setVis = v => page.evaluate(v => {
+            Object.defineProperty(document, 'visibilityState', { value: v, configurable: true });
+            document.dispatchEvent(new Event('visibilitychange'));
+        }, v);
+        await setVis('hidden');
+        await page.waitForTimeout(200);
+        const hidden = await page.evaluate(() => AudioSys.getMusicState().playing);
+        await setVis('visible');
+        await page.waitForTimeout(500);
+        const back = await page.evaluate(() => AudioSys.getMusicState().playing);
+        check(!hidden && back, `desktop: hidden tab pauses the music, visible resumes it (${hidden} -> ${back})`);
+
+    }
+}
+
+// Playlist: with every track cut short, a track ends, a pause follows, then another one.
+async function musicPlaylist(browser) {
+    console.log('\n== music-playlist');
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    await page.route('**/assets/music/*.mp3', shortTrack);
+    await page.goto(URL);
+    await page.waitForTimeout(400);
+    // the first tap anywhere (here: the title screen, not the Start button) starts the music
+    await page.mouse.click(10, 10);
+    const early = await page.waitForFunction(() => AudioSys.getMusicState().playing, null, { timeout: 5000 }).then(() => true).catch(() => false);
+    check(early && await page.isVisible('#welcome-screen'), `music-playlist: music starts with the first tap on the title screen (${early})`);
+    await page.click('#start-btn');
+    const next = await page.waitForFunction(() => {
+        const s = AudioSys.getMusicState();
+        return s.played.length >= 2 && s.playing && s;
+    }, null, { timeout: 25000 }).then(h => h.jsonValue()).catch(() => null);
+    check(!!next && next.played[1] !== next.played[0] && next.mode === 'tracks',
+        `music-playlist: the next track follows after a pause (${next ? next.played.join(' -> ') : 'none'})`);
+    check(errors.length === 0, `music-playlist: no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
+    await ctx.close();
+}
+
+// Music folder unreachable: the synthesized music plays instead, no errors apart from
+// the browser's own failed-request line.
+async function musicFallback(browser) {
+    console.log('\n== music-offline');
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
+    await page.route('**/assets/music/**', r => r.abort());
+    await page.goto(URL);
+    await page.waitForTimeout(400);
+    await page.click('#start-btn');
+    await page.waitForTimeout(1500);
+    const m = await page.evaluate(() => AudioSys.getMusicState());
+    check(m.mode === 'synth' && m.synthRunning && !m.playing, `music-offline: synthesized music takes over (${JSON.stringify({ mode: m.mode, synth: m.synthRunning })})`);
+    check(errors.length === 0, `music-offline: no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
+    await ctx.close();
+}
+
 async function run(browser, name, ctxOpts, touch) {
     console.log(`\n== ${name}`);
     const ctx = await browser.newContext(ctxOpts);
@@ -479,6 +579,8 @@ async function run(browser, name, ctxOpts, touch) {
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 
+    const musicReqs = [];
+    page.on('request', r => { if (r.url().includes('/assets/music/')) musicReqs.push(r.url().split('/').pop()); });
     if (name === 'desktop') {
         // custom art: a plain red assets/icons/wood.png must replace the built-in wood icon
         await page.route('**/assets/manifest.json', r => r.fulfill({ contentType: 'application/json', body: '["icons/wood.png"]' }));
@@ -486,8 +588,10 @@ async function run(browser, name, ctxOpts, touch) {
     }
     await page.goto(URL);
     await page.waitForTimeout(400);
+    check(musicReqs.length === 0, `${name}: no music downloaded before the first tap (${musicReqs.length})`);
     if (touch) await page.tap('#start-btn'); else await page.click('#start-btn');
     await page.waitForTimeout(400);
+    await musicChecks(page, name, touch, musicReqs);
 
     const sharp = await page.evaluate(iconSharpness);
     check(sharp.count >= 5 && sharp.blurry.length === 0, `${name}: ${sharp.count} menu icons rendered at screen resolution${sharp.blurry.length ? ': ' + sharp.blurry.join(', ') : ''}`);
@@ -739,6 +843,8 @@ async function run(browser, name, ctxOpts, touch) {
         await run(browser, 'desktop', { viewport: { width: 1440, height: 900 } }, false);
         await run(browser, 'phone-portrait', { ...devices['iPhone 15'] }, true);
         await run(browser, 'phone-landscape', { ...devices['iPhone 15 landscape'] }, true);
+        await musicPlaylist(browser);
+        await musicFallback(browser);
     } catch (e) {
         console.log('FAIL crashed: ' + e.message);
         failures++;
