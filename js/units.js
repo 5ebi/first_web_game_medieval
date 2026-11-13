@@ -82,7 +82,7 @@ const Units = (() => {
     function buildingsKey() {
         const all = BuildingManager.getAll();
         let k = all.length, s = 0;
-        for (let i = 0; i < all.length; i++) s = (s * 31 + all[i].id * 7 + all[i].tileX * 3 + all[i].tileY) % 1000000007;
+        for (let i = 0; i < all.length; i++) s = (s * 31 + all[i].id * 7 + all[i].pixelX * 3 + all[i].pixelY) % 1000000007;
         return k + ':' + s + ':' + GameMap.getSeed();
     }
 
@@ -96,8 +96,9 @@ const Units = (() => {
             if (GameMap.getTerrain(x, y) === TERRAIN.WATER) grid[y * MAP_WIDTH + x] = 1;
         }
         BuildingManager.getAll().forEach(b => {
-            for (let dy = 0; dy < b.def.height; dy++) for (let dx = 0; dx < b.def.width; dx++) {
-                const x = b.tileX + dx, y = b.tileY + dy;
+            // a tile is blocked when a footprint covers any part of it
+            const r = GameMap.rectTiles(b.pixelX, b.pixelY, b.width, b.height);
+            for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) {
                 if (x >= 0 && y >= 0 && x < MAP_WIDTH && y < MAP_HEIGHT) grid[y * MAP_WIDTH + x] = 1;
             }
         });
