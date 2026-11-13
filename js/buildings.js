@@ -5,12 +5,10 @@
 const BuildingManager = (() => {
     let placedBuildings = [];
     let nextId = 1;
-    let version = 0; // bumps on every change so the renderer knows when to rebuild caches
 
     function reset() {
         placedBuildings = [];
         nextId = 1;
-        version++;
     }
 
     function place(type, tileX, tileY) {
@@ -33,20 +31,19 @@ const BuildingManager = (() => {
             dayPlaced: 0,
             grown: def.production?.growthDays ? false : true,
             growthProgress: 0,
+            buildStart: performance.now(), // construction animation (cosmetic)
         };
+        if (def.crafts) {
+            building.product = Object.keys(WEAPONS)[0]; // weapon smith: what it forges
+            building.inputPaid = false;                // material for the current weapon taken
+        }
 
         placedBuildings.push(building);
-        version++;
         return building;
     }
 
     function remove(id) {
         placedBuildings = placedBuildings.filter(b => b.id !== id);
-        version++;
-    }
-
-    function getVersion() {
-        return version;
     }
 
     function getAll() {
@@ -72,6 +69,50 @@ const BuildingManager = (() => {
         return placedBuildings.filter(b => b.def.production && b.active && b.grown);
     }
 
+    // ---- Save / load ----
+    function serialize() {
+        return placedBuildings.map(b => ({
+            id: b.id,
+            type: b.type,
+            tileX: b.tileX,
+            tileY: b.tileY,
+            workers: b.workers,
+            active: b.active,
+            dayPlaced: b.dayPlaced,
+            grown: b.grown,
+            growthProgress: b.growthProgress,
+            paid: b.paid,
+            progress: b.progress || 0,
+            product: b.product,
+            inputPaid: b.inputPaid,
+        }));
+    }
+
+    function deserialize(list) {
+        reset();
+        (list || []).forEach(s => {
+            if (!BUILDINGS[s.type]) return;
+            const b = place(s.type, s.tileX, s.tileY);
+            if (!b) return;
+            b.id = s.id ?? b.id;
+            b.workers = s.workers ?? 0;
+            b.active = s.active ?? (b.maxWorkers === 0);
+            b.dayPlaced = s.dayPlaced ?? 1;
+            b.grown = s.grown ?? b.grown;
+            b.growthProgress = s.growthProgress ?? 0;
+            b.buildStart = 0; // loaded buildings are already finished
+            if (s.paid) b.paid = s.paid;
+            // saves from before lumberjacks had a price: they cost nothing, so refund nothing
+            else if (s.type === 'lumberjack') b.paid = { wood: 0, stone: 0, iron: 0 };
+            b.progress = s.progress || 0;
+            if (b.def.crafts) {
+                if (WEAPONS[s.product]) b.product = s.product;
+                b.inputPaid = !!s.inputPaid;
+            }
+            nextId = Math.max(nextId, b.id + 1);
+        });
+    }
+
     return {
         reset,
         place,
@@ -81,6 +122,7 @@ const BuildingManager = (() => {
         getBuildingAt,
         countByType,
         getProductionBuildings,
-        getVersion,
+        serialize,
+        deserialize,
     };
 })();

@@ -1,115 +1,108 @@
 // ============================================
 // Renderer - Canvas Drawing
+// World is drawn through a camera transform (pan + zoom), crisp on HiDPI.
 // ============================================
-//
-// Two layers:
-//  - a static layer (terrain, flowers, stone piles and ALL trees) baked once
-//    into an offscreen canvas per map,
-//  - a dynamic pass per frame: buildings plus the few trees that overlap a
-//    building, depth-sorted by their base.
-// Frames are only redrawn when something visible changed (camera, buildings,
-// placement preview, day/night tint, a new day), so an idle game costs ~0 CPU.
 
 const Renderer = (() => {
     let canvas, ctx;
-    let camera = { x: 0, y: 0 };
-    let canvasWidth, canvasHeight; // CSS pixels
-    let dpr = 1;                   // device pixels per CSS pixel
+    let camera = { x: 0, y: 0 }; // world coords at the top-left screen pixel
+    let zoom = 1;
+    let canvasWidth, canvasHeight, dpr = 1;
 
-    // Screen area covered by HUD / menus (CSS px), set by the UI
-    let insets = { top: 0, right: 0, bottom: 0, left: 0 };
+    // Areas of the screen covered by UI panels (CSS px); the map is kept visible inside them
+    let insets = { top: 48, right: 240, bottom: 0, left: 0 };
 
-    // Static map layer
+    // Terrain tile cache
     let terrainCanvas = null;
+    let terrainSeason = null;   // season the terrain cache was rendered for
+    let season = 'spring';      // current season id (updated every frame)
+    let minimapTerrain = null;
 
-    // Redraw bookkeeping
-    let dirty = true;
-    let lastBuildingsVersion = -1;
-    let lastPreviewKey = '';
-    let lastTintKey = -1;
-    let lastDay = -1;
-
-    // Trees whose sprite overlaps a building; they must be depth-sorted with it
-    let frontTrees = [];
-
-    // Floating yield numbers ("+6" over a lumberjack at the end of a day)
-    let floaters = [];
-    const FLOATER_MS = 1600;
-    const FLOAT_FONT = '17px "Jersey 10", monospace';
+    let lastFrame = performance.now();
+    let timeSec = 0;
 
     function init(canvasEl) {
         canvas = canvasEl;
         ctx = canvas.getContext('2d');
         resize();
-        window.addEventListener('resize', resize);
+        window.addEventListener('resize', () => {
+            resize();
+            setCamera(camera.x, camera.y);
+        });
         centerCamera();
     }
 
-    // Backing store in device pixels so pixel art and text stay sharp on
-    // high-DPI phones; all drawing code keeps working in CSS pixels.
     function resize() {
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
         canvasWidth = window.innerWidth;
         canvasHeight = window.innerHeight;
-        dpr = Math.min(window.devicePixelRatio || 1, 3);
         canvas.width = Math.round(canvasWidth * dpr);
         canvas.height = Math.round(canvasHeight * dpr);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.imageSmoothingEnabled = false;
-        setCamera(camera.x, camera.y); // re-clamp for the new size
-        dirty = true;
+        canvas.style.width = canvasWidth + 'px';
+        canvas.style.height = canvasHeight + 'px';
     }
 
-    function setInsets(next) {
-        insets = Object.assign({ top: 0, right: 0, bottom: 0, left: 0 }, next);
+    function setInsets(i) {
+        insets = Object.assign(insets, i);
         setCamera(camera.x, camera.y);
-        dirty = true;
-    }
-
-    // Visible (uncovered) part of the screen in CSS px
-    function getViewport() {
-        return {
-            x: insets.left,
-            y: insets.top,
-            w: Math.max(1, canvasWidth - insets.left - insets.right),
-            h: Math.max(1, canvasHeight - insets.top - insets.bottom),
-        };
-    }
-
-    function getCamera() { return { x: camera.x, y: camera.y }; }
-
-    function setCamera(x, y) {
-        // Clamp so every map edge can be scrolled into the uncovered area, but no further
-        const minX = -insets.left;
-        const maxX = Math.max(minX, MAP_PIXEL_W - canvasWidth + insets.right);
-        const minY = -insets.top;
-        const maxY = Math.max(minY, MAP_PIXEL_H - canvasHeight + insets.bottom);
-        const nx = Math.round(Math.max(minX, Math.min(maxX, x)));
-        const ny = Math.round(Math.max(minY, Math.min(maxY, y)));
-        if (nx !== camera.x || ny !== camera.y) {
-            camera.x = nx;
-            camera.y = ny;
-            dirty = true;
-        }
-    }
-
-    // Put a world point in the middle of the uncovered area
-    function centerOn(worldX, worldY) {
-        const vp = getViewport();
-        setCamera(worldX - (vp.x + vp.w / 2), worldY - (vp.y + vp.h / 2));
     }
 
     function centerCamera() {
-        centerOn(MAP_PIXEL_W / 2, MAP_PIXEL_H / 2);
+        const vw = (canvasWidth - insets.left - insets.right) / zoom;
+        const vh = (canvasHeight - insets.top - insets.bottom) / zoom;
+        setCamera(MAP_PIXEL_W / 2 - vw / 2 - insets.left / zoom, MAP_PIXEL_H / 2 - vh / 2 - insets.top / zoom);
+    }
+
+    function getCamera() { return camera; }
+    function getZoom() { return zoom; }
+
+    function clampAxis(cam, start, end, mapSize) {
+        const minCam = -start / zoom;            // map edge touches the panel edge
+        const maxCam = mapSize - end / zoom;
+        if (maxCam < minCam) return (minCam + maxCam) / 2; // map smaller than view: center it
+        return Math.max(minCam, Math.min(maxCam, cam));
+    }
+
+    function setCamera(x, y) {
+        camera.x = clampAxis(x, insets.left, canvasWidth - insets.right, MAP_PIXEL_W);
+        camera.y = clampAxis(y, insets.top, canvasHeight - insets.bottom, MAP_PIXEL_H);
     }
 
     function moveCamera(dx, dy) {
-        setCamera(camera.x + dx, camera.y + dy);
+        setCamera(camera.x + dx / zoom, camera.y + dy / zoom);
+    }
+
+    // Zoom keeping the world point under (sx, sy) fixed
+    function setZoom(newZoom, sx, sy) {
+        newZoom = Math.max(ZOOM_LEVELS[0], Math.min(ZOOM_LEVELS[ZOOM_LEVELS.length - 1], newZoom));
+        if (sx === undefined) { sx = (insets.left + canvasWidth - insets.right) / 2; sy = (insets.top + canvasHeight - insets.bottom) / 2; }
+        const wx = camera.x + sx / zoom;
+        const wy = camera.y + sy / zoom;
+        zoom = newZoom;
+        setCamera(wx - sx / zoom, wy - sy / zoom);
+    }
+
+    function zoomStep(dir, sx, sy) {
+        let idx = ZOOM_LEVELS.indexOf(zoom);
+        if (idx === -1) {
+            // find nearest
+            idx = ZOOM_LEVELS.reduce((best, z, i) => Math.abs(z - zoom) < Math.abs(ZOOM_LEVELS[best] - zoom) ? i : best, 0);
+        }
+        idx = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, idx + dir));
+        setZoom(ZOOM_LEVELS[idx], sx, sy);
     }
 
     function screenToWorld(sx, sy) {
         return {
-            x: sx + camera.x,
-            y: sy + camera.y,
+            x: sx / zoom + camera.x,
+            y: sy / zoom + camera.y,
+        };
+    }
+
+    function worldToScreen(wx, wy) {
+        return {
+            x: (wx - camera.x) * zoom,
+            y: (wy - camera.y) * zoom,
         };
     }
 
@@ -121,346 +114,822 @@ const Renderer = (() => {
         };
     }
 
-    function markDirty() { dirty = true; }
-
-    // ---- Trees ----
-    function treeSprite(t) {
-        return t.type === 'pine' ? Sprites.drawPineTree() : Sprites.drawTree();
-    }
-
-    function drawTree(c, t, offX, offY) {
-        const sprite = treeSprite(t);
-        c.drawImage(sprite,
-            Math.round(t.x - offX - sprite.width / 2),
-            Math.round(t.y - offY - sprite.height + 16));
-    }
-
-    function treeRect(t) {
-        const sprite = treeSprite(t);
-        return {
-            x: t.x - sprite.width / 2,
-            y: t.y - sprite.height + 16,
-            w: sprite.width,
-            h: sprite.height,
-        };
-    }
-
-    // ---- Static layer: everything that never moves ----
+    // ---------- Terrain cache ----------
     function renderTerrainCache() {
         if (terrainCanvas) return;
         terrainCanvas = document.createElement('canvas');
         terrainCanvas.width = MAP_PIXEL_W;
         terrainCanvas.height = MAP_PIXEL_H;
         const tctx = terrainCanvas.getContext('2d');
+        tctx.imageSmoothingEnabled = false;
 
-        const terrainGrid = GameMap.getTerrainGrid();
+        terrainSeason = season;
+        const winter = season === 'winter';
+        const grid = GameMap.getTerrainGrid();
         for (let y = 0; y < MAP_HEIGHT; y++) {
             for (let x = 0; x < MAP_WIDTH; x++) {
-                const t = terrainGrid[y][x];
-                let color;
-                switch (t) {
-                    case TERRAIN.GRASS: color = COLORS.grassLight; break;
-                    case TERRAIN.GRASS_DARK: color = COLORS.grassDark; break;
-                    case TERRAIN.WATER: color = COLORS.water; break;
-                    case TERRAIN.SAND: color = COLORS.sand; break;
-                    case TERRAIN.DIRT: color = COLORS.dirt; break;
-                    case TERRAIN.FOREST: color = COLORS.grassDark; break;
-                    case TERRAIN.STONE_DEPOSIT: color = '#6a6a5a'; break;
-                    case TERRAIN.FLOWERS: color = COLORS.grassLight; break;
-                    default: color = COLORS.grassLight;
-                }
-                tctx.fillStyle = color;
-                tctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-
-                // Add subtle grid line
-                tctx.fillStyle = 'rgba(0,0,0,0.04)';
-                tctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, 1);
-                tctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, 1, TILE_SIZE);
-
-                // Water shimmer
-                if (t === TERRAIN.WATER) {
-                    if ((x + y) % 3 === 0) {
-                        tctx.fillStyle = 'rgba(255,255,255,0.1)';
-                        tctx.fillRect(x * TILE_SIZE + 4, y * TILE_SIZE + 4, 8, 2);
-                    }
-                }
-
-                // Stone deposit texture
-                if (t === TERRAIN.STONE_DEPOSIT) {
-                    tctx.fillStyle = '#7a7a6a';
-                    tctx.fillRect(x * TILE_SIZE + 4, y * TILE_SIZE + 4, 12, 8);
-                    tctx.fillStyle = '#5a5a4a';
-                    tctx.fillRect(x * TILE_SIZE + 8, y * TILE_SIZE + 12, 16, 10);
-                }
+                const t = grid[y][x];
+                tctx.drawImage(Sprites.getSeasonalTile(t, GameMap.getVariant(x, y), season), x * TILE_SIZE, y * TILE_SIZE);
             }
         }
 
-        // Flower decorations
-        GameMap.getDecorations().forEach(d => {
-            const flowerSprite = Sprites.drawFlowers(2, d.seed);
-            tctx.drawImage(flowerSprite, d.x * TILE_SIZE, d.y * TILE_SIZE);
-        });
-
-        // Stone piles
-        const stonePileSprite = Sprites.drawStonePile();
-        GameMap.getStones().forEach(s => {
-            tctx.drawImage(stonePileSprite, Math.round(s.x), Math.round(s.y));
-        });
-
-        // Trees (already sorted by y in GameMap, so overlaps are correct)
-        GameMap.getTrees().forEach(t => drawTree(tctx, t, 0, 0));
-
-        lastBuildingsVersion = -1; // front trees depend on the map
-        dirty = true;
-    }
-
-    function rectsOverlap(a, b) {
-        return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-    }
-
-    // Only runs when buildings change, not per frame
-    function computeFrontTrees() {
-        const rects = BuildingManager.getAll().map(b => ({ x: b.pixelX, y: b.pixelY, w: b.width, h: b.height }));
-        frontTrees = rects.length === 0 ? [] : GameMap.getTrees().filter(t => {
-            const r = treeRect(t);
-            return rects.some(br => rectsOverlap(r, br));
-        });
-    }
-
-    // Night tint alpha for the current day phase, quantized so we only
-    // redraw when the change is actually visible
-    function nightTintKey() {
-        const dayPhase = Game.getState().dayProgress;
-        let alpha = 0;
-        if (dayPhase > 0.7) alpha = (dayPhase - 0.7) / 0.3 * 0.15;
-        else if (dayPhase < 0.15) alpha = (0.15 - dayPhase) / 0.15 * 0.15;
-        return Math.round(alpha * 255);
-    }
-
-    function previewKey(pp) {
-        return pp ? `${pp.type}|${pp.tileX}|${pp.tileY}|${pp.valid}` : '';
-    }
-
-    // Returns true when a frame was actually drawn
-    function render(placementPreview) {
-        renderTerrainCache();
-
-        const version = BuildingManager.getVersion();
-        if (version !== lastBuildingsVersion) {
-            lastBuildingsVersion = version;
-            computeFrontTrees();
-            dirty = true;
+        // Soft, ragged transitions between different kinds of ground (no hard 32px tile edges):
+        // a jagged strip of the neighbouring tile is drawn over each shared edge.
+        const landPriority = { [TERRAIN.SAND]: 1, [TERRAIN.DIRT]: 2, [TERRAIN.ROCKY]: 2.5, [TERRAIN.STONE_DEPOSIT]: 3, [TERRAIN.MEADOW]: 3.5, [TERRAIN.GRASS]: 4, [TERRAIN.FLOWERS]: 4, [TERRAIN.GRASS_DARK]: 5, [TERRAIN.FOREST]: 6 };
+        const T = TILE_SIZE;
+        for (let y = 0; y < MAP_HEIGHT; y++) {
+            for (let x = 0; x < MAP_WIDTH; x++) {
+                const t = grid[y][x];
+                if (t === TERRAIN.WATER) continue;
+                [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+                    const nx = x + dx, ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= MAP_WIDTH || ny >= MAP_HEIGHT) return;
+                    const n = grid[ny][nx];
+                    if (n === TERRAIN.WATER || n === t) return;
+                    // only the "stronger" ground creeps over the weaker one (grass over sand, forest over grass)
+                    if ((landPriority[n] || 0) <= (landPriority[t] || 0)) return;
+                    if ((landPriority[n] === 4 && landPriority[t] === 4)) return;
+                    tctx.save();
+                    tctx.beginPath();
+                    // an organic, wavy edge reaching up to ~10px into the tile
+                    const ph = ((x * 92821 + y * 68917 + (dx + 2) * 31 + (dy + 2) * 17) >>> 0) % 628 / 100;
+                    for (let i = 0; i < T; i += 2) {
+                        const h0 = (x * 928371 + y * 364479 + i * 7919 + (dx + 2) * 31 + (dy + 2) * 17) >>> 0;
+                        const wave = Math.sin(i * 0.21 + ph) * 0.6 + Math.sin(i * 0.47 + ph * 2.3) * 0.4;
+                        const depth = Math.max(1, Math.round(4 + wave * 4 + (h0 % 3) - 1));
+                        if (dx === 1) tctx.rect((x + 1) * T - depth, y * T + i, depth, 2);
+                        if (dx === -1) tctx.rect(x * T, y * T + i, depth, 2);
+                        if (dy === 1) tctx.rect(x * T + i, (y + 1) * T - depth, 2, depth);
+                        if (dy === -1) tctx.rect(x * T + i, y * T, 2, depth);
+                    }
+                    tctx.clip();
+                    tctx.drawImage(Sprites.getSeasonalTile(n, GameMap.getVariant(nx, ny), season), x * T, y * T);
+                    tctx.restore();
+                });
+            }
         }
 
-        const tintKey = nightTintKey();
-        const pKey = previewKey(placementPreview);
-        const day = Game.getState().day;
-        if (tintKey !== lastTintKey || pKey !== lastPreviewKey || day !== lastDay) dirty = true;
-        if (floaters.length > 0) dirty = true; // animating
-        if (!dirty) return false;
+        // Shorelines: foam on water tiles bordering land (frozen in winter: no foam)
+        for (let y = 0; y < MAP_HEIGHT && !winter; y++) {
+            for (let x = 0; x < MAP_WIDTH; x++) {
+                if (grid[y][x] !== TERRAIN.WATER) continue;
+                const land = (tx, ty) => {
+                    const t = GameMap.getTerrain(tx, ty);
+                    return t !== TERRAIN.WATER;
+                };
+                if (land(x, y - 1)) tctx.drawImage(Sprites.drawShore('n'), x * TILE_SIZE, y * TILE_SIZE);
+                if (land(x, y + 1)) tctx.drawImage(Sprites.drawShore('s'), x * TILE_SIZE, y * TILE_SIZE);
+                if (land(x - 1, y)) tctx.drawImage(Sprites.drawShore('w'), x * TILE_SIZE, y * TILE_SIZE);
+                if (land(x + 1, y)) tctx.drawImage(Sprites.drawShore('e'), x * TILE_SIZE, y * TILE_SIZE);
+            }
+        }
 
-        lastTintKey = tintKey;
-        lastPreviewKey = pKey;
-        lastDay = day;
-        dirty = false;
+        // Soft shadow on the land side of shores / forest edges for depth
+        tctx.fillStyle = 'rgba(0,0,0,0.08)';
+        for (let y = 0; y < MAP_HEIGHT; y++) {
+            for (let x = 0; x < MAP_WIDTH; x++) {
+                const t = grid[y][x];
+                if (t === TERRAIN.WATER) continue;
+                if (GameMap.getTerrain(x, y + 1) === TERRAIN.WATER) tctx.fillRect(x * TILE_SIZE, y * TILE_SIZE + TILE_SIZE - 2, TILE_SIZE, 2);
+            }
+        }
 
+        // Flower decorations: none in winter, fewer in autumn
+        GameMap.getDecorations().forEach(d => {
+            if (winter || (season === 'autumn' && d.seed % 3 !== 0)) return;
+            tctx.drawImage(Sprites.drawFlowers(2, d.seed), d.x * TILE_SIZE, d.y * TILE_SIZE);
+        });
+
+        drawHillShade(tctx, grid, winter);
+
+        // Minimap base (1px per tile)
+        Atmosphere.onMapChanged();
+
+        minimapTerrain = document.createElement('canvas');
+        minimapTerrain.width = MAP_WIDTH;
+        minimapTerrain.height = MAP_HEIGHT;
+        const mctx = minimapTerrain.getContext('2d');
+        // Average colour of each terrain tile, so custom tile art also shows on the minimap
+        const avg = {};
+        const probe = document.createElement('canvas');
+        probe.width = TILE_SIZE; probe.height = TILE_SIZE;
+        const pctx = probe.getContext('2d', { willReadFrequently: true });
+        const tileColor = (type) => {
+            if (avg[type]) return avg[type];
+            let col = MINIMAP_COLORS[type] || '#5a8f3c';
+            try {
+                pctx.clearRect(0, 0, TILE_SIZE, TILE_SIZE);
+                pctx.drawImage(Sprites.getSeasonalTile(type, 0, season), 0, 0);
+                const d = pctx.getImageData(0, 0, TILE_SIZE, TILE_SIZE).data;
+                let r = 0, g = 0, b = 0, n = 0;
+                for (let i = 0; i < d.length; i += 4) { if (d[i + 3] > 0) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; } }
+                if (n) col = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
+            } catch (e) { /* tainted canvas under file:// - keep fallback colour */ }
+            if (type === TERRAIN.FOREST) col = { autumn: '#8a5a22', winter: '#7d9180' }[season] || MINIMAP_COLORS[TERRAIN.FOREST]; // trees dominate forests visually
+            avg[type] = col;
+            return col;
+        };
+        for (let y = 0; y < MAP_HEIGHT; y++) {
+            for (let x = 0; x < MAP_WIDTH; x++) {
+                mctx.fillStyle = tileColor(grid[y][x]);
+                mctx.fillRect(x, y, 1, 1);
+            }
+        }
+    }
+
+    // Gentle hills: the elevation field is lit from the upper left and the result is
+    // posterised into a few bands on a 2px grid, so the ground has relief but stays pixel art.
+    function drawHillShade(tctx, grid, winter) {
+        const C = 2;
+        const W = MAP_PIXEL_W / C, H = MAP_PIXEL_H / C;
+        const img = tctx.createImageData(W, H);
+        const d = img.data;
+        const k = 1 / (TILE_SIZE / C);
+        const h = (x, y) => GameMap.getElevation(x * k - 0.5, y * k - 0.5);
+        for (let y = 0; y < H; y++) {
+            const ty = Math.floor(y * C / TILE_SIZE);
+            for (let x = 0; x < W; x++) {
+                const tx = Math.floor(x * C / TILE_SIZE);
+                if (grid[ty][tx] === TERRAIN.WATER) continue;
+                // slope towards the light (upper left) brightens, away darkens
+                const gx = h(x + 3, y) - h(x - 3, y), gy = h(x, y + 3) - h(x, y - 3);
+                let l = -(gx * 0.8 + gy) * 420;
+                // ordered dither so band edges are pixel-crisp but not ruler-straight
+                l += ((x * 3 + y * 7) % 4 - 1.5) * 0.06;
+                const band = Math.max(-3, Math.min(3, Math.round(l)));
+                if (!band) continue;
+                const i = (y * W + x) * 4;
+                if (band > 0) { d[i] = 255; d[i + 1] = 245; d[i + 2] = 200; d[i + 3] = band * (winter ? 9 : 13); }
+                else { d[i] = 20; d[i + 1] = 30; d[i + 2] = 20; d[i + 3] = -band * (winter ? 12 : 18); }
+            }
+        }
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        c.getContext('2d').putImageData(img, 0, 0);
+        tctx.imageSmoothingEnabled = false;
+        tctx.drawImage(c, 0, 0, MAP_PIXEL_W, MAP_PIXEL_H);
+    }
+
+    function invalidateTerrainCache() {
+        terrainCanvas = null;
+        minimapTerrain = null;
+    }
+
+    // ---------- Helpers ----------
+    function drawShadowEllipse(cx, cy, rx, ry, alpha = 0.25) {
+        ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // 0 during the day, 1 in the middle of the night (darkest around 01:00)
+    function nightAmount(gs) {
+        if (!Game.isClockRunning()) return 0;
+        const v = Math.max(0, Math.cos((Game.getHour() - 1) / 24 * Math.PI * 2));
+        return Math.pow(v, 1.5);
+    }
+
+    // ---------- Sun & shadows ----------
+    // The sun rises in the east (right) and sets in the west (left): shadows swing from
+    // long to the left in the morning, short around noon, to long to the right at dusk.
+    function sunParams(night) {
+        const hour = Game.isClockRunning() ? Game.getHour() : 10;
+        const t = Math.max(0, Math.min(1, (hour - 6) / 14));
+        const s = (0.5 - t) * 2;                 // +1 morning .. -1 evening
+        const cover = Atmosphere.getCover();
+        const overcast = Math.max(0, Math.min(1, (cover - 0.35) / 0.55));
+        const alpha = 0.34 * Math.pow(1 - night, 1.5) * (1 - overcast * 0.7);
+        return { shear: s * 1.05, len: 0.32 + Math.abs(s) * 0.42, alpha };
+    }
+
+    let shadowCanvas = null, sctx = null;
+    function prepareShadowLayer() {
+        if (!shadowCanvas || shadowCanvas.width !== canvas.width || shadowCanvas.height !== canvas.height) {
+            shadowCanvas = document.createElement('canvas');
+            shadowCanvas.width = canvas.width; shadowCanvas.height = canvas.height;
+            sctx = shadowCanvas.getContext('2d');
+        }
+        sctx.setTransform(1, 0, 0, 1, 0, 0);
+        sctx.clearRect(0, 0, shadowCanvas.width, shadowCanvas.height);
+        sctx.imageSmoothingEnabled = false;
+    }
+
+    // Projects a sprite's silhouette onto the ground from its base line
+    function castShadow(sprite, ox, oy, baseY, sun) {
+        if (!sctx) return;
+        const sil = Sprites.getSilhouette(sprite);
+        if (!sil) return;
+        sctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -camera.x * dpr * zoom, -camera.y * dpr * zoom);
+        sctx.translate(0, baseY);
+        sctx.transform(1, 0, sun.shear, sun.len, 0, 0);
+        sctx.drawImage(sil, ox, oy - baseY);
+    }
+
+    function buildingSprite(b) {
+        return (season === 'winter' && !b.buildStart)
+            ? Sprites.getBuildingSeasonal(b.type, { grown: b.grown }, season)
+            : Sprites.getBuilding(b.type, { grown: b.grown });
+    }
+
+    // ---------- Soldier orders ----------
+    function drawUnitOrders(hoverInfo, nowT) {
+        const sel = Units.getSelected();
+        if (sel.length) {
+            // dotted patrol loops (one per route, shared by the group)
+            ctx.lineWidth = 1 / zoom;
+            ctx.setLineDash([3 / zoom, 3 / zoom]);
+            ctx.strokeStyle = 'rgba(255, 230, 150, 0.7)';
+            sel.forEach(u => {
+                if (u.state !== 'patrol' || !u.patrol) return;
+                const pts = u.patrol.pts;
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pts[0].y);
+                for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+                if (pts.length > 2) ctx.closePath();
+                ctx.stroke();
+            });
+            ctx.setLineDash([]);
+        }
+        // destination marker: a ring that shrinks for a second
+        const m = hoverInfo?.marker;
+        if (m) {
+            const age = (nowT - m.t) / 1000;
+            if (age < 1.1) {
+                const r = 9 - age * 5;
+                ctx.globalAlpha = Math.max(0, 1 - age);
+                ctx.strokeStyle = m.kind === 'patrol' ? '#9ad0ff' : '#ffe080';
+                ctx.lineWidth = 2 / zoom;
+                ctx.beginPath();
+                ctx.ellipse(m.x, m.y, r, r * 0.45, 0, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(m.x, m.y - 2); ctx.lineTo(m.x, m.y - 10 + age * 3);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+        }
+    }
+
+    // Box selection rectangle (screen space)
+    function drawSelectBox(box) {
+        if (!box) return;
+        const x = Math.min(box.x0, box.x1), y = Math.min(box.y0, box.y1);
+        const w = Math.abs(box.x1 - box.x0), h = Math.abs(box.y1 - box.y0);
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.12)';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(255, 215, 0, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w), Math.round(h));
+    }
+
+    // ---------- Main render ----------
+    function render(placementPreview, hoverInfo) {
+        const nowT = performance.now();
+        const dt = Math.min(0.1, (nowT - lastFrame) / 1000);
+        lastFrame = nowT;
+        const gs = Game.getState();
+        const simRunning = gs.started && !gs.paused && !gs.gameOver;
+        const simDt = simRunning ? dt * Math.max(1, gs.speed) : 0;
+        timeSec += dt;
+
+        // Update cosmetic systems
+        updateConstruction(nowT);
+        Villagers.sync(BuildingManager.getAll());
+        Villagers.update(simDt);
+        Units.update(simDt);
+        Effects.update(simRunning ? simDt : dt * 0.3);
+        const night = nightAmount(gs);
+        season = Game.getSeason().id;
+        if (terrainSeason && season !== terrainSeason) invalidateTerrainCache();
+        Atmosphere.update(dt, gs, night);
+
+        // Clear in screen space
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.imageSmoothingEnabled = false;
-
-        // Background (for areas outside map)
-        ctx.fillStyle = '#1a3a1a';
+        ctx.fillStyle = '#16301a';
         ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-        // Static layer (only the visible portion)
-        const sx = Math.max(0, camera.x);
-        const sy = Math.max(0, camera.y);
-        const sw = Math.min(MAP_PIXEL_W, camera.x + canvasWidth) - sx;
-        const sh = Math.min(MAP_PIXEL_H, camera.y + canvasHeight) - sy;
-        if (sw > 0 && sh > 0) {
-            ctx.drawImage(terrainCanvas, sx, sy, sw, sh, sx - camera.x, sy - camera.y, sw, sh);
+        // World transform
+        ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -camera.x * dpr * zoom, -camera.y * dpr * zoom);
+        ctx.imageSmoothingEnabled = false;
+
+        renderTerrainCache();
+
+        // Visible world rect
+        const vx0 = camera.x, vy0 = camera.y;
+        const vx1 = camera.x + canvasWidth / zoom, vy1 = camera.y + canvasHeight / zoom;
+
+        const startTileX = Math.max(0, Math.floor(vx0 / TILE_SIZE) - 1);
+        const startTileY = Math.max(0, Math.floor(vy0 / TILE_SIZE) - 1);
+        const endTileX = Math.min(MAP_WIDTH, Math.ceil(vx1 / TILE_SIZE) + 1);
+        const endTileY = Math.min(MAP_HEIGHT, Math.ceil(vy1 / TILE_SIZE) + 1);
+
+        if (endTileX > startTileX && endTileY > startTileY) {
+            const sx = startTileX * TILE_SIZE;
+            const sy = startTileY * TILE_SIZE;
+            const sw = (endTileX - startTileX) * TILE_SIZE;
+            const sh = (endTileY - startTileY) * TILE_SIZE;
+            ctx.drawImage(terrainCanvas, sx, sy, sw, sh, sx, sy, sw, sh);
         }
 
-        // Dynamic, depth-sorted pass: buildings + trees overlapping them
-        const viewL = camera.x, viewT = camera.y, viewR = camera.x + canvasWidth, viewB = camera.y + canvasHeight;
-        const drawables = [];
-        const visibleBuildings = [];
+        // Map border
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        ctx.lineWidth = 2 / zoom;
+        ctx.strokeRect(0, 0, MAP_PIXEL_W, MAP_PIXEL_H);
 
+        // Animated water highlights
+        const grid = GameMap.getTerrainGrid();
+        const waveFrame = Math.floor(timeSec * 2) % 3;
+        for (let ty = startTileY; ty < endTileY; ty++) {
+            for (let tx = startTileX; tx < endTileX; tx++) {
+                if (grid[ty][tx] !== TERRAIN.WATER || season === 'winter') continue;
+                if ((tx * 3 + ty * 5) % 4 !== 0) continue;
+                const f = (waveFrame + tx + ty) % 3;
+                const off = Math.sin(timeSec * 1.5 + tx + ty) * 2;
+                ctx.drawImage(Sprites.drawWave(f), tx * TILE_SIZE + 8 + off, ty * TILE_SIZE + 12 + ((tx + ty) % 2) * 8);
+            }
+        }
+
+        // Stone piles (ground layer)
+        GameMap.getStones().forEach(s => {
+            if (s.x + 32 > vx0 && s.x - 32 < vx1 && s.y + 24 > vy0 && s.y - 24 < vy1) {
+                ctx.drawImage(Sprites.getStonePile(season, ((s.x * 7 + s.y * 3) | 0) % 3), Math.round(s.x), Math.round(s.y));
+            }
+        });
+
+        // Collect drawables for depth sorting. Each may also cast a sun shadow.
+        const drawables = [];
+        const sun = sunParams(night);
+        const wind = Atmosphere.getWind();
+
+        // Trees (crowns sway in the wind, a few px at most)
+        const swayAmp = 0.5 + wind * 1.8;
+        GameMap.getTrees().forEach(t => {
+            if (t.x + 40 > vx0 && t.x - 40 < vx1 && t.y + 60 > vy0 && t.y - 60 < vy1) {
+                const kind = t.type === 'pine' ? 'pine' : 'oak';
+                const variant = ((t.x * 13 + t.y * 7) | 0) % 3;
+                const ph = t.x * 0.045 + t.y * 0.031;
+                const sway = Math.sin(timeSec * (0.9 + wind * 1.4) + ph) + Math.sin(timeSec * 2.3 + ph * 1.7) * 0.25;
+                const frame = Math.max(-2, Math.min(2, Math.round(sway * swayAmp)));
+                const sprite = Sprites.getTreeFrame(kind, season, variant, frame);
+                const ox = Math.round(t.x - sprite.width / 2), oy = Math.round(t.y - sprite.height + 16);
+                drawables.push({
+                    y: t.y + 16,
+                    shadow: () => castShadow(sprite, ox, oy, t.y + 16, sun),
+                    draw: () => ctx.drawImage(sprite, ox, oy),
+                });
+            }
+        });
+
+        // Buildings
         BuildingManager.getAll().forEach(b => {
-            if (b.pixelX + b.width > viewL && b.pixelX < viewR && b.pixelY + b.height > viewT && b.pixelY < viewB) {
-                drawables.push({ y: b.pixelY + b.height, building: b });
-                visibleBuildings.push(b);
+            if (b.pixelX + b.width < vx0 - 60 || b.pixelX > vx1 + 60 || b.pixelY + b.height < vy0 || b.pixelY > vy1 + 120) return;
+            drawables.push({
+                y: b.pixelY + b.height,
+                shadow: () => {
+                    if (b.buildStart) return;
+                    const spr = buildingSprite(b);
+                    if (!spr) return;
+                    castShadow(spr, b.pixelX + Math.round((b.width - spr.width) / 2), b.pixelY + b.height - spr.height, b.pixelY + b.height - 2, sun);
+                },
+                draw: () => drawBuilding(b, nowT, night, hoverInfo),
+            });
+            // Smoke
+            if (b.def.chimney && !b.buildStart && (b.active || b.maxWorkers === 0) && simRunning) {
+                b._smokeT = (b._smokeT || 0) - simDt;
+                if (b._smokeT <= 0) {
+                    b._smokeT = 0.35 + Math.random() * 0.3;
+                    const spr = Sprites.getBuilding(b.type, { grown: b.grown });
+                    const sx0 = b.pixelX + Math.round((b.width - spr.width) / 2);
+                    const sy0 = b.pixelY + b.height - spr.height;
+                    Effects.smoke(sx0 + b.def.chimney[0], sy0 + b.def.chimney[1]);
+                }
+            }
+            if (b.def.crafts && !b.buildStart && b.active && simRunning && Math.random() < simDt * 1.5) {
+                Effects.sparks(b.pixelX + 32, b.pixelY + 40);
             }
         });
-        frontTrees.forEach(t => {
-            const r = treeRect(t);
-            if (r.x + r.w > viewL && r.x < viewR && r.y + r.h > viewT && r.y < viewB) {
-                drawables.push({ y: t.y + 30, tree: t });
-            }
+
+        // Villagers: feet exactly on their position, sun shadow plus a small contact shadow
+        const selVillager = hoverInfo?.villager;
+        Villagers.getAll().forEach(v => {
+            if (v.x < vx0 - 20 || v.x > vx1 + 20 || v.y < vy0 - 30 || v.y > vy1 + 20) return;
+            const sprite = Sprites.drawVillager(v.frame, v.palette, v.flip, v.tool, v.carry);
+            const ox = Math.round(v.x - sprite.width / 2), oy = Math.round(v.y) - sprite.height + 1 + (v.bob || 0);
+            drawables.push({
+                y: v.y,
+                shadow: () => castShadow(sprite, ox, oy - (v.bob || 0), Math.round(v.y) + 1, sun),
+                draw: () => {
+                    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+                    ctx.fillRect(Math.round(v.x) - 3, Math.round(v.y), 7, 1);
+                    if (selVillager === v) {
+                        ctx.strokeStyle = 'rgba(255, 215, 0, 0.95)';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.ellipse(Math.round(v.x) + 0.5, Math.round(v.y) + 0.5, 6, 2.5, 0, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                    ctx.drawImage(sprite, ox, oy);
+                },
+            });
         });
+
+        // Soldiers (same anchoring as villagers); selected ones get a ring
+        const selUnit = hoverInfo?.unit;
+        Units.getAll().forEach(u => {
+            if (u.x < vx0 - 20 || u.x > vx1 + 20 || u.y < vy0 - 30 || u.y > vy1 + 20) return;
+            const sprite = Sprites.drawSoldier(u.type, u.frame, u.flip);
+            const ox = Math.round(u.x - sprite.width / 2), oy = Math.round(u.y) - sprite.height + 1;
+            drawables.push({
+                y: u.y,
+                shadow: () => castShadow(sprite, ox, oy, Math.round(u.y) + 1, sun),
+                draw: () => {
+                    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+                    ctx.fillRect(Math.round(u.x) - 3, Math.round(u.y), 7, 1);
+                    if (selUnit === u || Units.isSelected(u)) {
+                        ctx.strokeStyle = 'rgba(255, 215, 0, 0.95)';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.ellipse(Math.round(u.x) + 0.5, Math.round(u.y) + 0.5, 6, 2.5, 0, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                    ctx.drawImage(sprite, ox, oy);
+                },
+            });
+        });
+
+        // Sun shadows: drawn opaque into their own layer, then laid over the ground once,
+        // so overlapping shadows don't stack into dark blotches
+        if (sun.alpha > 0.01) {
+            prepareShadowLayer();
+            drawables.forEach(d => d.shadow && d.shadow());
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.globalAlpha = sun.alpha;
+            ctx.drawImage(shadowCanvas, 0, 0);
+            ctx.globalAlpha = 1;
+            ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -camera.x * dpr * zoom, -camera.y * dpr * zoom);
+        }
 
         drawables.sort((a, b) => a.y - b.y);
-        drawables.forEach(d => {
-            if (d.building) {
-                const b = d.building;
-                const sprite = Sprites.getBuilding(b.type, { grown: b.grown });
-                if (sprite) ctx.drawImage(sprite, b.pixelX - camera.x, b.pixelY - camera.y);
-            } else {
-                drawTree(ctx, d.tree, camera.x, camera.y);
-            }
-        });
+        drawables.forEach(d => d.draw());
 
-        // Labels always on top of trees and neighbours
-        visibleBuildings.forEach(b => drawBuildingLabels(b, b.pixelX - camera.x, b.pixelY - camera.y));
+        // Atmosphere: fog, cloud shadows, small critters
+        const view = {
+            x0: vx0, y0: vy0, x1: vx1, y1: vy1, zoom, dpr, w: canvasWidth, h: canvasHeight,
+            setWorld: () => { ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, -camera.x * dpr * zoom, -camera.y * dpr * zoom); ctx.imageSmoothingEnabled = false; },
+            setScreen: () => { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.imageSmoothingEnabled = false; },
+        };
+        Atmosphere.drawGround(ctx, view);
+
+        // Particles & floating texts
+        Effects.draw(ctx);
+        Atmosphere.drawSky(ctx, view);
 
         // Placement preview
         if (placementPreview) drawPlacementPreview(placementPreview);
 
-        // Day/night cycle tint
-        if (tintKey > 0) {
-            ctx.fillStyle = `rgba(10, 10, 40, ${(tintKey / 255).toFixed(3)})`;
+        // Patrol routes of the selected soldiers and the last order's destination
+        drawUnitOrders(hoverInfo, nowT);
+
+        // Hover highlight on a building (when not placing)
+        if (hoverInfo?.building && !placementPreview) {
+            const b = hoverInfo.building;
+            ctx.strokeStyle = 'rgba(255, 230, 150, 0.8)';
+            ctx.lineWidth = 2 / zoom;
+            ctx.strokeRect(b.pixelX + 1, b.pixelY + 1, b.width - 2, b.height - 2);
+        }
+        if (hoverInfo?.selected) {
+            const b = hoverInfo.selected;
+            ctx.strokeStyle = 'rgba(255, 215, 0, 0.95)';
+            ctx.lineWidth = 2 / zoom;
+            ctx.setLineDash([6 / zoom, 4 / zoom]);
+            ctx.strokeRect(b.pixelX, b.pixelY, b.width, b.height);
+            ctx.setLineDash([]);
+        }
+
+        // ---------- Screen-space overlays ----------
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // Day/night tint
+        if (night > 0.01) {
+            ctx.fillStyle = `rgba(12, 16, 60, ${(night * 0.42).toFixed(3)})`;
             ctx.fillRect(0, 0, canvasWidth, canvasHeight);
         }
 
-        // Yields float above the night tint so they stay readable
-        if (floaters.length > 0) drawFloaters(performance.now());
-        return true;
+        // Weather, light halos, rain
+        Atmosphere.drawScreen(ctx, view);
+
+        // Placement hint text near the cursor
+        if (placementPreview && placementPreview.reason && placementPreview.screenX !== undefined) {
+            drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, placementPreview.reason, '#ffb0a0');
+        } else if (placementPreview && placementPreview.valid && placementPreview.screenX !== undefined) {
+            const def = BUILDINGS[placementPreview.type];
+            drawHint(placementPreview.screenX + 16, placementPreview.screenY + 20, placementPreview.hint || t('cv.click', { name: bName(def) }), '#c8ffc0');
+        }
+        drawSelectBox(hoverInfo?.box);
+        // Waiting for a Move / Patrol target: hint next to the mouse cursor
+        if (hoverInfo?.orderHint && hoverInfo.pointer) drawHint(hoverInfo.pointer.x + 16, hoverInfo.pointer.y + 20, hoverInfo.orderHint, '#c8e4ff');
     }
 
-    function spawnFloater(worldX, worldY, text, color, icon) {
-        floaters.push({ wx: worldX, wy: worldY, text, color, icon, t0: performance.now() });
-        dirty = true;
-    }
+    function drawBuilding(b, nowT, night, hoverInfo) {
+        const sprite = (season === 'winter' && !b.buildStart)
+            ? Sprites.getBuildingSeasonal(b.type, { grown: b.grown }, season)
+            : Sprites.getBuilding(b.type, { grown: b.grown });
+        if (!sprite) return;
 
-    function drawFloaters(now) {
-        floaters = floaters.filter(f => now - f.t0 < FLOATER_MS);
-        ctx.font = FLOAT_FONT;
-        ctx.textBaseline = 'middle';
-        ctx.textAlign = 'left';
-        ctx.lineJoin = 'round';
-        floaters.forEach(f => {
-            const p = Math.min(1, (now - f.t0) / FLOATER_MS);
-            const rise = 30 * (1 - Math.pow(1 - p, 3)); // ease-out
-            ctx.globalAlpha = p < 0.65 ? 1 : 1 - (p - 0.65) / 0.35;
-            const iconW = f.icon ? 13 : 0;
-            const textW = ctx.measureText(f.text).width;
-            const x = Math.round(f.wx - camera.x - (iconW + textW) / 2);
-            const y = Math.round(f.wy - camera.y - rise);
-            if (f.icon) {
-                const icon = Sprites.getIcon(f.icon);
-                if (icon) ctx.drawImage(icon, x, y - 5);
-            }
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = 'rgba(20, 12, 4, 0.9)';
-            ctx.strokeText(f.text, x + iconW, y);
-            ctx.fillStyle = f.color;
-            ctx.fillText(f.text, x + iconW, y);
-        });
-        ctx.globalAlpha = 1;
-    }
+        // Sprites are anchored bottom-center on their footprint, so custom art may be taller/wider
+        const ox = b.pixelX + Math.round((b.width - sprite.width) / 2);
+        const oy = b.pixelY + b.height - sprite.height;
 
-    const LABEL_FONT = '13px "Jersey 10", monospace';
-
-    function drawBuildingLabels(b, bx, by) {
-        ctx.textBaseline = 'middle';
-        ctx.textAlign = 'left';
-
-        // Worker badge: [person icon] 2/2
-        if (b.maxWorkers > 0) {
-            ctx.font = LABEL_FONT;
-            const text = `${b.workers}/${b.maxWorkers}`;
-            const w = 18 + Math.ceil(ctx.measureText(text).width);
-            const x = bx + 2, y = by + b.height - 14;
-            ctx.fillStyle = 'rgba(20, 14, 6, 0.78)';
-            ctx.fillRect(x, y, w, 12);
-            ctx.fillStyle = b.active ? '#6c6' : '#d66';
-            ctx.fillRect(x, y + 11, w, 1);
-            ctx.drawImage(Sprites.getIcon('pop'), x + 2, y + 1);
-            ctx.fillStyle = '#f1e4c0';
-            ctx.fillText(text, x + 15, y + 6.5);
+        // Under construction: foundation, rising building, scaffold, builder
+        if (b.buildStart) {
+            drawConstruction(b, sprite, ox, oy, nowT);
+            return;
         }
 
-        // Growth progress for orchards (inside the footprint, so it never covers neighbours)
+
+        // Small "settle" bounce right after completion (in whole pixels)
+        let lift = 0;
+        if (b._doneAt) {
+            const age = (nowT - b._doneAt) / 1000;
+            if (age < 0.3) lift = -Math.round(Math.sin(age / 0.3 * Math.PI) * 3);
+            else b._doneAt = 0;
+        }
+        ctx.drawImage(sprite, ox, oy + lift);
+        const scale = 1;
+
+        // Night window glow (positions are relative to the sprite's top-left)
+        if (night > 0.15 && b.def.lights && scale === 1) {
+            ctx.fillStyle = `rgba(255, 190, 80, ${(Math.min(1, (night - 0.15) * 2) * 0.85).toFixed(3)})`;
+            b.def.lights.forEach(([lx, ly, lw, lh]) => ctx.fillRect(ox + lx, oy + ly, lw, lh));
+        }
+
+        // Work cycle: a thin bar under production buildings shows when the next delivery arrives
+        if (b.def.production && b.active && Game.isClockRunning()) {
+            const bw = Math.min(b.width - 12, 40);
+            const bx = Math.round(b.pixelX + (b.width - bw) / 2), by = b.pixelY + b.height - 3;
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(bx - 1, by - 1, bw + 2, 3);
+            ctx.fillStyle = COLORS[b.def.production.resource] || '#ffd24a';
+            ctx.fillRect(bx, by, Math.round(bw * Math.min(1, b.progress || 0)), 1);
+        }
+
+        // Inactive (no workers) indicator
+        if (b.maxWorkers > 0 && !b.active) {
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(b.pixelX + 2, b.pixelY + b.height - 12, 44, 10);
+            ctx.fillStyle = '#ff9a8a';
+            ctx.font = '8px monospace';
+            ctx.fillText(t('cv.noworkers'), b.pixelX + 4, b.pixelY + b.height - 4);
+        }
+
+        // Growth progress for orchards / farms
         if (!b.grown && b.def.production?.growthDays) {
-            const pct = b.growthProgress / b.def.production.growthDays;
-            const x = bx + 2, y = by + 2, w = b.width - 4;
-            ctx.fillStyle = 'rgba(20, 14, 6, 0.8)';
-            ctx.fillRect(x, y, w, 12);
-            ctx.fillStyle = '#3f8f3a';
-            ctx.fillRect(x + 1, y + 1, Math.round((w - 2) * pct), 10);
-            ctx.font = LABEL_FONT;
+            const gs = Game.getState();
+            const dormant = season === 'winter';
+            const pct = Math.min(1, (b.growthProgress + (dormant ? 0 : gs.dayProgress)) / b.def.production.growthDays);
+            const bw = Math.min(b.width - 8, 56);
+            const bx = b.pixelX + (b.width - bw) / 2;
+            const by = b.pixelY - 10;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(bx, by, bw, 7);
+            ctx.fillStyle = '#6fcf4a';
+            ctx.fillRect(bx + 1, by + 1, (bw - 2) * pct, 5);
             ctx.fillStyle = '#fff';
-            ctx.fillText(`Growing ${b.growthProgress}/${b.def.production.growthDays}`, x + 4, y + 6.5);
+            ctx.font = '7px monospace';
+            ctx.fillText(dormant ? t('season.rest') : t('cv.growing'), bx + 2, by - 2);
         }
     }
 
-    // Production buildings: show the area they draw from and the resource tiles in it
-    function drawResourceRange(pp, def) {
-        const req = def.production && def.production.requires;
-        if (!req) return;
-        const r = RESOURCE_RADIUS;
-        const x0 = pp.tileX - r, y0 = pp.tileY - r;
-        const x1 = pp.tileX + def.width + r, y1 = pp.tileY + def.height + r; // exclusive
-        const wanted = TERRAIN[req];
+    // ---------- Construction ----------
+    function buildInfo(b) {
+        return BUILD_ANIM[b.type] || { ms: 1500, material: 'wood' };
+    }
 
-        ctx.fillStyle = 'rgba(255, 214, 80, 0.32)';
-        let found = 0;
-        for (let ty = Math.max(0, y0); ty < Math.min(MAP_HEIGHT, y1); ty++) {
-            for (let tx = Math.max(0, x0); tx < Math.min(MAP_WIDTH, x1); tx++) {
-                if (GameMap.getTerrain(tx, ty) === wanted) {
-                    ctx.fillRect(tx * TILE_SIZE - camera.x, ty * TILE_SIZE - camera.y, TILE_SIZE, TILE_SIZE);
-                    found++;
-                }
+    function constructionProgress(b, nowT) {
+        return Math.min(1, (nowT - b.buildStart) / buildInfo(b).ms);
+    }
+
+    // Reveal height in whole 2px steps so the building rises pixel by pixel
+    function revealHeight(spriteH, prog) {
+        const k = Math.min(1, Math.max(0, (prog - 0.12) / 0.8));
+        const eased = 1 - Math.pow(1 - k, 2);
+        return Math.round(spriteH * eased / 2) * 2;
+    }
+
+    const CHIP_COLORS = { wood: '196,140,70', stone: '190,190,190', soil: '150,110,60' };
+
+    function updateConstruction(nowT) {
+        BuildingManager.getAll().forEach(b => {
+            if (!b.buildStart) return;
+            const info = buildInfo(b);
+            const prog = constructionProgress(b, nowT);
+            if (prog >= 1) {
+                b.buildStart = 0;
+                b._doneAt = nowT;
+                onConstructionDone(b);
+                return;
             }
+            // Hammer blows while the walls go up
+            if (prog > 0.1 && prog < 0.95 && nowT >= (b._nextHammer || 0)) {
+                b._nextHammer = nowT + 190 + Math.random() * 90;
+                AudioSys.play('hammer', { material: info.material });
+                const spr = Sprites.getBuilding(b.type, { grown: b.grown });
+                const h = revealHeight(spr.height, prog);
+                const lineY = b.pixelY + b.height - h;
+                Effects.chips(b.pixelX + 6 + Math.random() * (b.width - 12), lineY, CHIP_COLORS[info.material]);
+            }
+        });
+    }
+
+    function onConstructionDone(b) {
+        AudioSys.play('buildDone');
+        Effects.ring(b.pixelX, b.pixelY, b.width, b.height);
+        Effects.stars(b.pixelX, b.pixelY, b.width, b.height);
+        const d = b.def;
+        let text = null;
+        if (d.provides.populationCap) text = t('menu.villagers', { n: d.provides.populationCap });
+        else if (d.provides.storage) text = t('menu.storage', { n: d.provides.storage });
+        else if (d.production) text = t('menu.prod', { n: Math.round(d.production.amount * 60 / d.production.cycle), res: resName(d.production.resource) });
+        if (text) Effects.floatText(b.pixelX + b.width / 2, b.pixelY - 6, text, '#ffe08a');
+    }
+
+    function drawConstruction(b, sprite, ox, oy, nowT) {
+        const prog = constructionProgress(b, nowT);
+        const info = buildInfo(b);
+        const fx = b.pixelX, fy = b.pixelY, fw = b.width, fh = b.height;
+
+        // Foundation: dug earth with a darker rim and a few stones
+        const fa = Math.min(1, prog / 0.12);
+        ctx.globalAlpha = fa;
+        ctx.fillStyle = info.material === 'soil' ? '#7a5a32' : '#8a6a40';
+        ctx.fillRect(fx + 2, fy + 2, fw - 4, fh - 4);
+        ctx.fillStyle = '#5e4426';
+        ctx.fillRect(fx + 2, fy + 2, fw - 4, 2);
+        ctx.fillRect(fx + 2, fy + fh - 4, fw - 4, 2);
+        ctx.fillRect(fx + 2, fy + 2, 2, fh - 4);
+        ctx.fillRect(fx + fw - 4, fy + 2, 2, fh - 4);
+        ctx.fillStyle = '#a08a6a';
+        for (let i = 0; i < 5; i++) ctx.fillRect(fx + 6 + ((i * 37 + b.id * 11) % (fw - 14)), fy + 6 + ((i * 23 + b.id * 7) % (fh - 12)), 3, 2);
+        // Corner stakes with string
+        ctx.fillStyle = '#c49a5c';
+        [[fx + 1, fy + 1], [fx + fw - 3, fy + 1], [fx + 1, fy + fh - 3], [fx + fw - 3, fy + fh - 3]].forEach(([x, y]) => ctx.fillRect(x, y - 4, 2, 6));
+        ctx.globalAlpha = 1;
+
+        // Faint blueprint of the finished building
+        ctx.globalAlpha = 0.18 * fa;
+        ctx.drawImage(sprite, ox, oy);
+        ctx.globalAlpha = 1;
+
+        // The part that is already built, rising from the ground
+        const h = revealHeight(sprite.height, prog);
+        if (h > 0) {
+            ctx.drawImage(sprite, 0, sprite.height - h, sprite.width, h, ox, oy + sprite.height - h, sprite.width, h);
         }
 
-        ctx.save();
-        ctx.setLineDash([6, 4]);
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = found > 0 ? 'rgba(255, 214, 80, 0.95)' : 'rgba(255, 110, 90, 0.95)';
-        ctx.strokeRect(x0 * TILE_SIZE - camera.x + 1, y0 * TILE_SIZE - camera.y + 1,
-            (x1 - x0) * TILE_SIZE - 2, (y1 - y0) * TILE_SIZE - 2);
-        ctx.restore();
+        // Scaffold that grows just ahead of the walls
+        if (prog > 0.08) {
+            const top = oy + sprite.height - Math.min(sprite.height, h + 8);
+            const bottom = oy + sprite.height;
+            const left = ox + 2, right = ox + sprite.width - 4;
+            // 1px poles with a lighter edge, cross braces and lashings
+            const pole = (x) => {
+                ctx.fillStyle = '#8a5a2a'; ctx.fillRect(x, top, 1, bottom - top);
+                ctx.fillStyle = '#b07a42'; ctx.fillRect(x - 1, top, 1, bottom - top);
+            };
+            pole(left + 1); pole(right);
+            if (sprite.width > 70) pole(ox + Math.round(sprite.width / 2));
+            for (let y = bottom - 10; y > top; y -= 10) {
+                ctx.fillStyle = '#6b4226'; ctx.fillRect(left, y, right - left + 1, 1);
+                ctx.fillStyle = '#c8b090'; ctx.fillRect(left, y - 1, 2, 3); ctx.fillRect(right - 1, y - 1, 2, 3);
+            }
+            // Planks on the current working level
+            ctx.fillStyle = '#c49a5c';
+            ctx.fillRect(left - 2, top, right - left + 6, 1);
+            ctx.fillStyle = '#8a6a3a';
+            ctx.fillRect(left - 2, top + 1, right - left + 6, 1);
+        }
+
+        // Builder hammering next to the site
+        const swing = Math.floor(nowT / 140) % 2;
+        const bx = fx - 6, by = fy + fh;
+        const villager = Sprites.drawVillager(5 + swing, (b.id + 2) % 6, false, 'hammer');
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(Math.round(bx - 3), Math.round(by), 7, 1);
+        ctx.drawImage(villager, Math.round(bx - villager.width / 2), Math.round(by - villager.height + 1));
+
+        // Thin progress bar above the site
+        const bw = Math.min(fw - 8, 48);
+        const pbx = fx + (fw - bw) / 2, pby = fy - 8;
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.fillRect(pbx, pby, bw, 4);
+        ctx.fillStyle = '#ffd24a';
+        ctx.fillRect(pbx + 1, pby + 1, Math.round((bw - 2) * prog), 2);
     }
 
     function drawPlacementPreview(pp) {
         const def = BUILDINGS[pp.type];
         if (!def) return;
-        drawResourceRange(pp, def);
-        const px = pp.tileX * TILE_SIZE - camera.x;
-        const py = pp.tileY * TILE_SIZE - camera.y;
+        const px = pp.tileX * TILE_SIZE;
+        const py = pp.tileY * TILE_SIZE;
         const pw = def.width * TILE_SIZE;
         const ph = def.height * TILE_SIZE;
 
-        // Preview sprite with transparency
-        ctx.globalAlpha = 0.6;
+        // Resource radius for production buildings that need a nearby resource
+        if (def.production?.requires) {
+            const r = 5 * TILE_SIZE;
+            ctx.fillStyle = pp.valid ? 'rgba(255,255,255,0.07)' : 'rgba(255,120,120,0.07)';
+            ctx.fillRect(px - r, py - r, pw + 2 * r, ph + 2 * r);
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.lineWidth = 1 / zoom;
+            ctx.setLineDash([4, 4]);
+            ctx.strokeRect(px - r, py - r, pw + 2 * r, ph + 2 * r);
+            ctx.setLineDash([]);
+        }
+
+        // Tile grid under the footprint
+        ctx.fillStyle = pp.valid ? 'rgba(80, 255, 80, 0.18)' : 'rgba(255, 60, 60, 0.22)';
+        ctx.fillRect(px, py, pw, ph);
+        ctx.strokeStyle = pp.valid ? 'rgba(120, 255, 120, 0.5)' : 'rgba(255, 120, 120, 0.5)';
+        ctx.lineWidth = 1 / zoom;
+        for (let dx = 1; dx < def.width; dx++) {
+            ctx.beginPath(); ctx.moveTo(px + dx * TILE_SIZE, py); ctx.lineTo(px + dx * TILE_SIZE, py + ph); ctx.stroke();
+        }
+        for (let dy = 1; dy < def.height; dy++) {
+            ctx.beginPath(); ctx.moveTo(px, py + dy * TILE_SIZE); ctx.lineTo(px + pw, py + dy * TILE_SIZE); ctx.stroke();
+        }
+
+        ctx.globalAlpha = 0.7;
         const sprite = Sprites.getBuilding(pp.type);
-        if (sprite) ctx.drawImage(sprite, px, py);
+        if (sprite) ctx.drawImage(sprite, px + Math.round((pw - sprite.width) / 2), py + ph - sprite.height);
         ctx.globalAlpha = 1;
 
-        // Placement outline + tint
-        const canBuild = pp.valid;
-        ctx.strokeStyle = canBuild ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = pp.valid ? 'rgba(80, 255, 80, 0.9)' : 'rgba(255, 60, 60, 0.9)';
+        ctx.lineWidth = 2 / zoom;
         ctx.strokeRect(px, py, pw, ph);
-        ctx.fillStyle = canBuild ? 'rgba(0, 255, 0, 0.1)' : 'rgba(255, 0, 0, 0.15)';
-        ctx.fillRect(px, py, pw, ph);
+    }
+
+    function drawHint(x, y, text, color) {
+        ctx.font = '600 12px "Segoe UI", sans-serif';
+        const w = ctx.measureText(text).width + 14;
+        const h = 22;
+        if (x + w > canvasWidth - insets.right - 4) x = canvasWidth - insets.right - 4 - w;
+        if (y + h > canvasHeight - 4) y = canvasHeight - 4 - h;
+        ctx.fillStyle = 'rgba(25, 18, 8, 0.92)';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x + 7, y + 15);
+    }
+
+    // ---------- Minimap ----------
+    function renderMinimap(mctx, w, h) {
+        renderTerrainCache();
+        mctx.imageSmoothingEnabled = false;
+        mctx.clearRect(0, 0, w, h);
+        mctx.drawImage(minimapTerrain, 0, 0, w, h);
+        const sx = w / MAP_PIXEL_W, sy = h / MAP_PIXEL_H;
+        BuildingManager.getAll().forEach(b => {
+            mctx.fillStyle = b.type === 'castle' ? '#ffd700' : (b.def.production ? '#f0f0f0' : '#e8b060');
+            mctx.fillRect(Math.floor(b.pixelX * sx), Math.floor(b.pixelY * sy), Math.max(2, Math.ceil(b.width * sx)), Math.max(2, Math.ceil(b.height * sy)));
+        });
+        // Viewport rectangle (uncovered screen area)
+        const vx = camera.x + insets.left / zoom;
+        const vy = camera.y + insets.top / zoom;
+        const vw = (canvasWidth - insets.left - insets.right) / zoom;
+        const vh = (canvasHeight - insets.top - insets.bottom) / zoom;
+        mctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        mctx.lineWidth = 1;
+        mctx.strokeRect(Math.floor(vx * sx) + 0.5, Math.floor(vy * sy) + 0.5, Math.floor(vw * sx), Math.floor(vh * sy));
+    }
+
+    // Center the visible area on a world point
+    function centerOn(wx, wy) {
+        const vw = (canvasWidth - insets.left - insets.right) / zoom;
+        const vh = (canvasHeight - insets.top - insets.bottom) / zoom;
+        setCamera(wx - vw / 2 - insets.left / zoom, wy - vh / 2 - insets.top / zoom);
     }
 
     return {
         init,
         resize,
+        setInsets,
         getCamera,
+        getZoom,
         setCamera,
         moveCamera,
+        setZoom,
+        zoomStep,
+        centerCamera,
+        centerOn,
         screenToWorld,
+        worldToScreen,
         screenToTile,
         render,
-        markDirty,
-        setInsets,
-        getViewport,
-        centerOn,
-        centerCamera,
-        spawnFloater,
-        invalidateTerrainCache: () => { terrainCanvas = null; floaters = []; dirty = true; },
+        renderMinimap,
+        invalidateTerrainCache,
     };
 })();

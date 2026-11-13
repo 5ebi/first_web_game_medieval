@@ -2,147 +2,248 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#21160b">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Lords of the Keep - a medieval castle builder you can play in the browser.">
+    <meta name="theme-color" content="#2a1a08">
     <title>Lords of the Keep - Medieval Castle Builder</title>
-    <link rel="icon" type="image/svg+xml" href="icon.svg">
-    <link rel="preload" href="fonts/Jersey10-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%232a1a08'/%3E%3Crect x='2' y='6' width='12' height='8' fill='%238a8070'/%3E%3Crect x='2' y='4' width='2' height='2' fill='%238a8070'/%3E%3Crect x='6' y='4' width='2' height='2' fill='%238a8070'/%3E%3Crect x='10' y='4' width='2' height='2' fill='%238a8070'/%3E%3Crect x='7' y='10' width='2' height='4' fill='%233a2810'/%3E%3Crect x='7' y='1' width='1' height='4' fill='%236b4226'/%3E%3Crect x='8' y='1' width='4' height='2' fill='%23c22'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div id="game-container">
-        <canvas id="game-canvas" aria-label="Game map"></canvas>
+        <canvas id="game-canvas"></canvas>
 
-        <!-- Top HUD: resources + time controls -->
-        <header id="hud">
-            <div id="resource-bar">
-                <button type="button" class="resource" data-res="wood" title="Wood">
-                    <span class="resource-icon" data-icon="wood"></span>
-                    <span class="sr-only">Wood</span>
-                    <span class="res-text">
-                        <span class="res-value" id="res-wood">50</span>
-                        <span class="res-rate" id="rate-wood"></span>
-                    </span>
-                    <span class="res-fill" aria-hidden="true"><span id="fill-wood"></span></span>
-                </button>
-                <button type="button" class="resource" data-res="stone" title="Stone">
-                    <span class="resource-icon" data-icon="stone"></span>
-                    <span class="sr-only">Stone</span>
-                    <span class="res-text">
-                        <span class="res-value" id="res-stone">30</span>
-                        <span class="res-rate" id="rate-stone"></span>
-                    </span>
-                    <span class="res-fill" aria-hidden="true"><span id="fill-stone"></span></span>
-                </button>
-                <button type="button" class="resource" data-res="iron" title="Iron">
-                    <span class="resource-icon" data-icon="iron"></span>
-                    <span class="sr-only">Iron</span>
-                    <span class="res-text">
-                        <span class="res-value" id="res-iron">0</span>
-                        <span class="res-rate" id="rate-iron"></span>
-                    </span>
-                    <span class="res-fill" aria-hidden="true"><span id="fill-iron"></span></span>
-                </button>
-                <button type="button" class="resource" data-res="food" title="Food">
-                    <span class="resource-icon" data-icon="food"></span>
-                    <span class="sr-only">Food</span>
-                    <span class="res-text">
-                        <span class="res-value" id="res-food">40</span>
-                        <span class="res-rate" id="rate-food"></span>
-                    </span>
-                    <span class="res-fill" aria-hidden="true"><span id="fill-food"></span></span>
-                </button>
-                <button type="button" class="resource" data-res="pop" title="Villagers (working / total)">
-                    <span class="resource-icon" data-icon="pop"></span>
-                    <span class="sr-only">Villagers</span>
-                    <span class="res-text">
-                        <span class="res-value" id="res-pop">0/0</span>
-                        <span class="res-rate" id="rate-pop"></span>
-                    </span>
-                </button>
+        <!-- Meat breakdown (opened by clicking / tapping the meat counter) -->
+        <div id="food-pop" class="hidden" role="dialog" aria-live="polite"></div>
+
+        <!-- Resource Bar -->
+        <div id="resource-bar">
+            <div class="resource" data-i18n-title="res.Wood">
+                <span class="resource-icon" id="icon-wood"></span>
+                <span class="resource-value" id="res-wood">0</span>
             </div>
-            <div id="time-bar">
-                <div id="day-pill" title="Day · 1 day = 1 minute at 1×">
-                    <span class="resource-icon" data-icon="day"></span>
-                    <span id="res-day">Day 1</span>
-                    <span class="day-bar" aria-hidden="true"><span id="day-fill"></span></span>
-                </div>
+            <div class="resource" data-i18n-title="res.Stone">
+                <span class="resource-icon" id="icon-stone"></span>
+                <span class="resource-value" id="res-stone">0</span>
+            </div>
+            <div class="resource" data-i18n-title="res.Iron">
+                <span class="resource-icon" id="icon-iron"></span>
+                <span class="resource-value" id="res-iron">0</span>
+            </div>
+            <div class="resource food" id="food-res" data-i18n-title="res.Food" role="button" tabindex="0" aria-haspopup="dialog" aria-expanded="false" aria-controls="food-pop">
+                <span class="resource-icon" id="icon-food"></span>
+                <span class="resource-value" id="res-food">0</span>
+            </div>
+            <div class="resource" id="storage-res" data-i18n-title="res.storage.title">
+                <span class="resource-icon" id="icon-storage"></span>
+                <span class="resource-value muted" id="res-storage">0</span>
+            </div>
+            <div class="resource" data-i18n-title="res.pop.short">
+                <span class="resource-icon" id="icon-pop"></span>
+                <span class="resource-value" id="res-pop">0 / 0</span>
+            </div>
+            <div class="resource season" id="season-res">
+                <span class="resource-icon" id="icon-season"></span>
+                <span class="resource-value" id="res-season"></span>
+            </div>
+            <div class="resource day" id="day-res">
+                <span class="resource-icon" id="icon-day"></span>
+                <span class="resource-value" id="res-day">Day 1</span>
+                <div class="day-bar"><div id="day-progress"></div></div>
+            </div>
+
+            <div id="topbar-right">
                 <div id="game-speed">
-                    <button type="button" id="speed-pause" class="speed-btn" title="Pause (Space)" aria-label="Pause">&#10074;&#10074;</button>
-                    <button type="button" id="speed-1x" class="speed-btn active" title="Normal speed (1)">1&times;</button>
-                    <button type="button" id="speed-2x" class="speed-btn" title="Fast (2)">2&times;</button>
-                    <button type="button" id="speed-3x" class="speed-btn" title="Very fast (3)">3&times;</button>
+                    <button id="speed-pause" class="speed-btn" data-i18n-title="speed.pause">&#10073;&#10073;</button>
+                    <button id="speed-1x" class="speed-btn active" data-i18n-title="speed.1">1x</button>
+                    <button id="speed-2x" class="speed-btn" data-i18n-title="speed.2">2x</button>
+                    <button id="speed-3x" class="speed-btn" data-i18n-title="speed.3">3x</button>
                 </div>
+                <div id="zoom-controls">
+                    <button id="zoom-out" class="icon-btn" data-i18n-title="zoom.out">&minus;</button>
+                    <span id="zoom-label">100%</span>
+                    <button id="zoom-in" class="icon-btn" data-i18n-title="zoom.in">+</button>
+                </div>
+                <button id="mute-btn" class="icon-btn" data-i18n-title="btn.mute"></button>
+                <button id="settings-btn" class="icon-btn" data-i18n-title="btn.settings">&#9881;</button>
+                <button id="help-btn" class="icon-btn" data-i18n-title="btn.help">?</button>
+                <button id="menu-btn" class="icon-btn text-btn" data-i18n="btn.new" data-i18n-title="btn.new.title">New</button>
             </div>
-        </header>
-
-        <!-- Building Menu: right sidebar on desktop, bottom bar on phones -->
-        <nav id="building-menu" aria-label="Buildings">
-            <h3>Buildings</h3>
-            <div id="building-list"></div>
-        </nav>
-
-        <!-- Info Panel (shows when clicking a placed building) -->
-        <div id="info-panel" class="hidden">
-            <button type="button" id="info-close" aria-label="Close">&times;</button>
-            <h3 id="info-title">Building</h3>
-            <div id="info-content"></div>
         </div>
 
-        <!-- Placement bar (while a building is selected) -->
-        <div id="placement-bar" class="hidden">
-            <button type="button" id="pb-cancel" aria-label="Cancel building">&times;</button>
-            <div class="pb-text">
-                <span id="pb-name">House</span>
-                <span id="pb-hint" class="pb-hint"></span>
+        <!-- Pause banner -->
+        <div id="pause-banner" class="hidden"><span class="pause-title" data-i18n="pause.title">PAUSED</span> <span data-i18n="pause.sub">press Space to continue</span></div>
+
+        <!-- Command panel (bottom): minimap, building categories, buildings or the
+             info scroll of the selected building / villager, and the next goal -->
+        <div id="command-panel">
+            <div id="cp-map" class="cp-frame">
+                <canvas id="minimap" width="216" height="162" data-i18n-title="menu.minimap"></canvas>
             </div>
-            <button type="button" id="pb-confirm">Build</button>
+            <div id="cp-main" class="cp-frame">
+                <div id="cp-cats" role="tablist"></div>
+                <div id="cp-body">
+                    <div id="cp-build" class="cp-view"></div>
+                    <div id="info-panel" class="cp-view hidden">
+                        <div id="info-portrait"></div>
+                        <div id="info-main">
+                            <h3 id="info-title">Building</h3>
+                            <div id="info-controls"></div>
+                            <div id="info-content"></div>
+                        </div>
+                        <div id="info-actions"></div>
+                        <button id="info-close" data-i18n-title="info.close">&times;</button>
+                    </div>
+                </div>
+            </div>
+            <div id="cp-side" class="cp-frame">
+                <div id="goal-box">
+                    <div class="goal-head"><span data-i18n="menu.goal">Next goal</span><span id="goal-count">0/0</span></div>
+                    <div id="goal-text"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Placement banner (visible while a building is selected) -->
+        <div id="place-banner" class="hidden">
+            <span id="place-text"></span>
+            <span id="place-hint"></span>
+            <button id="place-cancel" aria-label="Cancel">&times;</button>
         </div>
 
         <!-- Tooltip -->
         <div id="tooltip" class="hidden"></div>
 
         <!-- Notification area -->
-        <div id="notifications" aria-live="polite"></div>
+        <div id="notifications"></div>
+
+        <!-- Settings overlay -->
+        <div id="settings-screen" class="hidden">
+            <div class="overlay-box settings-box">
+                <button id="settings-close" class="close-x" data-i18n-title="s.close">&times;</button>
+                <h2 data-i18n="s.title">Settings</h2>
+                <div class="setting-row">
+                    <span class="setting-label" data-i18n="s.language">Language</span>
+                    <div class="seg">
+                        <button class="seg-btn lang-btn" data-lang="en">English</button>
+                        <button class="seg-btn lang-btn" data-lang="de">Deutsch</button>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label" data-i18n="s.music">Music</span>
+                    <button id="toggle-music" class="toggle" aria-pressed="true"><span class="toggle-knob"></span><span class="toggle-label">On</span></button>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label" data-i18n="s.sfx">Sound effects</span>
+                    <button id="toggle-sfx" class="toggle" aria-pressed="true"><span class="toggle-knob"></span><span class="toggle-label">On</span></button>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label" data-i18n="s.fx">Weather &amp; atmosphere</span>
+                    <button id="toggle-fx" class="toggle" aria-pressed="true"><span class="toggle-knob"></span><span class="toggle-label">On</span></button>
+                </div>
+                <div class="setting-row mouse-only">
+                    <span class="setting-label" data-i18n="s.edgescroll">Scroll at screen edge</span>
+                    <button id="toggle-edge" class="toggle" aria-pressed="true"><span class="toggle-knob"></span><span class="toggle-label">On</span></button>
+                </div>
+                <p class="settings-credits" data-i18n="s.credits">Music: Epidemic Sound (Bonnie Grace, Philip Ayers, Dian Shuai)</p>
+                <div class="btn-row settings-actions">
+                    <button id="settings-help" class="secondary" data-i18n="s.help">Show help</button>
+                    <button id="settings-new" class="secondary" data-i18n="s.newgame">New game</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Help overlay -->
+        <div id="help-screen" class="hidden">
+            <div class="overlay-box help-box">
+                <button id="help-close" class="close-x" data-i18n-title="s.close">&times;</button>
+                <h2 data-i18n="h.title">How to Play</h2>
+                <div class="help-cols">
+                    <div>
+                        <h4 data-i18n="h.basics">Basics</h4>
+                        <ul>
+                            <li data-i18n="h.b1"></li>
+                            <li data-i18n="h.b2"></li>
+                            <li data-i18n="h.b3"></li>
+                            <li data-i18n="h.b4"></li>
+                            <li data-i18n="h.b5"></li>
+                            <li data-i18n="h.b6"></li>
+                            <li data-i18n="h.b7"></li>
+                            <li data-i18n="h.b8"></li>
+                            <li data-i18n="h.b9"></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 data-i18n="h.controls">Controls</h4>
+                        <ul class="keys">
+                            <li data-i18n="h.c1"></li>
+                            <li data-i18n="h.c2"></li>
+                            <li data-i18n="h.c3"></li>
+                            <li data-i18n="h.c4"></li>
+                            <li data-i18n="h.c5"></li>
+                            <li data-i18n="h.c6"></li>
+                            <li data-i18n="h.c7"></li>
+                            <li data-i18n="h.c8"></li>
+                            <li data-i18n="h.c9"></li>
+                            <li data-i18n="h.c11"></li>
+                            <li data-i18n="h.c12"></li>
+                            <li data-i18n="h.c10"></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Game Over overlay -->
-        <div id="game-over" class="overlay hidden">
+        <div id="game-over" class="hidden">
             <div class="overlay-box">
-                <h2>Your People Have Starved!</h2>
-                <p>Your village ran out of food and your people have abandoned the settlement.</p>
-                <button type="button" id="restart-btn">Try Again</button>
+                <h2 data-i18n="go.title">Your People Have Starved!</h2>
+                <p data-i18n="go.text"></p>
+                <div id="game-over-stats" class="stats-box"></div>
+                <button id="restart-btn" data-i18n="go.retry">Try Again</button>
             </div>
         </div>
 
         <!-- Welcome overlay -->
-        <div id="welcome-screen" class="overlay">
+        <div id="welcome-screen">
             <div class="overlay-box">
-                <h1>Lords of the Keep</h1>
-                <p class="subtitle">A Medieval Castle Builder</p>
+                <div class="lang-corner">
+                    <button class="seg-btn lang-btn" data-lang="en">EN</button>
+                    <button class="seg-btn lang-btn" data-lang="de">DE</button>
+                </div>
+                <div class="crest"></div>
+                <h1 data-i18n="w.title">Lords of the Keep</h1>
+                <p class="subtitle" data-i18n="w.subtitle">A Medieval Castle Builder</p>
                 <div class="instructions">
-                    <p>You are the lord of a new settlement. Build your castle, gather resources, and grow your village.</p>
+                    <p data-i18n="w.intro"></p>
                     <ul>
-                        <li class="touch-only">Tap a building in the menu, move it with a tap or drag, then press Build</li>
-                        <li class="mouse-only">Click a building in the menu, then click the map to place it</li>
-                        <li><span class="touch-only">Drag the map with one finger to look around</span><span class="mouse-only">Drag the map (or scroll) to look around</span></li>
-                        <li>Gather wood, stone, and iron to build more</li>
-                        <li>Keep your villagers fed or they will leave!</li>
+                        <li data-i18n="w.li1"></li>
+                        <li data-i18n="w.li2"></li>
+                        <li data-i18n="w.li3"></li>
+                        <li data-i18n="w.li4"></li>
                     </ul>
                 </div>
-                <div class="overlay-actions">
-                    <button type="button" id="continue-btn" class="hidden">Continue</button>
-                    <button type="button" id="start-btn">Begin Your Reign</button>
+                <div class="btn-row">
+                    <button id="start-btn" data-i18n="w.start">Begin Your Reign</button>
+                    <button id="continue-btn" class="secondary hidden">Continue</button>
                 </div>
+                <p class="fine-print" data-i18n="w.fine"></p>
             </div>
         </div>
     </div>
 
     <script src="js/constants.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/audio.js"></script>
     <script src="js/sprites.js"></script>
     <script src="js/map.js"></script>
     <script src="js/buildings.js"></script>
+    <script src="js/villagers.js"></script>
+    <script src="js/units.js"></script>
+    <script src="js/effects.js"></script>
+    <script src="js/atmosphere.js"></script>
     <script src="js/game.js"></script>
-    <script src="js/save.js"></script>
     <script src="js/renderer.js"></script>
     <script src="js/ui.js"></script>
     <script src="js/main.js"></script>

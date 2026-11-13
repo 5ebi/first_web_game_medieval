@@ -5,85 +5,67 @@ A medieval castle builder game in the browser. Inspired by Stronghold, Civilizat
 ## Play
 
 Open `index.html` in any modern browser — no build step or dependencies needed.
-
-For the bundled pixel font, serve the folder instead of opening the file directly
-(Chrome blocks web fonts on `file://` and falls back to a monospace font):
-
-```sh
-python3 -m http.server 8000   # then open http://localhost:8000
-```
-
-Progress is saved automatically in the browser (every day, every building, and when
-you leave the page). The welcome screen offers **Continue** next time.
+Turn your sound on: music, ambience and effects are all synthesized in the browser.
 
 ## How to Play
 
-Made for phones first; works the same with a mouse.
+Inspired by Stronghold, made for phones and desktop.
 
-| | Phone / tablet | Mouse & keyboard |
-|---|---|---|
-| Choose a building | Tap it in the bar at the bottom | Click it in the right panel |
-| Position it | It appears on the nearest free spot — tap or drag it to move | It follows the cursor |
-| Build | Tap **Build** | Click the map |
-| Cancel | Tap **×** | Right-click, **Escape** or **×** |
-| Look around | Drag the map | Drag, or scroll / trackpad |
-| Details | Tap a resource or a building | Hover a resource, click a building |
-| Time | Pause / 1× / 2× / 3× buttons | Same, or **Space** (pause keeps the speed) and **1/2/3** |
+- **Place your Castle** (it is pre-selected), then the **Warehouse**. Time stands still until the warehouse is built; it brings the starting supplies (50 wood, 20 stone, 20 meat).
+- Nothing grows by itself: **only buildings with workers produce**, in batches (a bar under each building shows the next delivery). The castle gives you 10 villagers.
+- The **lumberjack** costs 10 wood. If you have none and no wood, the first one is free,
+  so you can never run out of wood for good.
+- A **quarry** must stand at least half on a stone field. Lumberjacks and hunters need a forest nearby.
+- Every working villager eats **0.5 meat per minute**. Without meat your people leave after 60 seconds.
+- A **day** (full day/night cycle) lasts 6 minutes at 1x. Each **season** lasts one day: hunting is better in summer and autumn and halved in winter. A warning two minutes before winter tells you how much meat to store.
+- **Drag** the map to scroll, **mouse wheel** / trackpad pinch / **+** / **-** to zoom, **WASD** or **arrow keys** to pan, click the **minimap** to jump
+- On touch screens: tap the map to position the building, tap it again to build; the bar above the menu cancels
+- **Right-click**, **Escape** or the ✕ in the placement bar cancels placement
+- **Space** to pause/unpause, **1/2/3** for speed, **M** mute, **O** settings, **H** help, **C** center on the Castle
+- Click a placed building for details or to **demolish** it (50% refund, **Del** key). Progress is **saved automatically**.
+- **Weather** changes every few minutes: clear, cloudy, rain (snow in winter) or fog.
 
-A greyed-out building tells you what is missing when you tap it; while placing,
-the bar says why a spot does not work (water, trees in the way, too far from
-stone, …). Lumberjacks, quarries and mines show their 5-tile range with the
-usable resource tiles highlighted.
+### Buildings (rates at 1x)
 
-### Buildings
-
-| Building | Cost | Workers | Output |
+| Building | Cost | Workers | Effect |
 |---|---|---|---|
-| Castle | Free | — | +10 population |
-| Warehouse | Free (limit 1) | — | +200 storage |
-| House | 15 wood, 10 stone | — | +5 population |
-| Lumberjack | 10 wood | 2 | +6 wood/day (near trees) |
-| Stone Quarry | 10 wood | 2 | +4 stone/day (near stone) |
-| Iron Mine | 15 wood, 10 stone | 2 | +2 iron/day (near stone) |
-| Chicken Hut | 10 wood, 5 stone | 1 | +4 food/day |
-| Apple Orchard | 5 wood | 1 | +8 food/day (5 day grow) |
+| Castle | Free | — | +10 villagers |
+| Warehouse | First free (+ starting supplies), then 30 wood, 20 stone | — | +300 storage |
+| Lumberjack | 10 wood (free if you have none and no wood) | 2 | 4 wood every 20 s (12/min), near forest |
+| Hunter's Hut | 15 wood | 2 | 4 meat every 30 s (8/min), near forest |
+| Stone Quarry | 20 wood | 3 | 4 stone every 30 s (8/min), half on a stone field |
+| House | 15 wood, 10 stone | — | +5 villagers |
+| Tavern | 25 wood, 15 stone, 5 iron | — | +8 villagers |
+| Iron Mine | 30 wood, 15 stone | 3 | 3 iron every 40 s (4.5/min), near stone |
+| Blacksmith | 30 wood, 20 stone, 10 iron | 1 | wood, stone and iron 25% faster (limit 1) |
 
-### Tips
+## Custom art
 
-- Every villager eats **1 food/day** — build food production early. New houses add mouths immediately
-- **3 consecutive days** without food = game over. The food counter shows how many days are left (`-11 · 3d`)
-- Lumberjacks, quarries and mines must be within **5 tiles** of forests / stone deposits, but not on top of them
-- Each resource stores **100** until you build the Warehouse (+200). A full bar turns orange: production is being wasted
-- A bar under the day fills up until the next day; at the end of each day the yields float up from every building
+Every sprite can be replaced with your own PNG without touching code. See [`assets/README.md`](assets/README.md) (German) for the file layout, sizes and editor tips; `assets/templates/` contains the current art at the exact sizes as a starting point.
 
 ## Tech
 
-Pure HTML5 Canvas + vanilla JS. All pixel art (map, buildings, icons) is procedurally generated.
-The only asset is the [Jersey 10](https://fonts.google.com/specimen/Jersey+10) pixel font in `fonts/`
-(SIL Open Font License, see `fonts/Jersey10-OFL.txt`).
+Pure HTML5 Canvas + vanilla JS. All pixel art is procedurally generated and all audio is synthesized with the Web Audio API — no external assets.
 
-- The map's static layer (terrain, trees, rocks) is drawn once; frames are only redrawn when
-  something visible changes, so an idle game uses almost no CPU or battery.
-- Time does not pass while the tab or app is in the background.
-- The canvas renders at the device pixel ratio, so the pixel art stays sharp on phones.
+Modules in `js/`:
 
-## Testing with AI agents (MCP)
-
-`.mcp.json` sets up two MCP servers that Claude Code (local or on claude.ai/code)
-offers after you approve them once:
-
-- **Playwright MCP**: drives the game in an emulated iPhone 15 (touch, high DPI):
-  tap through menus, place buildings, take screenshots.
-- **Chrome DevTools MCP**: desktop Chrome for performance traces (with CPU
-  throttling to mimic a slower phone), console errors and Lighthouse.
-
-Both run headless and use Google Chrome locally (or `CHROME_PATH` if set). To
-watch the browser, set `PLAYWRIGHT_MCP_HEADLESS=false`; for another phone, set
-`PLAYWRIGHT_MCP_DEVICE` (e.g. `"Pixel 7"`). Notes for the agent are in `CLAUDE.md`,
-the plan and open TODOs in `ROADMAP.md`.
-
-Regression tests (Playwright, phone + desktop): `sh tests/run-all.sh`.
+| File | Purpose |
+|---|---|
+| `constants.js` | Balance, building definitions, milestones, palettes |
+| `settings.js` | Persisted preferences (language, audio) |
+| `i18n.js` | English and German strings, `t()` helper |
+| `audio.js` | Procedural sound effects, ambient wind/birds, music loop |
+| `sprites.js` | Pixel-art tiles, buildings, villagers, icons |
+| `map.js` | Seeded terrain generation |
+| `buildings.js` | Placed buildings, save/load serialization |
+| `villagers.js` | Cosmetic walking workers |
+| `effects.js` | Smoke, dust, sparks, floating text |
+| `atmosphere.js` | Weather (clear, cloudy, rain, fog), pixel clouds and shadows, fog banks, birds, butterflies, fireflies, leaves, light halos, vignette |
+| `game.js` | Economy, day ticks, milestones, save/load |
+| `renderer.js` | Camera (pan/zoom, HiDPI), world rendering, minimap |
+| `ui.js` | Menus, tooltips, input, notifications |
+| `main.js` | Bootstrap and game loop |
 
 ## Deploy
 
-Push to `main` and enable GitHub Pages (Settings → Pages → Source: GitHub Actions). The included workflow auto-deploys.
+Push to `main` and the included workflow deploys to GitHub Pages. Set the Pages source once by hand to **GitHub Actions** (repository Settings → Pages → Build and deployment → Source), otherwise GitHub additionally runs its legacy branch build on every push.

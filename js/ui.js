@@ -3,852 +3,1734 @@
 // ============================================
 
 const UI = (() => {
-    let selectedBuilding = null; // building type to place
+    let selectedBuilding = null;   // building type to place
+    let selectedPlaced = null;     // placed building shown in the info panel
+    let selectedVillager = null;   // villager shown in the info panel
+    let selectedUnit = null;       // soldier shown in the info panel
+    let activeCat = 'castle';      // open building category
+    let bodyOpen = true;           // phones: the building strip can be folded away
+    let hoveredBuilding = null;
     let placementPreview = null;
-
-    // Last input device; touch/pen get the "position, then confirm" flow
-    let lastPointerType = window.matchMedia && window.matchMedia('(hover: none)').matches ? 'touch' : 'mouse';
-
-    // Pointer movement (px) below which a press counts as a tap, not a drag
-    const DRAG_THRESHOLD = 8;
+    let pointerOverCanvas = false;
+    let justPlaced = null;      // building placed last; no ghost while the cursor is still on it
+    let pendingTouch = null;    // touch: ghost position waiting for a confirming second tap
+    let lastInputTouch = false;
+    let wheelAcc = 0, wheelT = 0;
+    let lastPointer = { x: 0, y: 0 };
+    let isDragging = false;     // a mouse button / finger is down on the map
+    const keys = new Set();
+    const EDGE_PX = 12;         // mouse this close to the map area's edge scrolls the camera
+    const EDGE_SPEED = 700;     // screen px per second at the very edge
+    const noHover = window.matchMedia ? window.matchMedia('(hover: none)') : { matches: false };
 
     // DOM elements
     let els = {};
 
+    function $(id) { return document.getElementById(id); }
+
     function init() {
         els = {
-            hud: document.getElementById('hud'),
-            values: {
-                wood: document.getElementById('res-wood'),
-                stone: document.getElementById('res-stone'),
-                iron: document.getElementById('res-iron'),
-                food: document.getElementById('res-food'),
-            },
-            resPop: document.getElementById('res-pop'),
-            resDay: document.getElementById('res-day'),
-            rates: {
-                wood: document.getElementById('rate-wood'),
-                stone: document.getElementById('rate-stone'),
-                iron: document.getElementById('rate-iron'),
-                food: document.getElementById('rate-food'),
-                pop: document.getElementById('rate-pop'),
-            },
-            fills: {
-                wood: document.getElementById('fill-wood'),
-                stone: document.getElementById('fill-stone'),
-                iron: document.getElementById('fill-iron'),
-                food: document.getElementById('fill-food'),
-            },
-            dayPill: document.getElementById('day-pill'),
-            dayFill: document.getElementById('day-fill'),
-            buildingMenu: document.getElementById('building-menu'),
-            buildingList: document.getElementById('building-list'),
-            infoPanel: document.getElementById('info-panel'),
-            infoTitle: document.getElementById('info-title'),
-            infoContent: document.getElementById('info-content'),
-            infoClose: document.getElementById('info-close'),
-            tooltip: document.getElementById('tooltip'),
-            notifications: document.getElementById('notifications'),
-            gameOver: document.getElementById('game-over'),
-            welcome: document.getElementById('welcome-screen'),
-            startBtn: document.getElementById('start-btn'),
-            continueBtn: document.getElementById('continue-btn'),
-            restartBtn: document.getElementById('restart-btn'),
-            canvas: document.getElementById('game-canvas'),
-            placementBar: document.getElementById('placement-bar'),
-            pbName: document.getElementById('pb-name'),
-            pbHint: document.getElementById('pb-hint'),
-            pbConfirm: document.getElementById('pb-confirm'),
-            pbCancel: document.getElementById('pb-cancel'),
+            resWood: $('res-wood'),
+            resStone: $('res-stone'),
+            resIron: $('res-iron'),
+            resFood: $('res-food'),
+            foodRes: $('food-res'),
+            foodPop: $('food-pop'),
+            resPop: $('res-pop'),
+            resDay: $('res-day'),
+            dayProgress: $('day-progress'),
+            storageLabel: $('res-storage'),
+            commandPanel: $('command-panel'),
+            cpCats: $('cp-cats'),
+            cpBuild: $('cp-build'),
+            cpBody: $('cp-body'),
+            infoPortrait: $('info-portrait'),
+            infoPanel: $('info-panel'),
+            infoTitle: $('info-title'),
+            infoContent: $('info-content'),
+            infoClose: $('info-close'),
+            infoActions: $('info-actions'),
+            infoControls: $('info-controls'),
+            tooltip: $('tooltip'),
+            notifications: $('notifications'),
+            gameOver: $('game-over'),
+            gameOverStats: $('game-over-stats'),
+            welcome: $('welcome-screen'),
+            startBtn: $('start-btn'),
+            continueBtn: $('continue-btn'),
+            restartBtn: $('restart-btn'),
+            canvas: $('game-canvas'),
+            pauseBanner: $('pause-banner'),
+            muteBtn: $('mute-btn'),
+            settingsBtn: $('settings-btn'),
+            settingsScreen: $('settings-screen'),
+            settingsClose: $('settings-close'),
+            settingsHelp: $('settings-help'),
+            settingsNew: $('settings-new'),
+            langBtns: Array.from(document.querySelectorAll('.lang-btn')),
+            toggleMusic: $('toggle-music'),
+            toggleSfx: $('toggle-sfx'),
+            toggleFx: $('toggle-fx'),
+            toggleEdge: $('toggle-edge'),
+            dayRes: $('day-res'),
+            iconDay: $('icon-day'),
+            seasonRes: $('season-res'),
+            iconSeason: $('icon-season'),
+            resSeason: $('res-season'),
+            menuBtn: $('menu-btn'),
+            helpBtn: $('help-btn'),
+            helpScreen: $('help-screen'),
+            helpClose: $('help-close'),
+            minimap: $('minimap'),
+            goalText: $('goal-text'),
+            goalCount: $('goal-count'),
+            zoomIn: $('zoom-in'),
+            zoomOut: $('zoom-out'),
+            zoomLabel: $('zoom-label'),
+            resourceBar: $('resource-bar'),
+            placeBanner: $('place-banner'),
+            placeText: $('place-text'),
+            placeHint: $('place-hint'),
+            placeCancel: $('place-cancel'),
         };
 
-        installIcons();
+        buildResourceIcons();
         buildBuildingMenu();
         setupSpeedButtons();
-        setupCanvasInput();
-        setupKeyboard();
+        setupTopbarButtons();
+        setupSettings();
+        setupEventListeners();
+        setupMinimap();
+        setupFoodPop();
+        updateInsets();
+        window.addEventListener('resize', updateInsets);
 
-        els.infoClose.addEventListener('click', hideInfo);
+        els.infoClose.addEventListener('click', () => hideInfo());
+        els.placeCancel.addEventListener('click', () => deselectBuilding());
+        if (window.ResizeObserver) new ResizeObserver(updateInsets).observe(els.commandPanel);
+        // links inside the info scroll (e.g. a villager's workplace)
+        els.infoContent.addEventListener('click', (e) => {
+            const only = e.target.closest('[data-seltype]');
+            if (only) {
+                // narrow the selection to one kind of soldier
+                Units.select(Units.getSelected().filter(u => u.type === only.dataset.seltype).map(u => u.id));
+                AudioSys.play('click');
+                showSelection();
+                return;
+            }
+            const go = e.target.closest('[data-goto]');
+            if (!go) return;
+            const b = BuildingManager.getById(Number(go.dataset.goto));
+            if (!b) return;
+            AudioSys.play('click');
+            Renderer.centerOn(b.pixelX + b.width / 2, b.pixelY + b.height / 2);
+            showBuildingInfo(b);
+        });
+        // smith product toggle and barracks recruit buttons
+        els.infoControls.addEventListener('click', (e) => {
+            const btn = e.target.closest('button');
+            if (btn && btn.dataset.order) { onOrderButton(btn.dataset.order); return; }
+            if (!btn || !selectedPlaced) return;
+            if (btn.dataset.product) {
+                if (Game.setSmithProduct(selectedPlaced.id, btn.dataset.product)) AudioSys.play('click');
+            } else if (btn.dataset.recruit) {
+                const reason = Game.getRecruitReason(btn.dataset.recruit);
+                if (reason) { showNotification(reason, 'warning'); AudioSys.play('error'); return; }
+                if (Game.recruit(selectedPlaced.id, btn.dataset.recruit)) {
+                    AudioSys.play('buildDone');
+                    // the first soldier: tell how to command him
+                    if (Units.getAll().length === 1) showNotification(t(lastInputTouch ? 'sel.tip.touch' : 'sel.tip.mouse'), 'info');
+                }
+            }
+            refreshControls(true);
+            infoRefreshT = 0;
+        });
+        els.helpClose.addEventListener('click', () => { els.helpScreen.classList.add('hidden'); AudioSys.play('click'); });
 
-        // Tap a resource for the full story (amount / cap, per day, how long it lasts)
-        document.querySelectorAll('#resource-bar .resource').forEach(chip => {
-            chip.addEventListener('click', () => {
-                showTooltipFor(chip, resourceDetail(chip.dataset.res), { timeout: 4000 });
+        Lang.onChange(onLanguageChanged);
+        syncSettingsUI();
+
+        Atmosphere.setWeatherListener((next, prev) => {
+            if (next === 'rain') showNotification(t('weather.rain.start'), 'info');
+            else if (next === 'fog') showNotification(t('weather.fog.start'), 'info');
+            else if (next === 'clear' && (prev === 'rain' || prev === 'fog')) showNotification(t('weather.clear.start'), 'info');
+        });
+    }
+
+    // ---------- layout ----------
+    function isCompact() {
+        return window.matchMedia('(max-width: 760px)').matches;
+    }
+
+    function updateInsets() {
+        const top = els.resourceBar.offsetHeight || 48;
+        // the top bar wraps into two rows on phones: toasts and panels must start below it
+        document.documentElement.style.setProperty('--bar-bottom', top + 'px');
+        const bottom = els.commandPanel.offsetHeight || 0;
+        document.documentElement.style.setProperty('--panel-top', bottom + 'px');
+        Renderer.setInsets({ top, right: 0, bottom, left: 0 });
+    }
+
+    // ---------- language ----------
+    function onLanguageChanged() {
+        Lang.applyDom();
+        buildBuildingMenu();
+        updateResources();
+        updateMuteButton();
+        if (selectedPlaced) showBuildingInfo(selectedPlaced);
+        else if (unitView) showSelection();
+        if (!els.welcome.classList.contains('hidden')) showWelcome();
+        syncSettingsUI();
+        hideTooltip();
+        updatePlaceBanner();
+    }
+
+    // ---------- resource bar ----------
+    function buildResourceIcons() {
+        const map = { 'icon-wood': 'wood', 'icon-stone': 'stone', 'icon-iron': 'iron', 'icon-food': 'food', 'icon-pop': 'pop', 'icon-day': 'day', 'icon-storage': 'storage' };
+        Object.entries(map).forEach(([id, name]) => {
+            const el = $(id);
+            if (!el) return;
+            el.innerHTML = '';
+            el.appendChild(Sprites.drawIcon(name));
+        });
+        updateMuteButton();
+    }
+
+    function updateMuteButton() {
+        const muted = AudioSys.isMuted();
+        els.muteBtn.innerHTML = '';
+        els.muteBtn.appendChild(Sprites.drawIcon(muted ? 'mute' : 'sound'));
+        els.muteBtn.title = muted ? t('btn.unmute') : t('btn.mute');
+    }
+
+    // ---------- building menu ----------
+    // Categories are always visible as tabs; one click shows their buildings.
+    const CATEGORIES = [
+        { id: 'castle', icon: 'castle', types: ['castle', 'warehouse'] },
+        { id: 'industry', icon: 'wood', types: ['lumberjack', 'quarry', 'iron_mine'] },
+        { id: 'food', icon: 'food', types: ['hunter'] },
+        { id: 'town', icon: 'pop', types: ['house', 'tavern'] },
+        { id: 'military', icon: 'sword', types: ['weaponsmith', 'barracks'] },
+    ];
+    const catOf = type => (CATEGORIES.find(c => c.types.includes(type)) || CATEGORIES[0]).id;
+    const GOAL_BUILDING = {
+        castle: 'castle', warehouse: 'warehouse', lumberjack: 'lumberjack', hunter: 'hunter', quarry: 'quarry',
+        houses2: 'house', workers15: 'house', winter1: 'hunter', iron20: 'iron_mine', weaponsmith: 'weaponsmith', soldier1: 'barracks', pop30: 'house',
+    };
+
+    const iconUrls = {};
+    function iconUrl(name) {
+        if (!iconUrls[name]) iconUrls[name] = Sprites.drawIcon(name).toDataURL();
+        return iconUrls[name];
+    }
+    function ic(name) { return `<img class="ic" src="${iconUrl(name)}" alt="">`; }
+
+    function thumbUrl(type, size) {
+        const key = 'thumb_' + type + size;
+        if (!iconUrls[key]) iconUrls[key] = Sprites.getBuildingThumb(type, size).toDataURL();
+        return iconUrls[key];
+    }
+
+    function buildBuildingMenu() {
+        els.cpCats.innerHTML = '';
+        CATEGORIES.forEach(cat => {
+            const tab = document.createElement('button');
+            tab.className = 'cp-cat';
+            tab.dataset.cat = cat.id;
+            tab.setAttribute('role', 'tab');
+            tab.innerHTML = `<img class="cat-ic" src="${cat.id === 'castle' ? thumbUrl('castle', 32) : iconUrl(cat.icon)}" alt=""><span class="cat-name">${t('cat.' + cat.id)}</span><span class="cat-dot"></span>`;
+            tab.addEventListener('click', () => openCategory(cat.id, true));
+            els.cpCats.appendChild(tab);
+        });
+
+        els.cpBuild.innerHTML = '';
+        CATEGORIES.forEach(cat => cat.types.forEach(type => {
+            const def = BUILDINGS[type];
+            const btn = document.createElement('button');
+            btn.className = 'cp-bld';
+            btn.dataset.type = type;
+            btn.dataset.cat = cat.id;
+            btn.innerHTML = `
+                <span class="bld-pic"><img src="${thumbUrl(type, 56)}" alt=""></span>
+                <span class="bld-text">
+                    <span class="bld-name">${bName(def)}<span class="b-key">${def.hotkey}</span></span>
+                    <span class="b-cost"></span>
+                    <span class="b-info">${infoHtml(def)}</span>
+                    <span class="b-lock"></span>
+                </span>
+                <span class="b-badge">${t('b.goal')}</span>`;
+            btn.addEventListener('click', () => {
+                if (btn.classList.contains('disabled')) {
+                    showNotification(Game.getUnavailableReason(type) || t('g.notavailable'), 'warning');
+                    AudioSys.play('error');
+                    btn.classList.remove('shake'); void btn.offsetWidth; btn.classList.add('shake');
+                    return;
+                }
+                selectBuilding(type);
             });
-        });
-        els.pbConfirm.addEventListener('click', confirmPlacement);
-        els.pbCancel.addEventListener('click', deselectBuilding);
+            btn.addEventListener('mouseenter', () => showBuildingTooltip(btn, type));
+            btn.addEventListener('mouseleave', hideTooltip);
+            els.cpBuild.appendChild(btn);
+        }));
+        openCategory(activeCat, false);
+        updateBuildingButtons();
+    }
 
-        document.addEventListener('pointerdown', e => {
-            lastPointerType = e.pointerType || 'mouse';
-        }, true);
-
-        // Mouse clicks must not leave buttons focused, otherwise Space would
-        // press the focused button instead of toggling pause
-        document.addEventListener('mousedown', e => {
-            if (e.target.closest('button')) e.preventDefault();
-        });
-
-        // iOS Safari: block page pinch-zoom on the HUD (the map handles its own gestures)
-        document.addEventListener('gesturestart', e => e.preventDefault());
-
-        window.addEventListener('resize', measureLayout);
-        measureLayout();
-        if (document.fonts && document.fonts.load) {
-            document.fonts.load('16px "Jersey 10"').then(() => {
-                measureLayout();
-                Renderer.markDirty();
-            }).catch(() => {});
+    // Show a category's buildings. Clicking the open tab again on a phone folds the strip.
+    function openCategory(id, fromClick) {
+        const infoOpen = !els.infoPanel.classList.contains('hidden');
+        if (fromClick) {
+            AudioSys.play('click');
+            if (isCompact() && id === activeCat && bodyOpen && !infoOpen) bodyOpen = false;
+            else bodyOpen = true;
+            if (infoOpen) hideInfo();
         }
+        activeCat = id;
+        els.cpBuild.querySelectorAll('.cp-bld').forEach(btn => {
+            btn.classList.toggle('in-cat', btn.dataset.cat === id);
+        });
+        syncBody();
     }
 
-    // Pixel-art icons as CSS variables so any [data-icon] element can use them
-    function installIcons() {
-        ['wood', 'stone', 'iron', 'food', 'pop', 'day'].forEach(name => {
-            document.documentElement.style.setProperty(`--icon-${name}`, `url("${Sprites.getIconURL(name)}")`);
+    function syncBody() {
+        const infoOpen = !els.infoPanel.classList.contains('hidden');
+        const open = bodyOpen || !isCompact() || infoOpen;
+        els.commandPanel.classList.toggle('folded', !open);
+        els.commandPanel.classList.toggle('info-open', infoOpen);
+        syncTabs(infoOpen);
+        updateInsets();
+    }
+
+    // While the scroll shows a building, villager or soldiers no category is open,
+    // so no tab may look open either (one tap on any tab goes back to building).
+    function syncTabs(infoOpen) {
+        els.cpCats.querySelectorAll('.cp-cat').forEach(tab => {
+            const on = tab.dataset.cat === activeCat && !infoOpen && (bodyOpen || !isCompact());
+            tab.classList.toggle('active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
         });
     }
 
-    // Tell the renderer (and CSS) which parts of the screen the HUD covers,
-    // so the camera can reach every map edge and overlays avoid the menus
-    function measureLayout() {
-        const vw = window.innerWidth;
-        const vh = window.innerHeight;
-        const hudRect = els.hud.getBoundingClientRect();
-        const menuRect = els.buildingMenu.getBoundingClientRect();
-        const menuAtBottom = menuRect.width >= vw - 1;
-        const insets = {
-            top: Math.round(hudRect.bottom),
-            right: menuAtBottom ? 0 : Math.round(vw - menuRect.left),
-            bottom: menuAtBottom ? Math.round(vh - menuRect.top) : 0,
-            left: 0,
-        };
-        const root = document.documentElement.style;
-        root.setProperty('--inset-top', `${insets.top}px`);
-        root.setProperty('--inset-right', `${insets.right}px`);
-        root.setProperty('--inset-bottom', `${insets.bottom}px`);
-        Renderer.setInsets(insets);
+    // Cost with resource icons; amounts you cannot pay yet are red
+    function costIconsHtml(type) {
+        const cost = Game.getCost(type);
+        const res = Game.getState().resources;
+        const parts = ['wood', 'stone', 'iron'].filter(r => cost[r] > 0)
+            .map(r => `<span class="ci${res[r] < cost[r] ? ' missing' : ''}">${ic(r)}${cost[r]}</span>`);
+        return parts.length ? parts.join('') : `<span class="c-free">${t('free')}</span>`;
+    }
+
+    // Workers and what the building gives, as compact icon chips
+    function infoHtml(def) {
+        const parts = [];
+        if (def.workers > 0) parts.push(`<span class="ci">${ic('pop')}${def.workers}</span>`);
+        if (def.production) {
+            const p = def.production;
+            parts.push(`<span class="ci up">${ic(p.resource)}+${fmtNum(p.amount * 60 / p.cycle)}/min</span>`);
+        }
+        if (def.provides.populationCap) parts.push(`<span class="ci up">+${def.provides.populationCap} ${ic('pop')}</span>`);
+        if (def.provides.storage) parts.push(`<span class="ci up">${ic('storage')}+${def.provides.storage}</span>`);
+        if (def.crafts) parts.push(`<span class="ci up">${Object.keys(WEAPONS).map(w => ic(w)).join('')}</span>`);
+        if (def.recruits) parts.push(`<span class="ci up">${ic('shield')}</span>`);
+        return parts.join('');
+    }
+
+    // Short reason on the card itself (the full one is shown when tapping it)
+    function shortReason(type) {
+        const def = BUILDINGS[type];
+        if (def.limit !== null && BuildingManager.countByType(type) >= def.limit) return t('b.built');
+        if (type !== 'castle' && !Game.hasCastle()) return t('lock.castle');
+        if (type !== 'castle' && type !== 'warehouse' && !Game.hasWarehouse()) return t('lock.warehouse');
+        const cost = Game.getCost(type), res = Game.getState().resources;
+        const missing = ['wood', 'stone', 'iron'].filter(r => cost[r] > res[r])
+            .map(r => `${Math.ceil(cost[r] - res[r])} ${resName(r)}`);
+        if (missing.length) return t('lock.missing', { list: missing.join(', ') });
+        const free = Game.getFreeWorkers();
+        if (def.workers > free) return t('lock.workers', { n: def.workers, have: free });
+        return '';
     }
 
     function costHtml(def) {
         const parts = [];
-        ['wood', 'stone', 'iron'].forEach(res => {
-            if (def.cost[res] > 0) {
-                parts.push(`<span class="cost" data-res="${res}"><i class="mini-icon" data-icon="${res}" role="img" aria-label="${res}"></i>${def.cost[res]}</span>`);
-            }
-        });
-        if (def.workers > 0) {
-            parts.push(`<span class="cost" data-res="workers"><i class="mini-icon" data-icon="pop" role="img" aria-label="villagers"></i>${def.workers}</span>`);
-        }
-        if (parts.length === 0) parts.push('<span class="cost free">Free</span>');
-        return parts.join('');
+        const cost = Game.getCost(def.key);
+        if (cost.wood > 0) parts.push(`<span class="c-wood">${cost.wood} ${resName('wood')}</span>`);
+        if (cost.stone > 0) parts.push(`<span class="c-stone">${cost.stone} ${resName('stone')}</span>`);
+        if (cost.iron > 0) parts.push(`<span class="c-iron">${cost.iron} ${resName('iron')}</span>`);
+        return parts.length ? parts.join(' · ') : `<span class="c-free">${t('free')}</span>`;
     }
 
-    function infoText(def) {
-        const info = [];
-        if (def.provides.populationCap) info.push(`+${def.provides.populationCap} villagers (eat ${def.provides.populationCap} food/day)`);
-        if (def.provides.storage) info.push(`+${def.provides.storage} storage`);
+    function infoString(def) {
+        const parts = [];
+        if (def.workers > 0) parts.push(t(def.workers > 1 ? 'menu.workers' : 'menu.worker', { n: def.workers }));
+        if (def.provides.populationCap) parts.push(t('menu.villagers', { n: def.provides.populationCap }));
+        if (def.provides.storage) parts.push(t('menu.storage', { n: def.provides.storage }));
+        if (def.crafts) parts.push(`${t('info.forges')}: ${Object.keys(WEAPONS).map(w => wName(w, 2)).join(', ')}`);
         if (def.production) {
-            let p = `+${def.production.amount} ${def.production.resource}/day`;
-            if (def.production.growthDays) p += ` after ${def.production.growthDays} days`;
-            info.push(p);
+            parts.push(t('menu.prod', { n: fmtNum(def.production.amount * 60 / def.production.cycle), res: resName(def.production.resource) }));
         }
-        return info.join(' · ');
+        return parts.join(' · ');
     }
 
-    function buildBuildingMenu() {
-        els.buildingList.innerHTML = '';
-        BUILD_ORDER.forEach(type => {
-            const def = BUILDINGS[type];
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'building-btn';
-            btn.dataset.type = type;
-            btn.title = def.description;
-
-            const thumb = Sprites.getBuildingThumbnail(type, 48);
-            thumb.className = 'b-thumb';
-
-            const body = document.createElement('span');
-            body.className = 'b-body';
-            body.innerHTML = `
-                <span class="b-name">${def.name}</span>
-                <span class="b-cost">${costHtml(def)}</span>
-                <span class="b-status">Built</span>
-                <span class="b-info">${infoText(def)}</span>
-            `;
-
-            btn.append(thumb, body);
-            btn.addEventListener('click', () => onBuildingCardClick(btn, type));
-            els.buildingList.appendChild(btn);
-        });
-    }
-
-    // Disabled cards stay tappable: they explain what is missing instead of doing nothing
-    function onBuildingCardClick(btn, type) {
-        const blocker = Game.getBuildBlocker(type);
-        if (blocker && selectedBuilding !== type) {
-            btn.classList.remove('nope');
-            void btn.offsetWidth; // restart the shake animation
-            btn.classList.add('nope');
-            showTooltipFor(btn, blocker, { tone: 'bad', timeout: 2600 });
-            return;
+    function showBuildingTooltip(btn, type) {
+        if (isCompact()) return;
+        const def = BUILDINGS[type];
+        const reason = Game.getUnavailableReason(type);
+        let html = `<div class="tt-title">${bName(def)}</div><div class="tt-desc">${bDesc(def)}</div>`;
+        html += `<div class="tt-row"><span>${t('tt.size')}</span><span>${t('tt.tiles', { w: def.width, h: def.height })}</span></div>`;
+        html += `<div class="tt-row"><span>${t('tt.cost')}</span><span>${costHtml(def)}</span></div>`;
+        if (def.workers) html += `<div class="tt-row"><span>${t('tt.workers')}</span><span>${t('tt.eats', { n: def.workers, f: fmtNum(FOOD_PER_WORKER_PER_MIN) })}</span></div>`;
+        if (def.production) {
+            const p = def.production;
+            html += `<div class="tt-row"><span>${t('info.production')}</span><span>${t('tt.batch', { a: p.amount, res: resName(p.resource), s: p.cycle })}</span></div>`;
         }
-        selectBuilding(type);
+        if (def.onStone) html += `<div class="tt-row"><span>${t('tt.needs')}</span><span>${t('tt.onstone')}</span></div>`;
+        if (def.production?.resource === 'food') {
+            const wm = SEASONS.find(s => s.id === 'winter').food[def.key];
+            if (wm !== undefined && wm !== 1) html += `<div class="tt-row"><span>${t('tt.winter')}</span><span>${wm === 0 ? t('season.rest') : '×' + fmtNum(wm)}</span></div>`;
+        }
+        if (def.production?.requires) html += `<div class="tt-row"><span>${t('tt.needs')}</span><span>${def.production.requires === 'FOREST' ? t('tt.forest') : t('tt.stone')}</span></div>`;
+        if (reason) html += `<div class="tt-reason">${reason}</div>`;
+        html += `<div class="tt-hint">${t('tt.hotkey', { k: def.hotkey })}</div>`;
+        els.tooltip.innerHTML = html;
+        els.tooltip.classList.remove('hidden');
+        const r = btn.getBoundingClientRect();
+        const tw = els.tooltip.offsetWidth;
+        const th = els.tooltip.offsetHeight;
+        let x = Math.max(6, Math.min(window.innerWidth - tw - 6, r.left + r.width / 2 - tw / 2));
+        let y = Math.max(6, r.top - th - 10);
+        els.tooltip.style.left = x + 'px';
+        els.tooltip.style.top = y + 'px';
     }
 
-    function isTouchMode() {
-        return lastPointerType !== 'mouse';
+    function hideTooltip() {
+        els.tooltip.classList.add('hidden');
     }
 
     function selectBuilding(type) {
         if (selectedBuilding === type) {
-            deselectBuilding();
+            // Clicking the already selected building just confirms the choice (no surprise toggle)
+            AudioSys.play('select');
             return;
         }
         selectedBuilding = type;
-        placementPreview = null;
-        hideTooltip();
+        justPlaced = null;
+        pendingTouch = null;
+        if (catOf(type) !== activeCat) openCategory(catOf(type), false);
+        if (isCompact()) { bodyOpen = false; openCategory(activeCat, false); }
+        updatePlaceBanner();
         els.canvas.classList.add('placing');
-        hideInfo();
-
-        // Touch has no hover: put the ghost on the nearest free spot right away,
-        // so the player only has to adjust (tap / drag) and confirm
-        if (isTouchMode()) {
-            const vp = Renderer.getViewport();
-            const center = anchorTile(type, vp.x + vp.w / 2, vp.y + vp.h / 2);
-            const spot = findValidSpot(type, center.x, center.y) || center;
-            setPreviewTile(spot.x, spot.y);
-            ensurePreviewVisible();
-        }
+        AudioSys.play('select');
         updateBuildingButtons();
-        updatePlacementBar();
+        hideInfo();
+        refreshPreview();
     }
 
-    function deselectBuilding() {
+    function deselectBuilding(silent) {
+        if (selectedBuilding && !silent) AudioSys.play('deselect');
         selectedBuilding = null;
         placementPreview = null;
+        justPlaced = null;
+        pendingTouch = null;
         els.canvas.classList.remove('placing');
-        hideTooltip();
         updateBuildingButtons();
-        updatePlacementBar();
+        updatePlaceBanner();
+    }
+
+    function updatePlaceBanner() {
+        if (!els.placeBanner) return;
+        document.getElementById('game-container').classList.toggle('is-placing', !!selectedBuilding);
+        if (!selectedBuilding) { els.placeBanner.classList.add('hidden'); return; }
+        const touch = lastInputTouch || window.matchMedia('(pointer: coarse)').matches;
+        els.placeText.textContent = t('pl.placing', { name: bName(selectedBuilding) });
+        els.placeHint.textContent = touch ? t('pl.hint.touch') : t('pl.hint.mouse');
+        els.placeCancel.title = t('pl.cancel');
+        els.placeBanner.classList.remove('hidden');
     }
 
     function updateBuildingButtons() {
-        const gs = Game.getState();
-        const free = Game.getFreeWorkers();
-        const btns = els.buildingList.querySelectorAll('.building-btn');
-        btns.forEach(btn => {
+        const next = Game.getNextMilestone();
+        const goalType = next ? GOAL_BUILDING[next.id] : null;
+        const readyCats = new Set();
+        els.cpBuild.querySelectorAll('.cp-bld').forEach(btn => {
             const type = btn.dataset.type;
             const def = BUILDINGS[type];
-            const blocker = Game.getBuildBlocker(type);
-            const built = def.limit !== null && BuildingManager.countByType(type) >= def.limit;
-            btn.classList.toggle('disabled', !!blocker);
-            btn.classList.toggle('built', built);
+            const available = Game.isBuildingAvailable(type);
+            const done = def.limit !== null && BuildingManager.countByType(type) >= def.limit;
+            btn.classList.toggle('disabled', !available);
+            btn.classList.toggle('done', done);
             btn.classList.toggle('selected', type === selectedBuilding);
-            btn.setAttribute('aria-disabled', blocker ? 'true' : 'false');
-            btn.querySelectorAll('.cost[data-res]').forEach(chip => {
-                const res = chip.dataset.res;
-                const short = res === 'workers' ? def.workers > free : def.cost[res] > gs.resources[res];
-                chip.classList.toggle('short', short);
-            });
+            btn.classList.toggle('recommended', type === goalType && !done);
+            btn.setAttribute('aria-disabled', available ? 'false' : 'true');
+            // the castle disappears from the menu once it stands
+            btn.classList.toggle('gone', type === 'castle' && done);
+            const costEl = btn.querySelector('.b-cost');
+            const costHtmlNow = costIconsHtml(type);
+            if (costEl.innerHTML !== costHtmlNow) costEl.innerHTML = costHtmlNow;
+            const lockEl = btn.querySelector('.b-lock');
+            const reason = available ? '' : shortReason(type);
+            if (lockEl.textContent !== reason) lockEl.textContent = reason;
+            if (type === goalType && available) readyCats.add(btn.dataset.cat);
         });
+        els.cpCats.querySelectorAll('.cp-cat').forEach(tab => tab.classList.toggle('goal', readyCats.has(tab.dataset.cat)));
+        const castleBtn = els.cpBuild.querySelector('.cp-bld[data-type="castle"]');
+        if (castleBtn) castleBtn.classList.toggle('pulse', !Game.hasCastle() && selectedBuilding !== 'castle');
     }
 
+    // ---------- speed / top bar ----------
     function setupSpeedButtons() {
-        document.getElementById('speed-pause').addEventListener('click', () => setSpeed(0));
-        document.getElementById('speed-1x').addEventListener('click', () => setSpeed(1));
-        document.getElementById('speed-2x').addEventListener('click', () => setSpeed(2));
-        document.getElementById('speed-3x').addEventListener('click', () => setSpeed(3));
+        $('speed-pause').addEventListener('click', () => setSpeed(0));
+        $('speed-1x').addEventListener('click', () => setSpeed(1));
+        $('speed-2x').addEventListener('click', () => setSpeed(2));
+        $('speed-3x').addEventListener('click', () => setSpeed(3));
     }
 
     function setSpeed(speed) {
-        if (speed === 0) Game.togglePause();
-        else Game.setSpeed(speed);
+        Game.setSpeed(speed);
+        AudioSys.play('click');
         syncSpeedButtons();
-    }
-
-    // ---- Placement ----
-
-    // Top-left tile so that the building is centered under the pointer
-    function anchorTile(type, sx, sy) {
-        const def = BUILDINGS[type];
-        const w = Renderer.screenToWorld(sx, sy);
-        return {
-            x: Math.round(w.x / TILE_SIZE - def.width / 2),
-            y: Math.round(w.y / TILE_SIZE - def.height / 2),
-        };
-    }
-
-    function setPreviewTile(tileX, tileY) {
-        if (!selectedBuilding) {
-            placementPreview = null;
-            return;
-        }
-        const check = Game.canPlace(selectedBuilding, tileX, tileY);
-        placementPreview = {
-            type: selectedBuilding,
-            tileX,
-            tileY,
-            valid: check.ok,
-            reason: check.ok ? '' : check.reason,
-        };
-        updatePlacementBar();
-    }
-
-    function setPreviewAt(sx, sy) {
-        if (!selectedBuilding) {
-            placementPreview = null;
-            return;
-        }
-        const tile = anchorTile(selectedBuilding, sx, sy);
-        setPreviewTile(tile.x, tile.y);
-    }
-
-    // Nearest buildable spot, searching rings around (cx, cy)
-    function findValidSpot(type, cx, cy, maxRadius = 14) {
-        for (let r = 0; r <= maxRadius; r++) {
-            for (let dy = -r; dy <= r; dy++) {
-                for (let dx = -r; dx <= r; dx++) {
-                    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-                    if (Game.canPlace(type, cx + dx, cy + dy).ok) return { x: cx + dx, y: cy + dy };
-                }
-            }
-        }
-        return null;
-    }
-
-    // Scroll the map if the ghost ended up under the HUD or off screen. For
-    // production buildings, also bring the resource tiles in range into view,
-    // so the player can see *why* the spot works.
-    function ensurePreviewVisible() {
-        if (!placementPreview) return;
-        const pv = placementPreview;
-        const def = BUILDINGS[pv.type];
-        const cam = Renderer.getCamera();
-        const vp = Renderer.getViewport();
-        const margin = 24;
-        const onScreen = (wx0, wy0, wx1, wy1) =>
-            wx0 - cam.x >= vp.x + margin && wx1 - cam.x <= vp.x + vp.w - margin &&
-            wy0 - cam.y >= vp.y + margin && wy1 - cam.y <= vp.y + vp.h - margin;
-
-        const gx0 = pv.tileX * TILE_SIZE, gy0 = pv.tileY * TILE_SIZE;
-        const gx1 = gx0 + def.width * TILE_SIZE, gy1 = gy0 + def.height * TILE_SIZE;
-        let focusX = (gx0 + gx1) / 2;
-        let focusY = (gy0 + gy1) / 2;
-        let visible = onScreen(gx0, gy0, gx1, gy1);
-
-        const req = def.production && def.production.requires;
-        if (req) {
-            // centroid of the resource tiles in range
-            let sx = 0, sy = 0, n = 0;
-            for (let ty = pv.tileY - RESOURCE_RADIUS; ty < pv.tileY + def.height + RESOURCE_RADIUS; ty++) {
-                for (let tx = pv.tileX - RESOURCE_RADIUS; tx < pv.tileX + def.width + RESOURCE_RADIUS; tx++) {
-                    if (GameMap.getTerrain(tx, ty) === TERRAIN[req]) {
-                        sx += (tx + 0.5) * TILE_SIZE;
-                        sy += (ty + 0.5) * TILE_SIZE;
-                        n++;
-                    }
-                }
-            }
-            if (n > 0) {
-                const cx = sx / n, cy = sy / n;
-                visible = visible && onScreen(cx - 16, cy - 16, cx + 16, cy + 16);
-                focusX = (focusX + cx) / 2;
-                focusY = (focusY + cy) / 2;
-            }
-        }
-        if (!visible) Renderer.centerOn(focusX, focusY);
-    }
-
-    function pointInPreview(sx, sy) {
-        if (!placementPreview) return false;
-        const def = BUILDINGS[placementPreview.type];
-        const w = Renderer.screenToWorld(sx, sy);
-        const pad = 12; // fingers are not precise
-        const x0 = placementPreview.tileX * TILE_SIZE - pad;
-        const y0 = placementPreview.tileY * TILE_SIZE - pad;
-        return w.x >= x0 && w.x <= x0 + def.width * TILE_SIZE + pad * 2 &&
-               w.y >= y0 && w.y <= y0 + def.height * TILE_SIZE + pad * 2;
-    }
-
-    function tryPlace(type, tileX, tileY) {
-        const result = Game.placeBuilding(type, tileX, tileY);
-        if (!result) return null;
-
-        // Keep selected for rapid placement, unless limited or unaffordable now
-        if (!Game.isBuildingAvailable(type)) {
-            deselectBuilding();
-        } else if (isTouchMode()) {
-            // Offer the next free spot next to the one just built
-            const spot = findValidSpot(type, tileX, tileY);
-            if (spot) setPreviewTile(spot.x, spot.y);
-            else setPreviewTile(tileX, tileY);
-        } else if (placementPreview) {
-            setPreviewTile(placementPreview.tileX, placementPreview.tileY);
-        }
-        updateBuildingButtons();
-        updatePlacementBar();
-        return result;
-    }
-
-    function confirmPlacement() {
-        if (!selectedBuilding || !placementPreview || !placementPreview.valid) return;
-        tryPlace(selectedBuilding, placementPreview.tileX, placementPreview.tileY);
-    }
-
-    // Floating bar while placing: name, live reason, cancel (and Build on touch)
-    function updatePlacementBar() {
-        if (!selectedBuilding) {
-            els.placementBar.classList.add('hidden');
-            return;
-        }
-        const def = BUILDINGS[selectedBuilding];
-        const touch = isTouchMode();
-        els.pbName.textContent = def.name;
-        let hint;
-        let tone = '';
-        if (placementPreview && !placementPreview.valid) {
-            hint = placementPreview.reason;
-            tone = 'bad';
-        } else if (placementPreview) {
-            hint = touch ? 'Drag to move · tap Build' : 'Click to build · Esc to cancel';
-            tone = 'good';
-        } else {
-            hint = touch ? 'Tap the map to position' : 'Click the map to build · Esc to cancel';
-        }
-        els.pbHint.textContent = hint;
-        els.pbHint.className = tone ? `pb-hint ${tone}` : 'pb-hint';
-        els.pbConfirm.classList.toggle('hidden', !touch);
-        els.pbConfirm.disabled = !(placementPreview && placementPreview.valid);
-        els.placementBar.classList.remove('hidden');
-    }
-
-    function handleTap(sx, sy, pointerType) {
-        if (selectedBuilding) {
-            if (pointerType === 'mouse') {
-                const tile = anchorTile(selectedBuilding, sx, sy);
-                tryPlace(selectedBuilding, tile.x, tile.y);
-            } else {
-                // touch / pen: a tap only moves the ghost, "Build" confirms
-                setPreviewAt(sx, sy);
-            }
-            return;
-        }
-        // Tap on existing building - show info
-        const tile = Renderer.screenToTile(sx, sy);
-        const building = BuildingManager.getBuildingAt(tile.x, tile.y);
-        if (building) showBuildingInfo(building);
-        else hideInfo();
-    }
-
-    // ---- Map input: one code path for mouse, touch and pen ----
-    function setupCanvasInput() {
-        const canvas = els.canvas;
-        let drag = null; // { id, startX, startY, camX, camY, moved, mode, grab }
-
-        function pos(e) {
-            const rect = canvas.getBoundingClientRect();
-            return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-        }
-
-        canvas.addEventListener('pointerdown', e => {
-            if (!e.isPrimary || e.button > 0) return;
-            const p = pos(e);
-            const cam = Renderer.getCamera();
-            drag = { id: e.pointerId, startX: p.x, startY: p.y, camX: cam.x, camY: cam.y, moved: false, mode: 'pan' };
-            // On touch, pressing on the ghost drags the ghost instead of the map
-            if (e.pointerType !== 'mouse' && selectedBuilding && pointInPreview(p.x, p.y)) {
-                const w = Renderer.screenToWorld(p.x, p.y);
-                drag.mode = 'ghost';
-                drag.grab = {
-                    x: w.x - placementPreview.tileX * TILE_SIZE,
-                    y: w.y - placementPreview.tileY * TILE_SIZE,
-                };
-            }
-            try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-        });
-
-        canvas.addEventListener('pointermove', e => {
-            if (!e.isPrimary) return;
-            const p = pos(e);
-            if (drag && drag.id === e.pointerId) {
-                const dx = drag.startX - p.x;
-                const dy = drag.startY - p.y;
-                if (!drag.moved && Math.hypot(dx, dy) >= DRAG_THRESHOLD) {
-                    drag.moved = true;
-                    if (drag.mode === 'pan') canvas.classList.add('dragging');
-                }
-                if (drag.moved && drag.mode === 'pan') Renderer.setCamera(drag.camX + dx, drag.camY + dy);
-                if (drag.moved && drag.mode === 'ghost') {
-                    const w = Renderer.screenToWorld(p.x, p.y);
-                    setPreviewTile(
-                        Math.round((w.x - drag.grab.x) / TILE_SIZE),
-                        Math.round((w.y - drag.grab.y) / TILE_SIZE)
-                    );
-                }
-            }
-            // Mouse hover: ghost follows the pointer, reason follows the cursor
-            if (e.pointerType === 'mouse') {
-                setPreviewAt(p.x, p.y);
-                if (placementPreview && !placementPreview.valid && !(drag && drag.moved)) {
-                    showTooltip(placementPreview.reason, e.clientX + 16, e.clientY + 18, { tone: 'bad' });
-                } else {
-                    hideTooltip();
-                }
-            }
-        });
-
-        function endDrag(e, cancelled) {
-            if (!drag || drag.id !== e.pointerId) return;
-            const wasTap = !drag.moved && !cancelled;
-            drag = null;
-            canvas.classList.remove('dragging');
-            if (wasTap) {
-                const p = pos(e);
-                handleTap(p.x, p.y, e.pointerType);
-            }
-        }
-
-        canvas.addEventListener('pointerup', e => endDrag(e, false));
-        canvas.addEventListener('pointercancel', e => endDrag(e, true));
-        canvas.addEventListener('pointerleave', e => {
-            if (e.pointerType === 'mouse' && !drag) {
-                placementPreview = null;
-                hideTooltip();
-                updatePlacementBar();
-            }
-        });
-
-        // Trackpad / wheel scrolls the map
-        canvas.addEventListener('wheel', e => {
-            e.preventDefault();
-            if (e.ctrlKey) return; // pinch gesture on trackpads: ignore, don't zoom the page
-            const unit = e.deltaMode === 1 ? 16 : 1;
-            Renderer.moveCamera(e.deltaX * unit, e.deltaY * unit);
-        }, { passive: false });
-
-        // Right click to cancel
-        canvas.addEventListener('contextmenu', e => {
-            e.preventDefault();
-            deselectBuilding();
-        });
-    }
-
-    function setupKeyboard() {
-        document.addEventListener('keydown', e => {
-            if (e.key === 'Escape') {
-                deselectBuilding();
-                hideInfo();
-            }
-            if (e.key === ' ') {
-                // keyboard users activating a focused button keep the default
-                if (e.target.closest && e.target.closest('button')) return;
-                e.preventDefault();
-                setSpeed(0);
-            }
-            if (e.key === '1') setSpeed(1);
-            if (e.key === '2') setSpeed(2);
-            if (e.key === '3') setSpeed(3);
-        });
-    }
-
-    // ---- Tooltip ----
-    let tooltipTimer = null;
-
-    function showTooltip(text, x, y, opts = {}) {
-        const t = els.tooltip;
-        t.textContent = text;
-        t.className = opts.tone ? `tone-${opts.tone}` : '';
-        // measure, then keep it on screen
-        const r = t.getBoundingClientRect();
-        const nx = Math.max(8, Math.min(window.innerWidth - r.width - 8, x));
-        const ny = Math.max(8, Math.min(window.innerHeight - r.height - 8, y));
-        t.style.transform = `translate(${Math.round(nx)}px, ${Math.round(ny)}px)`;
-        clearTimeout(tooltipTimer);
-        if (opts.timeout) tooltipTimer = setTimeout(hideTooltip, opts.timeout);
-    }
-
-    // Above the element (bottom bar) or to its left (sidebar)
-    function showTooltipFor(el, text, opts = {}) {
-        showTooltip(text, 0, 0, opts);
-        const r = el.getBoundingClientRect();
-        const t = els.tooltip.getBoundingClientRect();
-        const inSidebar = r.left > window.innerWidth / 2 && r.top > 60 && r.width < window.innerWidth / 2;
-        if (inSidebar) {
-            showTooltip(text, r.left - t.width - 8, r.top + r.height / 2 - t.height / 2, opts);
-        } else if (r.top < window.innerHeight / 2) {
-            showTooltip(text, r.left + r.width / 2 - t.width / 2, r.bottom + 8, opts);
-        } else {
-            showTooltip(text, r.left + r.width / 2 - t.width / 2, r.top - t.height - 8, opts);
-        }
-    }
-
-    function hideTooltip() {
-        clearTimeout(tooltipTimer);
-        els.tooltip.classList.add('hidden');
-    }
-
-    function showBuildingInfo(building) {
-        els.infoTitle.textContent = building.def.name;
-        let html = `<p style="margin-bottom:8px;color:#9a8a68">${building.def.description}</p>`;
-
-        if (building.maxWorkers > 0) {
-            html += `<div class="stat"><span class="stat-label">Workers</span><span>${building.workers} / ${building.maxWorkers}</span></div>`;
-        }
-
-        if (building.def.production) {
-            const prod = building.def.production;
-            const status = building.grown ? (building.active ? 'Active' : 'No Workers') : `Growing (${building.growthProgress}/${prod.growthDays} days)`;
-            html += `<div class="stat"><span class="stat-label">Production</span><span>+${prod.amount} ${prod.resource}/day</span></div>`;
-            html += `<div class="stat"><span class="stat-label">Status</span><span>${status}</span></div>`;
-        }
-
-        if (building.def.provides.populationCap) {
-            html += `<div class="stat"><span class="stat-label">Housing</span><span>+${building.def.provides.populationCap} villagers</span></div>`;
-        }
-
-        if (building.def.provides.storage) {
-            html += `<div class="stat"><span class="stat-label">Storage</span><span>+${building.def.provides.storage}</span></div>`;
-        }
-
-        html += `<div class="stat" style="margin-top:6px"><span class="stat-label">Built on</span><span>Day ${building.dayPlaced}</span></div>`;
-
-        els.infoContent.innerHTML = html;
-        els.infoPanel.classList.remove('hidden');
-    }
-
-    function hideInfo() {
-        els.infoPanel.classList.add('hidden');
-    }
-
-    const RES_NAMES = { wood: 'Wood', stone: 'Stone', iron: 'Iron', food: 'Food' };
-    const fullNotified = {};
-
-    function isProducing(res, rates, foodProduced) {
-        return res === 'food' ? foodProduced > 0 : rates[res] > 0;
-    }
-
-    function resourceDetail(res) {
-        const gs = Game.getState();
-        const { rates, foodProduced, foodEaten } = Game.getRates();
-        if (res === 'pop') {
-            const free = gs.populationCap - gs.populationUsed;
-            return `Villagers: ${gs.populationCap} live here, ${gs.populationUsed} work, ${free} free. Each one eats 1 food a day.`;
-        }
-        const max = gs.maxStorage;
-        const amount = Math.floor(gs.resources[res]);
-        let text = `${RES_NAMES[res]}: ${amount} / ${max} stored`;
-        if (res === 'food') {
-            text += ` · +${foodProduced} grown, −${foodEaten} eaten a day`;
-            if (rates.food < 0) text += ` · lasts ${Math.floor(gs.resources.food / -rates.food)} more days`;
-        } else if (rates[res] > 0) {
-            text += ` · +${rates[res]} a day`;
-        } else {
-            text += ' · nothing produces it yet';
-        }
-        const rate = res === 'food' ? rates.food : rates[res];
-        if (gs.resources[res] >= max && isProducing(res, rates, foodProduced)) {
-            text += BuildingManager.countByType('warehouse') === 0
-                ? ' · Storage full, production is wasted! Build a Warehouse.'
-                : ' · Storage full, production is wasted!';
-        } else if (rate > 0) {
-            text += ` · full in ${Math.ceil((max - amount) / rate)} days`;
-        }
-        return text;
-    }
-
-    function updateResources() {
-        const gs = Game.getState();
-        const { rates, foodProduced } = Game.getRates();
-        const max = gs.maxStorage;
-
-        ['wood', 'stone', 'iron', 'food'].forEach(res => {
-            const chip = els.rates[res].closest('.resource');
-            const amount = gs.resources[res];
-            const rate = rates[res];
-            const producing = isProducing(res, rates, foodProduced);
-            const full = amount >= max && producing;
-            const fill = Math.min(1, amount / max);
-
-            els.values[res].textContent = Math.floor(amount);
-            els.fills[res].style.transform = `scaleX(${fill.toFixed(3)})`;
-            chip.classList.toggle('full', full);
-            chip.classList.toggle('near-full', !full && producing && fill >= 0.85);
-
-            let text = rate > 0 ? `+${rate}` : rate < 0 ? `${rate}` : '';
-            if (full) text += text ? ' · full' : 'full';
-            let alert = false;
-            if (res === 'food') {
-                if (rate < 0) {
-                    const days = Math.floor(amount / -rate);
-                    text += ` · ${days}d`;
-                    alert = days <= 2;
-                }
-                alert = alert || gs.starvationDays > 0;
-            }
-            chip.classList.toggle('alert', alert);
-            els.rates[res].textContent = text;
-            els.rates[res].classList.toggle('up', rate > 0 && !full);
-            els.rates[res].classList.toggle('down', rate < 0);
-            chip.title = resourceDetail(res);
-
-            // Say it once when production starts going to waste
-            if (full && !fullNotified[res]) {
-                fullNotified[res] = true;
-                const hint = BuildingManager.countByType('warehouse') === 0 ? ' Build a Warehouse to store more.' : '';
-                showNotification(`${RES_NAMES[res]} storage is full!${hint}`, 'warning');
-            } else if (!full) {
-                fullNotified[res] = false;
-            }
-        });
-
-        els.resPop.textContent = `${gs.populationUsed}/${gs.populationCap}`;
-        const free = gs.populationCap - gs.populationUsed;
-        els.rates.pop.textContent = gs.populationCap > 0 ? `${free} free` : '';
-        els.rates.pop.closest('.resource').title = resourceDetail('pop');
-
-        els.resDay.textContent = `Day ${gs.day}`;
-
-        updateBuildingButtons();
-    }
-
-    // Per frame: only the cheap day-progress bar
-    let lastDayFill = -1;
-    let lastPaused = null;
-    function tick() {
-        const gs = Game.getState();
-        const p = gs.started ? gs.dayProgress : 0;
-        if (Math.abs(p - lastDayFill) >= 0.002 || p < lastDayFill) {
-            els.dayFill.style.transform = `scaleX(${p.toFixed(3)})`;
-            lastDayFill = p;
-        }
-        if (gs.paused !== lastPaused) {
-            els.dayPill.classList.toggle('paused', gs.paused);
-            lastPaused = gs.paused;
-        }
-    }
-
-    // End of day: numbers float up from every producer, the castle shows what was eaten
-    function showDayReport(report) {
-        report.produced.forEach(p => {
-            const b = p.building;
-            const wasted = p.amount < p.wanted;
-            const text = p.amount > 0 ? `+${p.amount}` : 'full';
-            // start mid-building so the rise stays over its own roof, not the neighbour's labels
-            Renderer.spawnFloater(b.pixelX + b.width / 2, b.pixelY + b.height / 2, text, wasted ? '#ffcf6b' : '#c8f5a0', p.res);
-        });
-        if (report.foodNeeded > 0) {
-            const castle = BuildingManager.getAll().find(b => b.type === 'castle');
-            if (castle) {
-                const hungry = report.foodEaten < report.foodNeeded;
-                Renderer.spawnFloater(castle.pixelX + castle.width / 2, castle.pixelY + castle.height / 2,
-                    `-${report.foodNeeded}`, hungry ? '#ff5a4a' : '#ffa898', 'food');
-            }
-        }
-    }
-
-    function showNotification(message, type = 'info') {
-        const div = document.createElement('div');
-        div.className = `notification ${type}`;
-        div.textContent = message;
-        els.notifications.appendChild(div);
-        // Don't bury the map under messages (phones: 2, desktop: 3)
-        const max = window.innerWidth <= 760 ? 2 : 3;
-        while (els.notifications.children.length > max) els.notifications.firstChild.remove();
-        setTimeout(() => div.remove(), 3000);
-    }
-
-    function showGameOver() {
-        deselectBuilding();
-        hideInfo();
-        els.gameOver.classList.remove('hidden');
-    }
-
-    function hideWelcome() {
-        els.welcome.classList.add('hidden');
-    }
-
-    // savedInfo: null for a fresh start, or { day } when a saved settlement exists
-    let hasSave = false;
-    let confirmNewTimer = null;
-
-    function showWelcome(savedInfo) {
-        hasSave = !!savedInfo;
-        els.continueBtn.classList.toggle('hidden', !hasSave);
-        if (hasSave) els.continueBtn.textContent = `Continue · Day ${savedInfo.day}`;
-        resetNewGameButton();
-        els.welcome.classList.remove('hidden');
-    }
-
-    function resetNewGameButton() {
-        clearTimeout(confirmNewTimer);
-        els.startBtn.dataset.confirm = '';
-        els.startBtn.classList.toggle('secondary', hasSave);
-        els.startBtn.textContent = hasSave ? 'New Game' : 'Begin Your Reign';
-    }
-
-    function onContinue(cb) {
-        els.continueBtn.addEventListener('click', cb);
-    }
-
-    // With a save present, "New Game" needs a second tap so a misclick can't wipe the settlement
-    function onNewGame(cb) {
-        els.startBtn.addEventListener('click', () => {
-            if (hasSave && els.startBtn.dataset.confirm !== 'yes') {
-                els.startBtn.dataset.confirm = 'yes';
-                els.startBtn.textContent = 'Tap again to abandon your settlement';
-                clearTimeout(confirmNewTimer);
-                confirmNewTimer = setTimeout(resetNewGameButton, 3000);
-                return;
-            }
-            clearTimeout(confirmNewTimer);
-            hasSave = false;
-            cb();
-        });
     }
 
     function syncSpeedButtons() {
         const gs = Game.getState();
         document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
         const id = gs.paused ? 'speed-pause' : `speed-${gs.speed}x`;
-        const btn = document.getElementById(id);
-        if (btn) btn.classList.add('active');
+        const el = $(id);
+        if (el) el.classList.add('active');
+        els.pauseBanner.classList.toggle('hidden', !(gs.paused && gs.started && !gs.gameOver));
     }
 
-    // Re-sync every piece of UI with the game state (after new game / load)
-    function refreshAll() {
-        deselectBuilding();
-        hideInfo();
+    function setupTopbarButtons() {
+        els.muteBtn.addEventListener('click', () => {
+            AudioSys.init();
+            const muted = AudioSys.toggleMute();
+            updateMuteButton();
+            if (!muted) AudioSys.play('click');
+        });
+        els.helpBtn.addEventListener('click', () => {
+            toggleHelp();
+            AudioSys.play('click');
+        });
+        els.settingsBtn.addEventListener('click', () => {
+            toggleSettings();
+            AudioSys.play('click');
+        });
+        els.menuBtn.addEventListener('click', () => {
+            AudioSys.play('click');
+            confirmNewGame();
+        });
+        els.zoomIn.addEventListener('click', () => { Renderer.zoomStep(1); AudioSys.play('click'); updateZoomLabel(); });
+        els.zoomOut.addEventListener('click', () => { Renderer.zoomStep(-1); AudioSys.play('click'); updateZoomLabel(); });
+    }
+
+    function confirmNewGame() {
+        if (confirm(t('g.confirmnew'))) {
+            if (onNewGame) onNewGame();
+        }
+    }
+
+    function toggleHelp() {
+        els.settingsScreen.classList.add('hidden');
+        els.helpScreen.classList.toggle('hidden');
+    }
+
+    function toggleSettings() {
+        els.helpScreen.classList.add('hidden');
+        els.settingsScreen.classList.toggle('hidden');
+        if (!els.settingsScreen.classList.contains('hidden')) syncSettingsUI();
+    }
+
+    function updateZoomLabel() {
+        els.zoomLabel.textContent = Math.round(Renderer.getZoom() * 100) + '%';
+    }
+
+    let onNewGame = null;
+    function setNewGameHandler(fn) { onNewGame = fn; }
+
+    // ---------- settings dialog ----------
+    function setupSettings() {
+        els.settingsClose.addEventListener('click', () => { els.settingsScreen.classList.add('hidden'); AudioSys.play('click'); });
+        els.settingsScreen.addEventListener('click', (e) => {
+            if (e.target === els.settingsScreen) els.settingsScreen.classList.add('hidden');
+        });
+        els.langBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                AudioSys.play('click');
+                Lang.set(btn.dataset.lang);
+            });
+        });
+        els.toggleMusic.addEventListener('click', () => {
+            AudioSys.init();
+            AudioSys.toggleMusic();
+            AudioSys.play('click');
+            syncSettingsUI();
+        });
+        els.toggleFx.addEventListener('click', () => {
+            Atmosphere.setEnabled(!Atmosphere.isEnabled());
+            AudioSys.play('click');
+            syncSettingsUI();
+        });
+        els.toggleEdge.addEventListener('click', () => {
+            Settings.set('edgeScroll', !Settings.get('edgeScroll'));
+            AudioSys.play('click');
+            syncSettingsUI();
+        });
+        els.toggleSfx.addEventListener('click', () => {
+            AudioSys.init();
+            AudioSys.toggleSfx();
+            AudioSys.play('click');
+            syncSettingsUI();
+        });
+        els.settingsHelp.addEventListener('click', () => {
+            AudioSys.play('click');
+            toggleHelp();
+        });
+        els.settingsNew.addEventListener('click', () => {
+            AudioSys.play('click');
+            els.settingsScreen.classList.add('hidden');
+            confirmNewGame();
+        });
+    }
+
+    function syncSettingsUI() {
+        els.langBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.lang === Lang.get()));
+        setToggle(els.toggleMusic, AudioSys.isMusicOn());
+        setToggle(els.toggleSfx, AudioSys.isSfxOn());
+        setToggle(els.toggleFx, Atmosphere.isEnabled());
+        setToggle(els.toggleEdge, !!Settings.get('edgeScroll'));
+    }
+
+    function setToggle(btn, on) {
+        btn.classList.toggle('on', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const label = btn.querySelector('.toggle-label');
+        if (label) label.textContent = on ? t('s.on') : t('s.off');
+    }
+
+    // ---------- canvas input ----------
+    function getPointerPos(e) {
+        const rect = els.canvas.getBoundingClientRect();
+        const src = e.touches?.[0] || e.changedTouches?.[0] || e;
+        return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+    }
+
+    function refreshPreview() {
+        if (!selectedBuilding) { placementPreview = null; return; }
+        const def = BUILDINGS[selectedBuilding];
+
+        // Touch: the ghost stays where it was tapped until confirmed or moved
+        if (pendingTouch) {
+            const check = Game.canPlace(selectedBuilding, pendingTouch.tileX, pendingTouch.tileY);
+            const s = Renderer.worldToScreen((pendingTouch.tileX + def.width) * TILE_SIZE, (pendingTouch.tileY + def.height) * TILE_SIZE);
+            placementPreview = {
+                type: selectedBuilding, tileX: pendingTouch.tileX, tileY: pendingTouch.tileY,
+                valid: check.ok, reason: check.ok ? null : check.reason,
+                hint: check.ok ? t('cv.tap', { name: bName(def) }) : null,
+                screenX: s.x - 10, screenY: s.y - 14,
+            };
+            return;
+        }
+        if (!pointerOverCanvas || lastInputTouch) { placementPreview = null; return; }
+
+        const tile = Renderer.screenToTile(lastPointer.x, lastPointer.y);
+        // Right after building, keep quiet while the cursor is still on the new building
+        if (justPlaced) {
+            const b = justPlaced;
+            if (tile.x >= b.tileX && tile.x < b.tileX + b.def.width && tile.y >= b.tileY && tile.y < b.tileY + b.def.height) {
+                placementPreview = null;
+                return;
+            }
+            justPlaced = null;
+        }
+        const tx = tile.x - Math.floor((def.width - 1) / 2);
+        const ty = tile.y - Math.floor((def.height - 1) / 2);
+        const check = Game.canPlace(selectedBuilding, tx, ty);
+        placementPreview = {
+            type: selectedBuilding,
+            tileX: tx,
+            tileY: ty,
+            valid: check.ok,
+            reason: check.ok ? null : check.reason,
+            screenX: lastPointer.x,
+            screenY: lastPointer.y,
+        };
+    }
+
+    function anyOverlayOpen() {
+        return !els.welcome.classList.contains('hidden') || !els.gameOver.classList.contains('hidden');
+    }
+
+    // ---------- soldiers: selection and orders ----------
+    // Desktop: click / shift-click / double-click / left-drag box select, right-click moves,
+    // right- or middle-drag pans (left-drag pans too while you have no soldiers).
+    // Phones: tap selects, double tap selects the type, long press + drag draws a box,
+    // tap on the ground moves, one-finger drag always pans.
+    let orderMode = null;      // null | 'move' | 'patrol' | 'patrolAdd': waits for a target point
+    let unitView = false;      // the info scroll shows the soldier selection
+    let selBox = null;         // { x0, y0, x1, y1 } screen rect while box-selecting
+    let orderMarker = null;    // { x, y, t, kind } last order's destination
+    let lastClick = { t: 0, x: 0, y: 0, type: null };
+
+    function setOrderMode(mode) {
+        orderMode = mode;
+        els.canvas.classList.toggle('ordering', !!mode);
+        if (unitView) { refreshControls(true); infoRefreshT = 0; }
+    }
+
+    // Visible part of the map in world coordinates (between the top bar and the panel)
+    function visibleWorldRect() {
+        const top = els.resourceBar.offsetHeight || 0;
+        const bottom = window.innerHeight - (els.commandPanel.offsetHeight || 0);
+        const a = Renderer.screenToWorld(0, top), b = Renderer.screenToWorld(window.innerWidth, Math.max(top + 1, bottom));
+        return [a.x, a.y, b.x, b.y];
+    }
+
+    function selectTypeOnScreen(type, add) {
+        const ids = Units.inRect(...visibleWorldRect()).filter(u => u.type === type).map(u => u.id);
+        Units.select(ids, add);
+    }
+
+    function issueOrder(kind, w, keep) {
+        const sel = Units.getSelected();
+        if (!sel.length) { setOrderMode(null); return false; }
+        let n;
+        if (kind === 'stop') { Units.stop(); AudioSys.play('click'); setOrderMode(null); infoRefreshT = 0; return true; }
+        if (kind === 'patrol' || kind === 'patrolAdd') n = Units.patrolTo(null, w.x, w.y, kind === 'patrolAdd');
+        else n = Units.moveTo(null, w.x, w.y);
+        if (!n) {
+            AudioSys.play('error');
+            showNotification(t('sel.noway'), 'warning');
+        } else {
+            AudioSys.play('click');
+            orderMarker = { x: w.x, y: w.y, t: performance.now(), kind: kind === 'move' ? 'move' : 'patrol' };
+        }
+        // shift keeps adding patrol points
+        setOrderMode(keep && kind !== 'move' ? 'patrolAdd' : null);
+        infoRefreshT = 0;
+        return n > 0;
+    }
+
+    function setupEventListeners() {
+        isDragging = false;
+        let dragMode = 'pan';      // 'pan' | 'box'
+        let dragStart = { x: 0, y: 0 };
+        let cameraStart = { x: 0, y: 0 };
+        let dragDistance = 0;
+        let pinchDist = 0;
+        let longPress = null;
+        let dragButton = 0;
+
+        function cancelLongPress() { if (longPress) { clearTimeout(longPress); longPress = null; } }
+
+        function onPointerDown(e) {
+            const btn = e.button === undefined ? 0 : e.button;
+            if (btn > 2) return;
+            if (e.touches && e.touches.length === 2) {
+                pinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                isDragging = false;
+                selBox = null;
+                cancelLongPress();
+                e.preventDefault();
+                return;
+            }
+            const p = getPointerPos(e);
+            const wasTouch = lastInputTouch;
+            lastInputTouch = !!e.touches;
+            if (wasTouch !== lastInputTouch) updatePlaceBanner();
+            isDragging = true;
+            dragStart = p;
+            dragDistance = 0;
+            dragButton = btn;
+            // Mouse: left-drag draws a selection box once you have soldiers (Stronghold style)
+            dragMode = !e.touches && btn === 0 && !selectedBuilding && !orderMode && Units.getAll().length > 0 ? 'box' : 'pan';
+            const cam = Renderer.getCamera();
+            cameraStart = { x: cam.x, y: cam.y };
+            pointerOverCanvas = true;
+            lastPointer = p;
+            cancelLongPress();
+            if (e.touches && !selectedBuilding && Units.getAll().length > 0) {
+                // Touch: hold still, then drag, to draw a selection box
+                longPress = setTimeout(() => {
+                    longPress = null;
+                    if (!isDragging || dragDistance >= 8) return;
+                    dragMode = 'box';
+                    selBox = { x0: dragStart.x, y0: dragStart.y, x1: dragStart.x, y1: dragStart.y };
+                    try { window.getSelection()?.removeAllRanges(); } catch (_) { /* no selection API */ }
+                    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (_) { /* not allowed */ } }
+                    AudioSys.play('select');
+                }, 420);
+            }
+            if (btn === 1) e.preventDefault();
+            if (e.touches) e.preventDefault();
+        }
+
+        function onPointerMove(e) {
+            // Touches that did not start on the map (menu, dialogs) must scroll normally
+            if (e.touches && !isDragging && !pinchDist) return;
+            if (e.touches && e.touches.length === 2) {
+                const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                if (pinchDist > 0) {
+                    const rect = els.canvas.getBoundingClientRect();
+                    const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+                    const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+                    Renderer.setZoom(Renderer.getZoom() * (d / pinchDist), cx, cy);
+                    updateZoomLabel();
+                }
+                pinchDist = d;
+                e.preventDefault();
+                return;
+            }
+            const p = getPointerPos(e);
+            lastPointer = p;
+            pointerOverCanvas = e.target === els.canvas || isDragging;
+            if (!e.touches && e.target === els.canvas && lastInputTouch && !isDragging) {
+                lastInputTouch = false; // a real mouse is being used again
+                updatePlaceBanner();
+            }
+
+            if (isDragging) {
+                const dx = dragStart.x - p.x;
+                const dy = dragStart.y - p.y;
+                dragDistance = Math.sqrt(dx * dx + dy * dy);
+                if (dragDistance >= 8) cancelLongPress();
+                if (dragMode === 'box') {
+                    if (dragDistance >= 8 || selBox) selBox = { x0: dragStart.x, y0: dragStart.y, x1: p.x, y1: p.y };
+                } else {
+                    const z = Renderer.getZoom();
+                    Renderer.setCamera(cameraStart.x + dx / z, cameraStart.y + dy / z);
+                    if (dragDistance > 8) els.canvas.classList.add('dragging');
+                }
+            }
+
+            if (pointerOverCanvas) {
+                const tile = Renderer.screenToTile(p.x, p.y);
+                hoveredBuilding = selectedBuilding || orderMode ? null : (BuildingManager.getBuildingAt(tile.x, tile.y) || null);
+            } else {
+                hoveredBuilding = null;
+            }
+            refreshPreview();
+            if (e.touches) e.preventDefault();
+        }
+
+        function finishBox(e) {
+            const a = Renderer.screenToWorld(selBox.x0, selBox.y0), b = Renderer.screenToWorld(selBox.x1, selBox.y1);
+            selBox = null;
+            const ids = Units.inRect(a.x, a.y, b.x, b.y).map(u => u.id);
+            const add = e.shiftKey || e.ctrlKey || e.metaKey;
+            Units.select(ids, add);
+            if (Units.getSelected().length) { AudioSys.play('click'); showSelection(); }
+            else if (unitView) hideInfo();
+        }
+
+        function onPointerUp(e) {
+            if (e.touches && e.touches.length > 0) return;
+            pinchDist = 0;
+            cancelLongPress();
+            if (!isDragging) return;
+            isDragging = false;
+            els.canvas.classList.remove('dragging');
+            const btn = dragButton;
+
+            if (selBox) { finishBox(e); return; }
+
+            if (dragDistance < 8) {
+                const p = getPointerPos(e);
+                lastPointer = p;
+                pointerOverCanvas = true;
+                refreshPreview();
+                const tile = Renderer.screenToTile(p.x, p.y);
+
+                if (btn !== 0) {
+                    // right click: move the selected soldiers, otherwise cancel
+                    if (btn === 2) {
+                        if (Units.getSelected().length && !selectedBuilding) issueOrder('move', Renderer.screenToWorld(p.x, p.y));
+                        else if (selectedBuilding) deselectBuilding();
+                        else hideInfo();
+                    }
+                    return;
+                }
+
+                if (selectedBuilding) {
+                    const def0 = BUILDINGS[selectedBuilding];
+                    if (e.changedTouches) {
+                        // Touch: first tap positions the ghost, a tap on the ghost builds it
+                        const pend = pendingTouch;
+                        const onGhost = pend && tile.x >= pend.tileX && tile.x < pend.tileX + def0.width &&
+                            tile.y >= pend.tileY && tile.y < pend.tileY + def0.height;
+                        if (!onGhost) {
+                            pendingTouch = { tileX: tile.x - Math.floor((def0.width - 1) / 2), tileY: tile.y - Math.floor((def0.height - 1) / 2) };
+                            refreshPreview();
+                            AudioSys.play('click');
+                            return;
+                        }
+                    }
+                    const pp = placementPreview;
+                    const result = Game.placeBuilding(selectedBuilding, pp ? pp.tileX : tile.x, pp ? pp.tileY : tile.y);
+                    if (result) {
+                        AudioSys.play('buildStart');
+                        Effects.dust(result.pixelX, result.pixelY, result.width, result.height);
+                        justPlaced = result;
+                        pendingTouch = null;
+                        const def = BUILDINGS[selectedBuilding];
+                        if (result.type === 'castle' && !Game.hasWarehouse()) {
+                            // Guided start: the warehouse comes next and starts the clock
+                            selectBuilding('warehouse');
+                            showNotification(t('g.aftercastle'), 'info');
+                        } else if (result.type === 'warehouse' && BuildingManager.countByType('warehouse') === 1) {
+                            deselectBuilding(true);
+                        } else if ((def.limit !== null && BuildingManager.countByType(selectedBuilding) >= def.limit) ||
+                            !Game.isBuildingAvailable(selectedBuilding)) {
+                            deselectBuilding(true);
+                        }
+                        updateBuildingButtons();
+                        refreshPreview();
+                    } else {
+                        AudioSys.play('error');
+                    }
+                } else {
+                    const w = Renderer.screenToWorld(p.x, p.y);
+                    const add = e.shiftKey || e.ctrlKey || e.metaKey;
+                    if (orderMode) { issueOrder(orderMode, w, add && !e.changedTouches); return; }
+                    const unit = Units.pick(w.x, w.y);
+                    if (unit) {
+                        const now = performance.now();
+                        const dbl = now - lastClick.t < 380 && Math.hypot(p.x - lastClick.x, p.y - lastClick.y) < 24 && lastClick.type === unit.type;
+                        lastClick = { t: dbl ? 0 : now, x: p.x, y: p.y, type: unit.type };
+                        if (dbl) selectTypeOnScreen(unit.type, add);
+                        else if (add) Units.toggle(unit.id);
+                        else Units.select([unit.id]);
+                        AudioSys.play('click');
+                        showSelection();
+                        return;
+                    }
+                    // Phones: with soldiers selected, a tap on the map sends them there
+                    if (e.changedTouches && Units.getSelected().length) { issueOrder('move', w); return; }
+                    const villager = Villagers.pick(w.x, w.y);
+                    const building = BuildingManager.getBuildingAt(tile.x, tile.y);
+                    if (villager) {
+                        AudioSys.play('click');
+                        showVillagerInfo(villager);
+                    } else if (building) {
+                        AudioSys.play('click');
+                        showBuildingInfo(building);
+                    } else {
+                        hideInfo();
+                    }
+                }
+            }
+        }
+
+        els.canvas.addEventListener('mousedown', onPointerDown);
+        window.addEventListener('mousemove', onPointerMove);
+        window.addEventListener('mouseup', onPointerUp);
+        els.canvas.addEventListener('mouseleave', () => { pointerOverCanvas = false; hoveredBuilding = null; placementPreview = null; });
+        els.canvas.addEventListener('mouseenter', () => { pointerOverCanvas = true; });
+
+        els.canvas.addEventListener('touchstart', onPointerDown, { passive: false });
+        window.addEventListener('touchmove', onPointerMove, { passive: false });
+        window.addEventListener('touchend', onPointerUp);
+        window.addEventListener('touchcancel', onPointerUp);
+
+        els.canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const p = getPointerPos(e);
+            let d = e.deltaY;
+            if (e.deltaMode === 1) d *= 33;
+            else if (e.deltaMode === 2) d *= 400;
+            if (e.ctrlKey) {
+                // Trackpad pinch arrives as ctrl+wheel: zoom smoothly
+                Renderer.setZoom(Renderer.getZoom() * Math.exp(-d * 0.01), p.x, p.y);
+            } else {
+                // Collect small trackpad deltas; one mouse-wheel notch (~100) is one zoom step
+                const now = performance.now();
+                if (now - wheelT > 300) wheelAcc = 0;
+                wheelT = now;
+                wheelAcc += d;
+                if (Math.abs(wheelAcc) < 60) return;
+                Renderer.zoomStep(wheelAcc < 0 ? 1 : -1, p.x, p.y);
+                wheelAcc = 0;
+            }
+            updateZoomLabel();
+            refreshPreview();
+        }, { passive: false });
+
+        // right click is handled on mouse up (it can also be a drag that pans the map)
+        els.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        // iOS: a long press must never select text or open the callout (it draws a box)
+        els.canvas.addEventListener('selectstart', (e) => e.preventDefault());
+        document.addEventListener('selectstart', (e) => { if (isDragging) e.preventDefault(); });
+        window.addEventListener('blur', () => { pointerOverCanvas = false; });
+        document.addEventListener('mouseleave', () => { pointerOverCanvas = false; });
+        els.canvas.addEventListener('auxclick', (e) => e.preventDefault());
+
+        document.addEventListener('keydown', (e) => {
+            if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+            const k = e.key;
+
+            // Dialogs that can be closed with Escape
+            if (k === 'Escape') {
+                if (!els.helpScreen.classList.contains('hidden')) { els.helpScreen.classList.add('hidden'); return; }
+                if (!els.settingsScreen.classList.contains('hidden')) { els.settingsScreen.classList.add('hidden'); return; }
+            }
+            if (anyOverlayOpen()) return;
+
+            keys.add(k.toLowerCase());
+
+            if (k === 'Escape') {
+                if (selectedBuilding) deselectBuilding();
+                else if (orderMode) setOrderMode(null);
+                else hideInfo();
+            } else if ((k === 'p' || k === 'P') && Units.getSelected().length) {
+                setOrderMode(orderMode === 'patrol' ? null : 'patrol');
+                AudioSys.play('click');
+            } else if ((k === 'l' || k === 'L') && Units.getSelected().length) {
+                issueOrder('stop');
+            } else if (k === ' ') {
+                e.preventDefault();
+                Game.togglePause();
+                AudioSys.play('click');
+                syncSpeedButtons();
+            } else if (k === '1' || k === '2' || k === '3') {
+                setSpeed(parseInt(k, 10));
+            } else if (k === '+' || k === '=') {
+                Renderer.zoomStep(1); updateZoomLabel();
+            } else if (k === '-' || k === '_') {
+                Renderer.zoomStep(-1); updateZoomLabel();
+            } else if (k.toLowerCase() === 'm') {
+                els.muteBtn.click();
+            } else if (k.toLowerCase() === 'o') {
+                toggleSettings();
+            } else if (k === 'h' || k === 'H' || k === '?') {
+                toggleHelp();
+            } else if (k === 'Delete' || k === 'Backspace') {
+                if (selectedPlaced) tryDemolish(selectedPlaced.id);
+            } else if (k === 'c' || k === 'C') {
+                const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+                if (castle) Renderer.centerOn(castle.pixelX + castle.width / 2, castle.pixelY + castle.height / 2);
+            } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+                const type = BUILD_ORDER.find(bt => BUILDINGS[bt].hotkey.toLowerCase() === k.toLowerCase());
+                if (type) {
+                    if (Game.isBuildingAvailable(type)) selectBuilding(type);
+                    else { showNotification(Game.getUnavailableReason(type), 'warning'); AudioSys.play('error'); }
+                }
+            }
+        });
+        document.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+        window.addEventListener('blur', () => keys.clear());
+    }
+
+    // Desktop edge scrolling: the mouse within EDGE_PX of the visible map area (screen sides,
+    // just below the top bar, just above the panel) moves the camera that way, faster the
+    // closer it is. Mouse only: never on touch, while dragging, over UI or outside the window.
+    function edgeDir(pos, lo, hi) {
+        if (pos < lo + EDGE_PX) return -Math.min(1, (lo + EDGE_PX - pos) / EDGE_PX);
+        if (pos > hi - EDGE_PX) return Math.min(1, (pos - (hi - EDGE_PX)) / EDGE_PX);
+        return 0;
+    }
+    function edgeScrollActive() {
+        return !!Settings.get('edgeScroll') && pointerOverCanvas && !isDragging && !lastInputTouch && !noHover.matches
+            && !anyOverlayOpen() && els.settingsScreen.classList.contains('hidden');
+    }
+    function edgeScroll(dtSec) {
+        if (!edgeScrollActive()) return;
+        const top = els.resourceBar.offsetHeight || 0;
+        const bottom = window.innerHeight - (els.commandPanel.offsetHeight || 0);
+        const ex = edgeDir(lastPointer.x, 0, window.innerWidth);
+        const ey = edgeDir(lastPointer.y, top, bottom);
+        if (!ex && !ey) return;
+        // moveCamera divides by zoom: the map slides by the same screen distance at any zoom
+        const step = EDGE_SPEED * Math.min(dtSec, 0.1);
+        Renderer.moveCamera(ex * (0.4 + 0.6 * Math.abs(ex)) * step, ey * (0.4 + 0.6 * Math.abs(ey)) * step);
+        refreshPreview();
+    }
+
+    // Called every frame: keyboard panning, minimap, day bar
+    function tick(dtSec) {
+        let dx = 0, dy = 0;
+        if (keys.has('arrowleft') || keys.has('a')) dx -= 1;
+        if (keys.has('arrowright') || keys.has('d')) dx += 1;
+        if (keys.has('arrowup') || keys.has('w')) dy -= 1;
+        if (keys.has('arrowdown') || keys.has('s')) dy += 1;
+        dx = Math.sign(dx); dy = Math.sign(dy);
+        if (dx || dy) {
+            const speed = 600 * dtSec;
+            Renderer.moveCamera(dx * speed, dy * speed);
+            refreshPreview();
+        } else {
+            edgeScroll(dtSec);
+        }
+        if (els.minimap && !els.minimap.classList.contains('hidden')) {
+            minimapFrame = (minimapFrame + 1) % 3;
+            if (minimapFrame === 0) Renderer.renderMinimap(minimapCtx, els.minimap.width, els.minimap.height);
+        }
+        refreshInfo(dtSec);
+        const gs = Game.getState();
+        if (els.dayProgress) els.dayProgress.style.width = (gs.dayProgress * 100).toFixed(1) + '%';
+        updateSky(gs);
+    }
+
+    // ---------- sky / weather indicator ----------
+    let lastSkyIcon = '', lastSkyTitle = '';
+    let lastSeasonKey = '';
+    function updateSeason(gs) {
+        if (!els.seasonRes) return;
+        const s = Game.getSeason();
+        const toWinterMin = Math.ceil(s.secondsToWinter / 60);
+        const leftMin = Math.ceil(s.secondsLeft / 60);
+        const key = `${s.id}|${leftMin}|${toWinterMin}|${s.year}|${Lang.get()}`;
+        if (key === lastSeasonKey) return;
+        if (!lastSeasonKey.startsWith(s.id + '|')) {
+            els.iconSeason.innerHTML = '';
+            els.iconSeason.appendChild(Sprites.drawIcon(s.id));
+        }
+        lastSeasonKey = key;
+        els.resSeason.textContent = t('season.' + s.id);
+        els.seasonRes.title = s.id === 'winter'
+            ? t('season.tip.winter', { year: s.year, left: leftMin })
+            : t('season.tip', { name: t('season.' + s.id), year: s.year, left: leftMin, winter: toWinterMin });
+        els.seasonRes.classList.toggle('winter-soon', Game.isClockRunning() && s.id !== 'winter' && s.secondsToWinter <= WINTER_WARNING_SECONDS);
+    }
+
+    function updateSky(gs) {
+        updateSeason(gs);
+        const icon = Atmosphere.getSkyIcon();
+        if (icon !== lastSkyIcon && els.iconDay) {
+            els.iconDay.innerHTML = '';
+            els.iconDay.appendChild(Sprites.drawIcon(icon));
+            lastSkyIcon = icon;
+        }
+        const title = t('weather.title', { n: gs.day, w: t('weather.' + Atmosphere.getWeather()) });
+        if (title !== lastSkyTitle && els.dayRes) {
+            els.dayRes.title = title;
+            lastSkyTitle = title;
+        }
+    }
+
+    // ---------- minimap ----------
+    let minimapCtx = null;
+    let minimapFrame = 0;
+    function setupMinimap() {
+        if (!els.minimap) return;
+        minimapCtx = els.minimap.getContext('2d');
+        let down = false;
+        const moveTo = (e) => {
+            const r = els.minimap.getBoundingClientRect();
+            const src = e.touches?.[0] || e;
+            const fx = (src.clientX - r.left) / r.width;
+            const fy = (src.clientY - r.top) / r.height;
+            Renderer.centerOn(fx * MAP_PIXEL_W, fy * MAP_PIXEL_H);
+        };
+        els.minimap.addEventListener('mousedown', (e) => { down = true; moveTo(e); });
+        window.addEventListener('mousemove', (e) => { if (down) moveTo(e); });
+        window.addEventListener('mouseup', () => { down = false; });
+        els.minimap.addEventListener('touchstart', (e) => { moveTo(e); e.preventDefault(); }, { passive: false });
+        els.minimap.addEventListener('touchmove', (e) => { moveTo(e); e.preventDefault(); }, { passive: false });
+    }
+
+    // ---------- info panel (replaces the building strip, like a scroll) ----------
+    let infoKey = '';
+    function openInfoView() {
+        els.cpBuild.classList.add('hidden');
+        els.infoPanel.classList.remove('hidden');
+        hideTooltip();
+        syncBody();
+    }
+
+    function setPortrait(canvas, scale) {
+        els.infoPortrait.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = canvas.toDataURL();
+        img.style.width = Math.round(canvas.width * scale) + 'px';
+        img.style.height = Math.round(canvas.height * scale) + 'px';
+        els.infoPortrait.appendChild(img);
+    }
+
+    function stat(label, value, cls = '') {
+        return `<div class="stat"><span class="stat-label">${label}</span><span class="${cls}">${value}</span></div>`;
+    }
+
+    function bar(frac, color, label) {
+        const pct = Math.max(0, Math.min(1, frac)) * 100;
+        return `<div class="pbar"><div class="pbar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></div>${label ? `<span class="pbar-label">${label}</span>` : ''}</div>`;
+    }
+
+    // Goods in store: one row per resource with a fill bar against the capacity
+    function stockHtml() {
+        const gs = Game.getState();
+        const rates = Game.getRates();
+        const net = { wood: rates.wood, stone: rates.stone, iron: rates.iron, food: rates.food - Game.getFoodConsumption() };
+        let html = `<div class="stock-grid">`;
+        ['wood', 'stone', 'iron', 'food'].forEach(r => {
+            const v = Math.floor(gs.resources[r]);
+            const rate = Math.round(net[r] * 10) / 10;
+            const rateHtml = rate > 0 ? `<span class="rate up">+${fmtNum(rate)}/min</span>` : rate < 0 ? `<span class="rate down">${fmtNum(rate)}/min</span>` : '';
+            html += `<div class="stock-item${v >= gs.maxStorage ? ' full' : ''}" title="${t('res.' + r[0].toUpperCase() + r.slice(1))}">
+                <span class="stock-ic">${ic(r)}</span>
+                <span class="stock-name">${t('res.' + r[0].toUpperCase() + r.slice(1))}</span>
+                <span class="stock-val">${v}<span class="stock-max"> / ${gs.maxStorage}</span> ${rateHtml}</span>
+                ${bar(v / gs.maxStorage, COLORS[r] || '#c8a050')}
+            </div>`;
+        });
+        Object.keys(WEAPONS).forEach(w => {
+            const v = gs.weapons[w] || 0;
+            html += `<div class="stock-item${v >= WEAPON_STOCK_MAX ? ' full' : ''}" title="${cap(wName(w, 2))}">
+                <span class="stock-ic">${ic(w)}</span>
+                <span class="stock-name">${cap(wName(w, 2))}</span>
+                <span class="stock-val">${v}<span class="stock-max"> / ${WEAPON_STOCK_MAX}</span></span>
+                ${bar(v / WEAPON_STOCK_MAX, '#9aa4b8')}
+            </div>`;
+        });
+        return html + `</div>`;
+    }
+
+    function cap(str) { return str ? str[0].toUpperCase() + str.slice(1) : str; }
+
+    // "3 bows · 1 sword" with icons
+    function weaponsInline() {
+        const gs = Game.getState();
+        return Object.keys(WEAPONS).map(w => `<span class="nowrap">${ic(w)} ${gs.weapons[w] || 0}</span>`).join(' &nbsp;');
+    }
+
+    function weaponCostHtml(w) {
+        const cost = WEAPONS[w].cost, res = Game.getState().resources;
+        return Object.keys(cost).map(r => `<span class="${res[r] < cost[r] ? 'bad' : ''}">${ic(r)} ${cost[r]} ${resName(r)}</span>`).join(' ');
+    }
+
+    function smithInfoHtml(b) {
+        const w = Game.getProduct(b);
+        const wd = WEAPONS[w];
+        const st = Game.getSmithStatus(b);
+        let status;
+        if (b.buildStart && st === 'working') status = `<span>${t('info.building')}</span>`;
+        else if (st === 'noworkers') status = `<span class="bad">${t('info.noworkers')}</span>`;
+        else if (st === 'full') status = `<span class="bad">${t('smith.full', { max: WEAPON_STOCK_MAX })}</span>`;
+        else if (st === 'noinput') {
+            const res = Game.getState().resources;
+            const list = Object.entries(wd.cost).filter(([r, a]) => res[r] < a).map(([r, a]) => `${Math.ceil(a - res[r])} ${resName(r)}`).join(', ');
+            status = `<span class="bad">${t('smith.noinput', { list })}</span>`;
+        } else if (st === 'notime') status = `<span class="bad">${t('res.notime')}</span>`;
+        else status = `<span class="ok">${t('smith.working')}</span>`;
+        let html = stat(t('info.forges'), `${ic(w)} ${cap(wName(w, 1))}`);
+        html += stat(t('info.weaponcost'), weaponCostHtml(w));
+        html += stat(t('info.status'), status);
+        if (st === 'working' || b.inputPaid) {
+            const left = Math.max(0, Math.ceil((1 - (b.progress || 0)) * wd.cycle));
+            html += `<div class="stat stat-bar"><span class="stat-label">${t('info.delivery')}</span>${bar(b.progress || 0, '#9aa4b8', t('smith.next', { w: wName(w, 1), s: left }))}</div>`;
+        }
+        html += stat(t('info.weapons'), weaponsInline());
+        return html;
+    }
+
+    function barracksInfoHtml() {
+        let html = stat(t('info.weapons'), weaponsInline());
+        html += stat(t('info.free'), `${ic('pop')} ${Game.getFreeWorkers()}`, Game.getFreeWorkers() > 0 ? '' : 'bad');
+        const soldiers = Object.keys(WEAPONS).map(w => WEAPONS[w].unit)
+            .map(u => `<span class="nowrap">${t('unit.' + u)} ${Units.countByType(u)}</span>`).join(' · ');
+        html += stat(t('info.soldiers'), soldiers);
+        return html;
+    }
+
+    // Buttons above the info text: the smith's product, the barracks' recruits.
+    // Only rebuilt when they change, so a click is never lost to a refresh.
+    let controlsKey = '';
+    function controlsHtml(b) {
+        if (unitView) return orderButtonsHtml();
+        if (!b) return '';
+        if (b.def.crafts) {
+            const cur = Game.getProduct(b);
+            return `<span class="ctl-label">${t('info.choose')}</span>` + Object.keys(WEAPONS).map(w =>
+                `<button class="ctl-btn${w === cur ? ' active' : ''}" data-product="${w}" aria-pressed="${w === cur}">${ic(w)} ${cap(wName(w, 1))}</button>`).join('');
+        }
+        if (b.def.recruits) {
+            return Object.keys(WEAPONS).map(w => {
+                const unit = WEAPONS[w].unit;
+                const reason = Game.getRecruitReason(unit);
+                const short = !reason ? '' : Game.getFreeWorkers() < 1 ? t('recruit.nofree') : t('recruit.noweapon', { w: wName(w, 1) });
+                return `<button class="ctl-btn recruit${reason ? ' off' : ''}" data-recruit="${unit}"${reason ? ` aria-disabled="true" title="${reason}"` : ''}>` +
+                    `${ic(w)} <span>${t('recruit.btn', { name: t('unit.' + unit), w: wName(w, 1) })}${short ? `<small>${short}</small>` : ''}</span></button>`;
+            }).join('');
+        }
+        return '';
+    }
+
+    function refreshControls(force) {
+        const html = controlsHtml(selectedPlaced);
+        if (!force && html === controlsKey) return;
+        controlsKey = html;
+        els.infoControls.innerHTML = html;
+    }
+
+    function buildingInfoHtml(building) {
+        const def = building.def;
+        let html = `<p class="info-desc">${bDesc(def)}</p>`;
+
+        if (building.maxWorkers > 0) {
+            let people = '';
+            for (let i = 0; i < building.maxWorkers; i++) people += `<span class="worker${i < building.workers ? '' : ' empty'}">${ic('pop')}</span>`;
+            html += stat(t('info.workers'), `${people} ${building.workers} / ${building.maxWorkers}`);
+        }
+        if (def.production) {
+            const prod = def.production;
+            const out = Game.getBuildingOutput(building);
+            const resting = prod.resource === 'food' && Game.getSeasonMultiplier(building.type) === 0;
+            const status = building.buildStart ? `<span>${t('info.building')}</span>`
+                : !building.active ? `<span class="bad">${t('info.noworkers')}</span>`
+                : resting ? `<span class="bad">${t('season.rest')}</span>`
+                : !Game.isClockRunning() ? `<span class="bad">${t('res.notime')}</span>`
+                : `<span class="ok">${t('info.active')}</span>`;
+            const base = prod.amount * 60 / prod.cycle;
+            const cls = out > base + 0.01 ? 'ok' : out < base - 0.01 ? 'bad' : '';
+            html += stat(t('info.production'), `${ic(prod.resource)} ${t('menu.prod', { n: fmtNum(out), res: resName(prod.resource) })}`, cls);
+            html += stat(t('info.status'), status);
+            if (building.active && !resting) {
+                const mult = out / base || 1;
+                const left = Math.max(0, Math.ceil((1 - (building.progress || 0)) * prod.cycle / mult));
+                html += `<div class="stat stat-bar"><span class="stat-label">${t('info.delivery')}</span>${bar(building.progress || 0, COLORS[prod.resource] || '#ffd24a', t('info.next', { a: prod.amount, res: resName(prod.resource), s: left }))}</div>`;
+            }
+            if (prod.resource === 'food') {
+                const season = Game.getSeason();
+                const m = Game.getSeasonMultiplier(building.type, season);
+                html += stat(t('info.season'), `${t('season.' + season.id)} ${m === 0 ? '· ' + t('season.rest') : '×' + fmtNum(m)}`, m > 1 ? 'ok' : m < 1 ? 'bad' : '');
+            }
+        }
+        if (def.provides.populationCap) {
+            html += stat(t('info.housing'), `${ic('pop')} ${t('menu.villagers', { n: def.provides.populationCap })}`);
+        }
+        if (def.crafts) html += smithInfoHtml(building);
+        if (def.recruits) html += barracksInfoHtml();
+        // Warehouse and keep show the stockpile
+        if (def.provides.storage || building.type === 'castle') {
+            if (building.type === 'castle') {
+                const gs = Game.getState();
+                html += stat(t('info.people'), `${ic('pop')} ${t('info.people.value', { used: gs.populationUsed, cap: gs.populationCap, free: Game.getFreeWorkers() })}`);
+            }
+            html += `<div class="stock-head">${t('info.stock')}${def.provides.storage ? ` · ${t('info.storage.this', { n: def.provides.storage })}` : ''}</div>`;
+            html += stockHtml();
+        }
+        html += stat(t('info.built'), t('info.day', { n: building.dayPlaced }));
+        return html;
+    }
+
+    function showBuildingInfo(building) {
+        leaveUnitView();
+        selectedPlaced = building;
+        selectedVillager = null;
+        els.infoTitle.textContent = bName(building.def);
+        refreshControls(true);
+        const spr = Sprites.getBuilding(building.type, { grown: building.grown });
+        if (spr) setPortrait(spr, Math.min(1.5, 84 / spr.height, 120 / spr.width));
+        els.infoContent.innerHTML = buildingInfoHtml(building);
+        infoKey = '';
+
+        els.infoActions.innerHTML = '';
+        if (building.type !== 'castle') {
+            const refund = ['wood', 'stone', 'iron']
+                .map(r => [r, Math.floor((building.paid || building.def.cost)[r] * DEMOLISH_REFUND)])
+                .filter(([, a]) => a > 0)
+                .map(([r, a]) => `+${a} ${resName(r)}`).join(', ');
+            const btn = document.createElement('button');
+            btn.className = 'danger-btn';
+            btn.textContent = refund ? t('info.demolish.refund', { r: refund }) : t('info.demolish');
+            btn.title = t('info.demolish.title');
+            btn.addEventListener('click', () => tryDemolish(building.id));
+            els.infoActions.appendChild(btn);
+        }
+        openInfoView();
+        keepInView(building.pixelX + building.width / 2, building.pixelY + building.height / 2, building.height);
+    }
+
+    // The scroll may cover what was clicked: move the camera so it stays visible
+    function keepInView(wx, wy, h = 32) {
+        const s = Renderer.worldToScreen(wx, wy);
+        const panelTop = window.innerHeight - (els.commandPanel.offsetHeight || 0);
+        const z = Renderer.getZoom();
+        if (s.y + h * z / 2 > panelTop - 8 || s.y < (els.resourceBar.offsetHeight || 48) + 8) Renderer.centerOn(wx, wy);
+    }
+
+    function villagerInfoHtml(v) {
+        const b = BuildingManager.getById(v.buildingId);
+        let html = `<p class="info-desc">${t('vil.desc.' + v.job)}</p>`;
+        html += stat(t('vil.activity'), t(Villagers.activity(v)));
+        if (v.carry) html += stat(t('vil.carrying'), `${ic(v.carry)} ${t('res.' + v.carry[0].toUpperCase() + v.carry.slice(1))}`);
+        if (b) html += stat(t('vil.workplace'), `<button class="link-btn" data-goto="${b.id}">${bName(b.def)}</button>`);
+        html += stat(t('vil.eats'), `${ic('food')} ${t('vil.eats.value', { n: fmtNum(FOOD_PER_WORKER_PER_MIN) })}`);
+        return html;
+    }
+
+    function showVillagerInfo(v) {
+        leaveUnitView();
+        selectedVillager = v;
+        selectedPlaced = null;
+        refreshControls(true);
+        els.infoTitle.textContent = `${v.name} · ${t('vil.job.' + v.job)}`;
+        setPortrait(Sprites.drawVillager(4, v.palette, false, v.tool), 3.5);
+        els.infoContent.innerHTML = villagerInfoHtml(v);
+        infoKey = '';
+        els.infoActions.innerHTML = '';
+        openInfoView();
+        keepInView(v.x, v.y - 10, 24);
+    }
+
+    function unitInfoHtml(u) {
+        let html = `<p class="info-desc">${t('unit.' + u.type + '.desc')}</p>`;
+        html += `<div class="stat stat-bar"><span class="stat-label">${t('unit.hp')}</span>${bar(u.hp / u.maxHp, '#c84a3a', `${Math.ceil(u.hp)} / ${u.maxHp}`)}</div>`;
+        html += stat(t('unit.state'), t('unit.state.' + u.state));
+        const w = UNIT_WEAPON[u.type];
+        html += stat(t('info.weapons'), `${ic(w)} ${cap(wName(w, 1))}`);
+        const b = BuildingManager.getById(u.barracksId);
+        if (b) html += stat(t('unit.from'), `<button class="link-btn" data-goto="${b.id}">${bName(b.def)}</button>`);
+        html += stat(t('vil.eats'), `${ic('food')} ${t('vil.eats.value', { n: fmtNum(FOOD_PER_WORKER_PER_MIN) })}`);
+        return html;
+    }
+
+    // ---------- soldier selection scroll ----------
+    function leaveUnitView() {
+        unitView = false;
+        Units.clearSelection();
+        setOrderMode(null);
+        selBox = null;
+    }
+
+    function orderButtonsHtml() {
+        const sel = Units.getSelected();
+        const patrolling = sel.some(u => u.state === 'patrol');
+        // keyboard hints are hidden on touch screens (css .hk)
+        const b = (order, label, title, active, key) =>
+            `<button class="ctl-btn order${active ? ' active' : ''}" data-order="${order}" aria-pressed="${!!active}" title="${title}">${label}${key ? ` <span class="hk">${key}</span>` : ''}</button>`;
+        return b('move', t('sel.move'), t('sel.move.title'), orderMode === 'move') +
+            b('patrol', t('sel.patrol'), t('sel.patrol.title'), orderMode === 'patrol', 'P') +
+            (patrolling ? b('patrolAdd', t('sel.addpoint'), t('sel.addpoint.title'), orderMode === 'patrolAdd') : '') +
+            b('stop', t('sel.stop'), t('sel.stop.title'), false, 'L') +
+            b('deselect', t('sel.deselect'), t('sel.deselect.title'), false, 'Esc');
+    }
+
+    function onOrderButton(order) {
+        if (order === 'deselect') { AudioSys.play('deselect'); hideInfo(); return; }
+        if (order === 'stop') { issueOrder('stop'); return; }
+        setOrderMode(orderMode === order ? null : order);
+        AudioSys.play('click');
+    }
+
+    function selectionHtml() {
+        const sel = Units.getSelected();
+        let html = '';
+        if (orderMode) html += `<p class="order-hint">${t(orderMode === 'move' ? 'sel.pick.move' : orderMode === 'patrol' ? 'sel.pick.patrol' : 'sel.pick.add')}</p>`;
+        if (sel.length === 1) return html + unitInfoHtml(sel[0]);
+        const types = Object.keys(WEAPONS).map(w => WEAPONS[w].unit);
+        const chips = types.map(ty => [ty, sel.filter(u => u.type === ty).length]).filter(([, n]) => n > 0)
+            .map(([ty, n]) => `<button class="link-btn sel-chip" data-seltype="${ty}" title="${t('sel.only')}">${ic(UNIT_WEAPON[ty])} ${t('unit.' + ty)} ×${n}</button>`).join(' ');
+        html += stat(t('sel.units'), chips);
+        const states = ['idle', 'move', 'patrol'].map(st => [st, sel.filter(u => u.state === st).length]).filter(([, n]) => n > 0)
+            .map(([st, n]) => `${t('unit.state.' + st)} ${n}`).join(' · ');
+        html += stat(t('unit.state'), states);
+        return html;
+    }
+
+    function showSelection() {
+        const sel = Units.getSelected();
+        if (!sel.length) { hideInfo(); return; }
+        selectedPlaced = null;
+        selectedVillager = null;
+        selectedUnit = sel.length === 1 ? sel[0] : null;
+        unitView = true;
+        refreshControls(true);
+        els.infoTitle.textContent = sel.length === 1 ? t('unit.' + sel[0].type) : t('sel.title', { n: sel.length });
+        setPortrait(Sprites.drawSoldier(sel[0].type, 0, false), 3.5);
+        els.infoContent.innerHTML = selectionHtml();
+        infoKey = '';
+        els.infoActions.innerHTML = '';
+        openInfoView();
+        const cx = sel.reduce((a, u) => a + u.x, 0) / sel.length, cy = sel.reduce((a, u) => a + u.y, 0) / sel.length;
+        keepInView(cx, cy - 10, 24);
+    }
+
+    // Keep the open scroll up to date (progress bars, stock, what a villager is doing)
+    let infoRefreshT = 0;
+    function refreshInfo(dt) {
+        if (els.infoPanel.classList.contains('hidden')) return;
+        infoRefreshT -= dt;
+        if (infoRefreshT > 0) return;
+        infoRefreshT = 0.25;
+        let html = null;
+        if (selectedPlaced) {
+            if (!BuildingManager.getById(selectedPlaced.id)) { hideInfo(); return; }
+            html = buildingInfoHtml(selectedPlaced);
+            refreshControls();
+        } else if (unitView) {
+            if (!Units.getSelected().length) { hideInfo(); return; }
+            html = selectionHtml();
+            refreshControls();
+        } else if (selectedVillager) {
+            if (!Villagers.getById(selectedVillager.id)) { hideInfo(); return; }
+            html = villagerInfoHtml(selectedVillager);
+        }
+        if (html !== null && html !== infoKey) { els.infoContent.innerHTML = html; infoKey = html; }
+    }
+
+    function tryDemolish(id) {
+        const b = BuildingManager.getById(id);
+        if (!b) return;
+        const ok = Game.demolishBuilding(id);
+        if (ok) {
+            AudioSys.play('demolish');
+            Effects.dust(b.pixelX, b.pixelY, b.width, b.height);
+            hideInfo();
+        } else {
+            AudioSys.play('error');
+        }
+    }
+
+    function hideInfo() {
+        leaveUnitView();
+        selectedPlaced = null;
+        selectedVillager = null;
+        selectedUnit = null;
+        refreshControls(true);
+        els.infoPanel.classList.add('hidden');
+        els.cpBuild.classList.remove('hidden');
+        syncBody();
+    }
+
+    // ---------- resources ----------
+    function updateResources() {
+        const gs = Game.getState();
+        const rates = Game.getRates();
+        const foodNet = rates.food - Game.getFoodConsumption();
+
+        // value plus its net rate per minute; the rate is always visible (phones drop the "/min")
+        function fmt(val, rate, always) {
+            const r = Math.round(rate * 10) / 10;
+            let s = `<span class="num">${Math.floor(val)}</span>`;
+            if (r !== 0 || always) s += ' ' + rateHtml(r);
+            return s;
+        }
+
+        els.resWood.innerHTML = fmt(gs.resources.wood, rates.wood);
+        els.resStone.innerHTML = fmt(gs.resources.stone, rates.stone);
+        els.resIron.innerHTML = fmt(gs.resources.iron, rates.iron);
+        // meat: the net balance is shown even at zero once anyone produces or eats
+        els.resFood.innerHTML = fmt(gs.resources.food, foodNet, rates.food > 0 || Game.getFoodConsumption() > 0);
+        els.resPop.textContent = `${gs.populationUsed} / ${gs.populationCap}`;
+        els.resDay.textContent = Game.isClockRunning() ? t('res.daytime', { n: gs.day, time: clockText() }) : t('res.notime');
+        if (els.storageLabel) els.storageLabel.textContent = `${gs.maxStorage}`;
+
+        ['wood', 'stone', 'iron', 'food'].forEach(r => {
+            const el = els['res' + r[0].toUpperCase() + r.slice(1)];
+            el.parentElement.classList.toggle('full', gs.resources[r] >= gs.maxStorage - 0.01);
+            el.parentElement.title = t('res.storage.value', { name: t('res.' + r[0].toUpperCase() + r.slice(1)), v: Math.floor(gs.resources[r]), max: gs.maxStorage });
+        });
+        els.foodRes.title = t('res.storage.value', { name: t('res.Food'), v: Math.floor(gs.resources.food), max: gs.maxStorage }) + '\n' + t('res.food.more');
+        if (foodPopOpen) renderFoodPop();
+        els.resFood.parentElement.classList.toggle('danger', gs.starving > 0 || (foodNet < 0 && gs.resources.food < -foodNet * 2));
+        els.resPop.parentElement.title = t('res.pop.title', { used: gs.populationUsed, cap: gs.populationCap, free: Game.getFreeWorkers() });
+
+        const next = Game.getNextMilestone();
+        if (els.goalText) {
+            els.goalText.textContent = next ? t('ms.' + next.id) : t('menu.goal.done');
+            els.goalCount.textContent = `${gs.milestones.length}/${MILESTONES.length}`;
+        }
+
+        updateBuildingButtons();
         syncSpeedButtons();
+        if (els.resourceBar.offsetHeight !== lastBarHeight) { lastBarHeight = els.resourceBar.offsetHeight; updateInsets(); }
+    }
+    let lastBarHeight = 0;
+
+    // "+1.5/min", "−2/min" (real minus sign) or "±0/min"; the unit is hidden on phones
+    function rateHtml(r) {
+        const cls = r > 0 ? 'up' : r < 0 ? 'down' : 'zero';
+        const sign = r > 0 ? '+' : r < 0 ? '\u2212' : '\u00b1';
+        return `<span class="rate ${cls}">${sign}${fmtNum(Math.abs(r))}<span class="rate-unit">/min</span></span>`;
+    }
+
+    // ---------- meat breakdown popover (click / tap on the meat counter) ----------
+    let foodPopOpen = false;
+    function setupFoodPop() {
+        const toggle = () => { AudioSys.play('click'); setFoodPop(!foodPopOpen); };
+        els.foodRes.addEventListener('click', toggle);
+        els.foodRes.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+        // any press outside closes it (the canvas stays usable underneath)
+        document.addEventListener('pointerdown', (e) => {
+            if (foodPopOpen && !els.foodRes.contains(e.target) && !els.foodPop.contains(e.target)) setFoodPop(false);
+        }, true);
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && foodPopOpen) setFoodPop(false); });
+        window.addEventListener('resize', () => { if (foodPopOpen) placeFoodPop(); });
+    }
+
+    function setFoodPop(open) {
+        foodPopOpen = open;
+        els.foodPop.classList.toggle('hidden', !open);
+        els.foodRes.classList.toggle('open', open);
+        els.foodRes.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) renderFoodPop();
+    }
+
+    function renderFoodPop() {
+        const gs = Game.getState();
+        const made = Game.getRates().food;
+        const eaten = Game.getFoodConsumption();
+        const net = made - eaten;
+        const hunters = BuildingManager.getProductionBuildings().filter(b => b.def.production.resource === 'food').length;
+        const r1 = (x) => Math.round(x * 10) / 10;
+        let html = `<div class="fp-title">${t('food.pop.title')}</div>`
+            + `<div class="fp-row"><span>${t('food.pop.made', { n: hunters })}</span>${rateHtml(r1(made))}</div>`
+            + `<div class="fp-row"><span>${t('food.pop.eaten', { n: gs.populationUsed })}</span>${rateHtml(-r1(eaten))}</div>`
+            + `<div class="fp-row fp-net"><span>${t('food.pop.net')}</span>${rateHtml(r1(net))}</div>`;
+        if (net < 0) html += `<div class="fp-warn">${t('food.pop.lasts', { m: fmtNum(Math.max(0, gs.resources.food) / -net) })}</div>`;
+        html += `<div class="fp-hint">${t('food.pop.hint', { f: fmtNum(FOOD_PER_WORKER_PER_MIN) })}</div>`;
+        els.foodPop.innerHTML = html;
+        placeFoodPop();
+    }
+
+    // below the bar, centred on the meat counter, kept on screen
+    function placeFoodPop() {
+        const r = els.foodRes.getBoundingClientRect();
+        const bar = els.resourceBar.getBoundingClientRect();
+        const w = els.foodPop.offsetWidth;
+        const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2));
+        els.foodPop.style.left = Math.round(left) + 'px';
+        els.foodPop.style.top = Math.round(bar.bottom + 6) + 'px';
+    }
+
+    // ---------- notifications ----------
+    const notifSounds = { warning: 'warning', danger: 'warning', success: null, grown: 'grown', info: null };
+    function showNotification(message, type = 'info') {
+        const existing = Array.from(els.notifications.children).find(n => n.dataset.msg === message);
+        if (existing) existing.remove();
+        const div = document.createElement('div');
+        div.className = `notification ${type}`;
+        div.dataset.msg = message;
+        div.textContent = message;
+        els.notifications.appendChild(div);
+        const maxNotes = isCompact() ? 2 : 4;
+        while (els.notifications.children.length > maxNotes) els.notifications.firstChild.remove();
+        const life = type === 'danger' ? 4500 : 3200;
+        div.style.animationDuration = `0.3s, 0.5s`;
+        div.style.animationDelay = `0s, ${(life - 500) / 1000}s`;
+        setTimeout(() => div.remove(), life);
+        const snd = notifSounds[type];
+        if (snd) AudioSys.play(snd);
+    }
+
+    function fmtNum(m) {
+        return Number(m).toLocaleString(Lang.get() === 'de' ? 'de-DE' : 'en-US', { maximumFractionDigits: 1 });
+    }
+
+    function clockText() {
+        const h = Game.getHour();
+        const hh = Math.floor(h), mm = Math.floor((h - hh) * 60 / 10) * 10;
+        return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+
+    // Big banner when a new season starts
+    function showSeason(season) {
+        const div = document.createElement('div');
+        div.className = `notification season season-${season.id}`;
+        div.innerHTML = `<span class="s-icon"></span><span class="s-text"><span class="s-name">${t('season.' + season.id)}</span><span class="s-sub">${t('season.start.' + season.id)}</span></span>`;
+        // copy the cached icon canvas (a DOM node can only live in one place)
+        const src = Sprites.drawIcon(season.id);
+        const icon = document.createElement('canvas');
+        icon.width = src.width; icon.height = src.height;
+        icon.getContext('2d').drawImage(src, 0, 0);
+        div.querySelector('.s-icon').appendChild(icon);
+        els.notifications.appendChild(div);
+        div.style.animationDelay = `0s, 5s`;
+        setTimeout(() => div.remove(), 5500);
+        AudioSys.play('season', { id: season.id });
+        updateResources();
+        if (selectedPlaced) showBuildingInfo(selectedPlaced);
+    }
+
+    function showMilestone(m) {
+        const div = document.createElement('div');
+        div.className = 'notification milestone';
+        div.innerHTML = `<span class="m-label">${t('g.milestone')}</span> ${t('ms.' + m.id)}`;
+        els.notifications.appendChild(div);
+        const maxNotes = isCompact() ? 2 : 4;
+        while (els.notifications.children.length > maxNotes) els.notifications.firstChild.remove();
+        div.style.animationDelay = `0s, 4.5s`;
+        setTimeout(() => div.remove(), 5000);
+        AudioSys.play('milestone');
         updateResources();
     }
 
-    function getPlacementPreview() {
-        return placementPreview;
+    // ---------- overlays ----------
+    function showGameOver() {
+        const gs = Game.getState();
+        els.gameOverStats.innerHTML = `
+            <div class="stat"><span class="stat-label">${t('go.days')}</span><span>${gs.day}</span></div>
+            <div class="stat"><span class="stat-label">${t('go.built')}</span><span>${gs.stats.built}</span></div>
+            <div class="stat"><span class="stat-label">${t('go.pop')}</span><span>${gs.stats.maxPop}</span></div>
+            <div class="stat"><span class="stat-label">${t('go.ms')}</span><span>${gs.milestones.length} / ${MILESTONES.length}</span></div>
+        `;
+        els.gameOver.classList.remove('hidden');
+        deselectBuilding(true);
+        hideInfo();
+        AudioSys.play('gameOver');
     }
 
+    function hideWelcome() {
+        els.welcome.classList.add('hidden');
+    }
+
+    function showWelcome() {
+        const info = Game.getSaveInfo();
+        if (info) {
+            els.continueBtn.classList.remove('hidden');
+            els.continueBtn.textContent = t('w.continue', { day: info.day, n: info.buildings });
+        } else {
+            els.continueBtn.classList.add('hidden');
+        }
+        els.welcome.classList.remove('hidden');
+    }
+
+    function getPlacementPreview() { return placementPreview; }
+    const hoverInfo = {};
+    function getHoverInfo() {
+        hoverInfo.building = hoveredBuilding;
+        hoverInfo.selected = selectedPlaced;
+        hoverInfo.villager = selectedVillager;
+        hoverInfo.unit = selectedUnit;
+        hoverInfo.box = selBox;
+        hoverInfo.marker = orderMarker;
+        hoverInfo.orderHint = orderMode && pointerOverCanvas && !lastInputTouch
+            ? t(orderMode === 'move' ? 'sel.pick.move' : orderMode === 'patrol' ? 'sel.pick.patrol' : 'sel.pick.add') : null;
+        hoverInfo.pointer = lastPointer;
+        return hoverInfo;
+    }
+
+    function getStartBtn() { return els.startBtn; }
+    function getContinueBtn() { return els.continueBtn; }
     function getRestartBtn() { return els.restartBtn; }
     function getGameOverEl() { return els.gameOver; }
 
     return {
         init,
+        tick,
         selectBuilding,
         deselectBuilding,
         updateResources,
+        updateBuildingButtons,
         showNotification,
+        showMilestone,
+        showSeason,
         showGameOver,
         hideWelcome,
         showWelcome,
-        onContinue,
-        onNewGame,
-        refreshAll,
+        hideInfo,
+        showSelection,
+        getOrderMode: () => orderMode,
         getPlacementPreview,
+        getHoverInfo,
+        getStartBtn,
+        getContinueBtn,
         getRestartBtn,
         getGameOverEl,
-        updateBuildingButtons,
-        measureLayout,
-        tick,
-        showDayReport,
+        setNewGameHandler,
+        syncSpeedButtons,
+        updateZoomLabel,
+        updateInsets,
     };
 })();
