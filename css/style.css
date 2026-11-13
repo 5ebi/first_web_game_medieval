@@ -897,6 +897,13 @@ kbd {
     margin-top: 18px;
 }
 
+.settings-credits {
+    margin: 12px 0 0;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-dim);
+}
+
 .overlay-box .settings-actions button {
     font-size: 14px;
     padding: 9px 18px;
