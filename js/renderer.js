@@ -831,8 +831,8 @@ const Renderer = (() => {
     function drawPlacementPreview(pp) {
         const def = BUILDINGS[pp.type];
         if (!def) return;
-        const px = pp.tileX * TILE_SIZE;
-        const py = pp.tileY * TILE_SIZE;
+        const px = pp.x;
+        const py = pp.y;
         const pw = def.width * TILE_SIZE;
         const ph = def.height * TILE_SIZE;
 
@@ -848,17 +848,9 @@ const Renderer = (() => {
             ctx.setLineDash([]);
         }
 
-        // Tile grid under the footprint
+        // Footprint (free placement: no tile grid inside it)
         ctx.fillStyle = pp.valid ? 'rgba(80, 255, 80, 0.18)' : 'rgba(255, 60, 60, 0.22)';
         ctx.fillRect(px, py, pw, ph);
-        ctx.strokeStyle = pp.valid ? 'rgba(120, 255, 120, 0.5)' : 'rgba(255, 120, 120, 0.5)';
-        ctx.lineWidth = 1 / zoom;
-        for (let dx = 1; dx < def.width; dx++) {
-            ctx.beginPath(); ctx.moveTo(px + dx * TILE_SIZE, py); ctx.lineTo(px + dx * TILE_SIZE, py + ph); ctx.stroke();
-        }
-        for (let dy = 1; dy < def.height; dy++) {
-            ctx.beginPath(); ctx.moveTo(px, py + dy * TILE_SIZE); ctx.lineTo(px + pw, py + dy * TILE_SIZE); ctx.stroke();
-        }
 
         ctx.globalAlpha = 0.7;
         const sprite = Sprites.getBuilding(pp.type);

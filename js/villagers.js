@@ -86,14 +86,13 @@ const Villagers = (() => {
 
     // A tile of the needed resource near the workplace (random among the closest ones)
     function findWorkSpot(v, b, resource) {
-        const def = b.def;
         const R = typeof RESOURCE_RADIUS !== 'undefined' ? RESOURCE_RADIUS : 5;
         const spots = [];
-        for (let dy = -R; dy < def.height + R; dy++) {
-            for (let dx = -R; dx < def.width + R; dx++) {
-                const tx = b.tileX + dx, ty = b.tileY + dy;
+        const r = GameMap.rectTiles(b.pixelX, b.pixelY, b.width, b.height);
+        for (let ty = r.y0 - R; ty <= r.y1 + R; ty++) {
+            for (let tx = r.x0 - R; tx <= r.x1 + R; tx++) {
                 if (GameMap.getTerrain(tx, ty) !== TERRAIN[resource]) continue;
-                const inside = dx >= 0 && dy >= 0 && dx < def.width && dy < def.height;
+                const inside = tx >= r.x0 && ty >= r.y0 && tx <= r.x1 && ty <= r.y1;
                 const px = tx * TILE_SIZE + 16, py = ty * TILE_SIZE + 22;
                 const d = Math.hypot(px - v.homeX, py - v.homeY) + (inside ? 40 : 0);
                 spots.push({ x: px, y: py, d });

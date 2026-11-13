@@ -189,14 +189,28 @@ const GameMap = (() => {
         }
     }
 
-    // Clear trees, stone piles and flowers under a building footprint.
+    // Tile range a pixel rect overlaps (any positive area), inclusive bounds.
+    // Footprints are free (world pixels), terrain stays a tile grid.
+    function rectTiles(x, y, w, h) {
+        return {
+            x0: Math.floor(x / TILE_SIZE), y0: Math.floor(y / TILE_SIZE),
+            x1: Math.ceil((x + w) / TILE_SIZE) - 1, y1: Math.ceil((y + h) / TILE_SIZE) - 1,
+        };
+    }
+
+    // Clear trees, stone piles and flowers under a building footprint (world pixels).
+    // A terrain tile is cleared when its centre lies under the footprint, so an
+    // off-grid building clears exactly as many tiles as one on the grid.
     // Returns true when terrain tiles changed (terrain cache must be rebuilt).
-    function clearArea(tileX, tileY, w, h, opts = {}) {
+    function clearArea(x, y, w, h, opts = {}) {
         let changed = false;
-        for (let dy = 0; dy < h; dy++) {
-            for (let dx = 0; dx < w; dx++) {
-                const tx = tileX + dx, ty = tileY + dy;
+        const x0 = x, y0 = y, x1 = x + w, y1 = y + h;
+        const r = rectTiles(x, y, w, h);
+        for (let ty = r.y0; ty <= r.y1; ty++) {
+            for (let tx = r.x0; tx <= r.x1; tx++) {
                 if (tx < 0 || ty < 0 || tx >= MAP_WIDTH || ty >= MAP_HEIGHT) continue;
+                const cx = tx * TILE_SIZE + TILE_SIZE / 2, cy = ty * TILE_SIZE + TILE_SIZE / 2;
+                if (cx < x0 || cx >= x1 || cy < y0 || cy >= y1) continue;
                 const t = terrain[ty][tx];
                 // a quarry keeps the stone field it stands on
                 if (t === TERRAIN.FOREST || (t === TERRAIN.STONE_DEPOSIT && !opts.keepStone) || t === TERRAIN.FLOWERS) {
@@ -205,13 +219,15 @@ const GameMap = (() => {
                 }
             }
         }
-        const x0 = tileX * TILE_SIZE, y0 = tileY * TILE_SIZE;
-        const x1 = x0 + w * TILE_SIZE, y1 = y0 + h * TILE_SIZE;
         const nTrees = treeMap.length, nStones = stoneMap.length;
         treeMap = treeMap.filter(t => !(t.x >= x0 - 6 && t.x < x1 + 6 && t.y + 16 >= y0 && t.y + 16 < y1 + 10));
         stoneMap = stoneMap.filter(s => !(s.x + 32 > x0 + 4 && s.x < x1 - 4 && s.y + 24 > y0 + 4 && s.y < y1));
         const nDec = decorations.length;
-        decorations = decorations.filter(d => !(d.x >= tileX && d.x < tileX + w && d.y >= tileY && d.y < tileY + h));
+        // decorations sit on tile coordinates: same centre rule as the terrain
+        decorations = decorations.filter(d => {
+            const cx = d.x * TILE_SIZE + TILE_SIZE / 2, cy = d.y * TILE_SIZE + TILE_SIZE / 2;
+            return !(cx >= x0 && cx < x1 && cy >= y0 && cy < y1);
+        });
         if (decorations.length !== nDec) changed = true;
         return changed || treeMap.length !== nTrees || stoneMap.length !== nStones;
     }
@@ -240,35 +256,57 @@ const GameMap = (() => {
     function getStones() { return stoneMap; }
     function getDecorations() { return decorations; }
 
-    // Check if area is buildable (not water, not on existing buildings)
-    function isBuildable(tileX, tileY, width, height, placedBuildings) {
-        for (let dy = 0; dy < height; dy++) {
-            for (let dx = 0; dx < width; dx++) {
-                const tx = tileX + dx;
-                const ty = tileY + dy;
-                const t = getTerrain(tx, ty);
-                if (t === TERRAIN.WATER || t === TERRAIN.SAND) return false;
+    // Does a footprint (world pixels) overlap a tile of one of these terrain types?
+    function rectHasTerrain(x, y, w, h, types) {
+        const r = rectTiles(x, y, w, h);
+        for (let ty = r.y0; ty <= r.y1; ty++) {
+            for (let tx = r.x0; tx <= r.x1; tx++) {
+                if (types.includes(getTerrain(tx, ty))) return true;
             }
         }
-        // Check overlap with existing buildings
+        return false;
+    }
+
+    // Area (px²) of a footprint that lies on terrain of one type
+    function terrainArea(x, y, w, h, type) {
+        const r = rectTiles(x, y, w, h);
+        let area = 0;
+        for (let ty = r.y0; ty <= r.y1; ty++) {
+            for (let tx = r.x0; tx <= r.x1; tx++) {
+                if (getTerrain(tx, ty) !== type) continue;
+                const ox = Math.min(x + w, (tx + 1) * TILE_SIZE) - Math.max(x, tx * TILE_SIZE);
+                const oy = Math.min(y + h, (ty + 1) * TILE_SIZE) - Math.max(y, ty * TILE_SIZE);
+                if (ox > 0 && oy > 0) area += ox * oy;
+            }
+        }
+        return area;
+    }
+
+    // Building footprints that overlap a rect (touching edges is fine)
+    function overlapsBuilding(x, y, w, h, placedBuildings) {
         for (const b of placedBuildings) {
-            if (rectsOverlap(tileX, tileY, width, height, b.tileX, b.tileY, b.def.width, b.def.height)) {
-                return false;
-            }
+            if (rectsOverlap(x, y, w, h, b.pixelX, b.pixelY, b.width, b.height)) return true;
         }
-        return true;
+        return false;
+    }
+
+    // Check if a footprint (world pixels) is buildable: inside the map, no water or
+    // sand under it, no other building overlapping it
+    function isBuildable(x, y, w, h, placedBuildings) {
+        if (rectHasTerrain(x, y, w, h, [TERRAIN.WATER, TERRAIN.SAND])) return false; // off-map reads as water
+        return !overlapsBuilding(x, y, w, h, placedBuildings);
     }
 
     function rectsOverlap(x1, y1, w1, h1, x2, y2, w2, h2) {
         return !(x1 + w1 <= x2 || x2 + w2 <= x1 || y1 + h1 <= y2 || y2 + h2 <= y1);
     }
 
-    // Check if there's a required resource nearby (within N tiles)
-    function hasNearbyResource(tileX, tileY, width, height, terrainType, radius = 5) {
-        for (let dy = -radius; dy < height + radius; dy++) {
-            for (let dx = -radius; dx < width + radius; dx++) {
-                const tx = tileX + dx;
-                const ty = tileY + dy;
+    // Check if there's a required resource near a footprint (within N tiles of
+    // every tile it touches)
+    function hasNearbyResource(x, y, w, h, terrainType, radius = 5) {
+        const r = rectTiles(x, y, w, h);
+        for (let ty = r.y0 - radius; ty <= r.y1 + radius; ty++) {
+            for (let tx = r.x0 - radius; tx <= r.x1 + radius; tx++) {
                 if (getTerrain(tx, ty) === TERRAIN[terrainType]) return true;
             }
         }
@@ -286,6 +324,10 @@ const GameMap = (() => {
         getStones,
         getDecorations,
         isBuildable,
+        rectTiles,
+        rectHasTerrain,
+        terrainArea,
+        overlapsBuilding,
         clearArea,
         hasNearbyResource,
     };
