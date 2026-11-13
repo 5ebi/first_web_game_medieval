@@ -21,6 +21,62 @@ _Last updated: 2026-11-13_
   (PWA, later Capacitor). Stay vanilla JS + canvas without a build step.
 - Look and feel: Stronghold (incl. Stronghold 4, Dec 2026) as the main reference for
   UI layout and economy feel; stays 2D pixel art.
+- Placement feedback: **Civilization** is the owner's reference. While placing, the map
+  shows from red to green how good each spot is for that building, and the yield with
+  its bonuses is spelled out before you commit.
+- Proposed, not decided: the Thronefall formula (build by day, defend at night, runs
+  with a score). It fits phones, a small scope and the soldiers that already exist.
+
+## Playtest 2026-11-13
+
+Played on a phone viewport: about 5 minutes in real time at 3x (to day 3), then 48 more
+game minutes simulated (to day 11). An earlier 15-minute session the same day ran on
+the stale PR #4 line by mistake; only findings that also hold on `main` are listed.
+
+What works: the village feels alive (villagers, smoke, seasons, weather, music), the
+"Next goal" strip gives direction, rates per minute are always visible, the info panel
+has actions (demolish), no console errors.
+
+What is missing:
+
+1. **No interesting decisions.** A script with a fixed build order plus four rules (no
+   free workers -> house, meat net low -> hunter, otherwise the next producer, recruit
+   when possible) had 12 of 14 goals after 4.5 real minutes, all 14 by day 9, and by
+   day 11 stood at 120 villagers with wood, stone, iron and meat all at the 400 cap.
+   If a bot with four rules plays optimally, the player has nothing to weigh up.
+2. **No threat.** Soldiers have no enemy; 12 archers stand next to the castle. Iron and
+   weapons pile up to their caps. Winter did not bite once (meat stayed near 400).
+3. **Position does not matter.** Beyond "forest within 5 tiles" and "half on stone" every
+   spot is as good as any other. Trees never run out. Neighbours do nothing.
+4. **Nothing after goal 14.** No score, no end of a run, no reason to continue.
+5. **No depth yet:** no upgrades, no production chains, no trade-offs (everything can be
+   built, nothing excludes anything).
+6. **Failing is only punishment:** game over after 60 s without meat deletes the save,
+   without an end screen that shows what was achieved.
+7. **Bug seen:** "Storage full: meat is going to waste" appeared with about 30 of 400
+   meat. Likely cause: meat is fractional, so `gained < p.amount` in `Game.simulate`
+   is true by rounding (28.3 + 4 - 28.3 < 4).
+
+## Reference games (use them for ideas)
+
+| Game | What it does right | What to take |
+|---|---|---|
+| **Civilization** | While placing a district, every tile shows its yield, tinted from poor to great; adjacency bonuses are listed before you commit. | Placement feedback (see "Now"). |
+| **Stronghold** | Visible chains (wheat -> mill -> bakery), people carry goods. Popularity as a lever (taxes, rations). Sieges give stone and iron a purpose. Missions with goals. | Chains, trade-offs, enemies, missions. |
+| **Thronefall** | Build by day, defend at night. Few but weighty decisions. 10-15 minutes per run, score, perks. | The rhythm of tension and rest, an end to a run. |
+| **Clash Royale** | 3-minute matches. Elixir forces a decision every few seconds. Collecting and upgrading, trophies, strong feedback on every action. | Decision density, progress across runs, juice. **Not** the timers, loot boxes and loss-aversion tricks. |
+| **Islanders / Dorfromantik** | Every placement scores points depending on its neighbours. No combat, ideal on phones. | Placement as a puzzle. |
+
+Why they work (check new features against these):
+
+- **Competence:** I get better and the game shows it (score, stars, rank). We have 14
+  goals, then no yardstick.
+- **Meaningful choice:** either-or instead of both. Today the player simply builds
+  everything.
+- **Goals on three time scales:** seconds (tap, feedback), minutes (next building, next
+  night), days (unlocks, best score). The last one is missing.
+- **Open loops and varying rewards:** "one more night until the tower" pulls players
+  back; events keep it fresh.
 
 ## Decisions (keep them unless there is a reason)
 
@@ -60,6 +116,34 @@ _Last updated: 2026-11-13_
   tap, routed through `musicGain`. The procedural music is only the fallback when a
   track can't load. SFX and ambience stay synthesized. No database: saves live in
   `localStorage`; a DB only becomes relevant for accounts, cloud saves or leaderboards.
+
+## Now (ordered by the owner on 2026-11-13; tracked as issues labelled `task`)
+
+1. **Free placement:** buildings sit wherever there is room, not on the tile grid.
+   Terrain stays a tile grid.
+2. **Reward placement** (after 1): lumberjack yield depends on the trees in its radius
+   and trees get fewer; neighbour bonuses (e.g. house near a well); Civilization-style
+   display while placing (red-to-green map tint, yield and bonuses at the ghost).
+3. **Open question for the owner:** "houses fill over days, more buffer at the start"
+   came from the stale build. On `main` only working villagers eat, so a new house costs
+   no meat, and the start never ran short in the playtest. Villagers moving in over
+   time could still be worth it for pacing.
+
+## Ideas from the playtest (by effect per effort)
+
+1. **Threat in the Thronefall rhythm** (large, the real lever; decide with the owner):
+   a raid every few nights. Soldiers, weapons, iron and stone (walls, towers) get a
+   purpose and position matters.
+2. **An end to a run and a score** (small to medium): end screen with days, villagers,
+   goals and best score; keep the save; villagers leave step by step instead of an
+   instant game over.
+3. **More goals with unlocks** (small): continue past goal 14; unlock buildings through
+   goals instead of offering everything at once.
+4. **Either-or choices** (medium): building upgrades, popularity levers (taxes,
+   rations), limited space near resources once yields depend on position.
+5. **Depth** (medium to large): production chains (wheat -> mill -> bakery), roads.
+6. **Progress across runs:** map seeds, a daily challenge seed, unlockable perks.
+7. **Balancing:** caps were reached for every resource by day 7; winter should bite.
 
 ## Backlog (rough priority)
 

@@ -1151,8 +1151,9 @@ const UI = (() => {
         els.infoPortrait.appendChild(img);
     }
 
-    function stat(label, value, cls = '') {
-        return `<div class="stat"><span class="stat-label">${label}</span><span class="${cls}">${value}</span></div>`;
+    // wide: a long value gets two columns of the scroll so it stays on one line
+    function stat(label, value, cls = '', wide = false) {
+        return `<div class="stat${wide ? ' stat-wide' : ''}"><span class="stat-label">${label}</span><span class="${cls}">${value}</span></div>`;
     }
 
     function bar(frac, color, label) {
@@ -1308,7 +1309,7 @@ const UI = (() => {
         if (def.provides.storage || building.type === 'castle') {
             if (building.type === 'castle') {
                 const gs = Game.getState();
-                html += stat(t('info.people'), `${ic('pop')} ${t('info.people.value', { used: gs.populationUsed, cap: gs.populationCap, free: Game.getFreeWorkers() })}`);
+                html += stat(t('info.people'), `${ic('pop')} ${t('info.people.value', { used: gs.populationUsed, cap: gs.populationCap, free: Game.getFreeWorkers() })}`, '', true);
             }
             html += `<div class="stock-head">${t('info.stock')}${def.provides.storage ? ` · ${t('info.storage.this', { n: def.provides.storage })}` : ''}</div>`;
             html += stockHtml();
