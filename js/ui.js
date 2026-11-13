@@ -614,16 +614,21 @@ const UI = (() => {
         return { x: src.clientX - rect.left, y: src.clientY - rect.top };
     }
 
+    // Top-left of a footprint centred on a world point, in whole pixels
+    function ghostAt(def, w) {
+        return { x: Math.round(w.x - def.width * TILE_SIZE / 2), y: Math.round(w.y - def.height * TILE_SIZE / 2) };
+    }
+
     function refreshPreview() {
         if (!selectedBuilding) { placementPreview = null; return; }
         const def = BUILDINGS[selectedBuilding];
 
         // Touch: the ghost stays where it was tapped until confirmed or moved
         if (pendingTouch) {
-            const check = Game.canPlace(selectedBuilding, pendingTouch.tileX, pendingTouch.tileY);
-            const s = Renderer.worldToScreen((pendingTouch.tileX + def.width) * TILE_SIZE, (pendingTouch.tileY + def.height) * TILE_SIZE);
+            const check = Game.canPlace(selectedBuilding, pendingTouch.x, pendingTouch.y);
+            const s = Renderer.worldToScreen(pendingTouch.x + def.width * TILE_SIZE, pendingTouch.y + def.height * TILE_SIZE);
             placementPreview = {
-                type: selectedBuilding, tileX: pendingTouch.tileX, tileY: pendingTouch.tileY,
+                type: selectedBuilding, x: pendingTouch.x, y: pendingTouch.y,
                 valid: check.ok, reason: check.ok ? null : check.reason,
                 hint: check.ok ? t('cv.tap', { name: bName(def) }) : null,
                 screenX: s.x - 10, screenY: s.y - 14,
@@ -632,23 +637,23 @@ const UI = (() => {
         }
         if (!pointerOverCanvas || lastInputTouch) { placementPreview = null; return; }
 
-        const tile = Renderer.screenToTile(lastPointer.x, lastPointer.y);
+        const w = Renderer.screenToWorld(lastPointer.x, lastPointer.y);
         // Right after building, keep quiet while the cursor is still on the new building
         if (justPlaced) {
             const b = justPlaced;
-            if (tile.x >= b.tileX && tile.x < b.tileX + b.def.width && tile.y >= b.tileY && tile.y < b.tileY + b.def.height) {
+            if (w.x >= b.pixelX && w.x < b.pixelX + b.width && w.y >= b.pixelY && w.y < b.pixelY + b.height) {
                 placementPreview = null;
                 return;
             }
             justPlaced = null;
         }
-        const tx = tile.x - Math.floor((def.width - 1) / 2);
-        const ty = tile.y - Math.floor((def.height - 1) / 2);
-        const check = Game.canPlace(selectedBuilding, tx, ty);
+        // Free placement: the ghost is centred on the cursor, no tile grid
+        const pos = ghostAt(def, w);
+        const check = Game.canPlace(selectedBuilding, pos.x, pos.y);
         placementPreview = {
             type: selectedBuilding,
-            tileX: tx,
-            tileY: ty,
+            x: pos.x,
+            y: pos.y,
             valid: check.ok,
             reason: check.ok ? null : check.reason,
             screenX: lastPointer.x,
@@ -803,8 +808,8 @@ const UI = (() => {
             }
 
             if (pointerOverCanvas) {
-                const tile = Renderer.screenToTile(p.x, p.y);
-                hoveredBuilding = selectedBuilding || orderMode ? null : (BuildingManager.getBuildingAt(tile.x, tile.y) || null);
+                const w = Renderer.screenToWorld(p.x, p.y);
+                hoveredBuilding = selectedBuilding || orderMode ? null : (BuildingManager.getBuildingAt(w.x, w.y) || null);
             } else {
                 hoveredBuilding = null;
             }
@@ -838,7 +843,7 @@ const UI = (() => {
                 lastPointer = p;
                 pointerOverCanvas = true;
                 refreshPreview();
-                const tile = Renderer.screenToTile(p.x, p.y);
+                const wp = Renderer.screenToWorld(p.x, p.y);
 
                 if (btn !== 0) {
                     // right click: move the selected soldiers, otherwise cancel
@@ -855,17 +860,18 @@ const UI = (() => {
                     if (e.changedTouches) {
                         // Touch: first tap positions the ghost, a tap on the ghost builds it
                         const pend = pendingTouch;
-                        const onGhost = pend && tile.x >= pend.tileX && tile.x < pend.tileX + def0.width &&
-                            tile.y >= pend.tileY && tile.y < pend.tileY + def0.height;
+                        const onGhost = pend && wp.x >= pend.x && wp.x < pend.x + def0.width * TILE_SIZE &&
+                            wp.y >= pend.y && wp.y < pend.y + def0.height * TILE_SIZE;
                         if (!onGhost) {
-                            pendingTouch = { tileX: tile.x - Math.floor((def0.width - 1) / 2), tileY: tile.y - Math.floor((def0.height - 1) / 2) };
+                            pendingTouch = ghostAt(def0, wp);
                             refreshPreview();
                             AudioSys.play('click');
                             return;
                         }
                     }
                     const pp = placementPreview;
-                    const result = Game.placeBuilding(selectedBuilding, pp ? pp.tileX : tile.x, pp ? pp.tileY : tile.y);
+                    const at = pp || ghostAt(def0, wp);
+                    const result = Game.placeBuilding(selectedBuilding, at.x, at.y);
                     if (result) {
                         AudioSys.play('buildStart');
                         Effects.dust(result.pixelX, result.pixelY, result.width, result.height);
@@ -906,7 +912,7 @@ const UI = (() => {
                     // Phones: with soldiers selected, a tap on the map sends them there
                     if (e.changedTouches && Units.getSelected().length) { issueOrder('move', w); return; }
                     const villager = Villagers.pick(w.x, w.y);
-                    const building = BuildingManager.getBuildingAt(tile.x, tile.y);
+                    const building = BuildingManager.getBuildingAt(wp.x, wp.y);
                     if (villager) {
                         AudioSys.play('click');
                         showVillagerInfo(villager);
