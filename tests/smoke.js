@@ -20,7 +20,8 @@ function buildVillage() {
     const near = (type, cx, cy, r = 14) => {
         for (let d = 0; d <= r; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
             if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
-            if (Game.canPlace(type, cx + dx, cy + dy).ok) return Game.placeBuilding(type, cx + dx, cy + dy);
+            const x = (cx + dx) * TILE_SIZE + 7, y = (cy + dy) * TILE_SIZE + 13; // off the 32 px grid on purpose
+            if (Game.canPlace(type, x, y).ok) return Game.placeBuilding(type, x, y);
         }
         return null;
     };
@@ -40,7 +41,8 @@ function buildMilitary() {
     const near = (type, cx, cy, r = 30) => {
         for (let d = 0; d <= r; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
             if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
-            if (Game.canPlace(type, cx + dx, cy + dy).ok) return Game.placeBuilding(type, cx + dx, cy + dy);
+            const x = (cx + dx) * TILE_SIZE + 7, y = (cy + dy) * TILE_SIZE + 13; // off the 32 px grid on purpose
+            if (Game.canPlace(type, x, y).ok) return Game.placeBuilding(type, x, y);
         }
         return null;
     };
@@ -48,8 +50,114 @@ function buildMilitary() {
     const s = Game.getState();
     s.resources = { wood: 200, stone: 200, iron: 50, food: 200 };
     const out = {};
-    ['iron_mine', 'weaponsmith', 'barracks'].forEach(t => { out[t] = !!near(t, castle.tileX, castle.tileY + 5); });
+    ['iron_mine', 'weaponsmith', 'barracks'].forEach(t => { out[t] = !!near(t, Math.floor(castle.pixelX / TILE_SIZE), Math.floor(castle.pixelY / TILE_SIZE) + 5); });
     return out;
+}
+
+// Free placement rules (issue #31): touching, overlap, water, quarry on stone, workers' routes
+function placementRules() {
+    const T = TILE_SIZE, s = Game.getState();
+    s.resources = { wood: 500, stone: 500, iron: 100, food: 200 };
+    s.maxStorage = Math.max(s.maxStorage, 600);
+    s.populationCap += 20;
+    const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+    const r = {};
+    // a free off-grid spot for a house, then its neighbours
+    let a = null;
+    for (let d = 8; d < 30 && !a; d++) for (let dy = -d; dy <= d && !a; dy++) for (let dx = -d; dx <= d && !a; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+        const x = castle.pixelX + dx * T + 5, y = castle.pixelY + dy * T + 9;
+        if (!Game.canPlace('house', x, y).ok) continue;
+        // room on the right for a second house that touches it
+        if (!Game.canPlace('house', x + 2 * T, y).ok) continue;
+        a = Game.placeBuilding('house', x, y);
+    }
+    r.placed = !!a && a.pixelX % T !== 0;
+    if (a) {
+        r.touch = Game.canPlace('house', a.pixelX + a.width, a.pixelY).ok;
+        const over = Game.canPlace('house', a.pixelX + a.width - 1, a.pixelY);
+        r.overlap = over.ok ? 'ok' : over.reason;
+        r.overlapReason = !over.ok && over.reason === t('g.occupied');
+        const b = r.touch && Game.placeBuilding('house', a.pixelX + a.width, a.pixelY);
+        r.touchPlaced = !!b;
+    }
+    // water: a footprint that reaches 4 px into water is refused, 4 px further back it fits
+    r.water = null;
+    for (let ty = 2; ty < MAP_HEIGHT - 3 && !r.water; ty++) for (let tx = 3; tx < MAP_WIDTH - 2 && !r.water; tx++) {
+        const tt = GameMap.getTerrain(tx, ty);
+        if (tt !== TERRAIN.WATER && tt !== TERRAIN.SAND) continue; // shore sand counts as water
+        const x = tx * T - 2 * T + 4, y = ty * T + 3;
+        const inWater = Game.canPlace('house', x, y), dry = Game.canPlace('house', x - 4, y);
+        if (!inWater.ok && dry.ok) r.water = { refused: inWater.reason === t('g.water'), reason: inWater.reason };
+    }
+    // quarry: just under half on stone is refused, half or more (off-grid) is allowed
+    const qw = BUILDINGS.quarry.width * T, qh = BUILDINGS.quarry.height * T, need = qw * qh * BUILDINGS.quarry.onStone;
+    r.quarryLow = null; r.quarryOk = null;
+    for (let y = 0; y < MAP_PIXEL_H - qh && !(r.quarryLow && r.quarryOk); y += 6) for (let x = 0; x < MAP_PIXEL_W - qw && !(r.quarryLow && r.quarryOk); x += 6) {
+        if (x % T === 0 && y % T === 0) continue;
+        if (!GameMap.isBuildable(x, y, qw, qh, BuildingManager.getAll())) continue;
+        const area = GameMap.terrainArea(x, y, qw, qh, TERRAIN.STONE_DEPOSIT);
+        if (!r.quarryLow && area > 0 && area < need) {
+            const c = Game.canPlace('quarry', x, y);
+            r.quarryLow = { ok: c.ok, reason: c.reason, onStone: c.reason === t('g.onstone'), share: +(area / (qw * qh)).toFixed(2) };
+        }
+        if (!r.quarryOk && area >= need && area < qw * qh) {
+            const c = Game.canPlace('quarry', x, y);
+            if (c.ok) r.quarryOk = { share: +(area / (qw * qh)).toFixed(2), placed: !!Game.placeBuilding('quarry', x, y) };
+        }
+    }
+    // villagers of off-grid workplaces still get to work
+    Villagers.sync(BuildingManager.getAll());
+    const reached = {};
+    for (let i = 0; i < 900; i++) {
+        Villagers.update(0.1);
+        Villagers.getAll().forEach(v => { if (v.state === 'working') reached[v.buildingType] = true; });
+    }
+    r.working = ['lumberjack', 'quarry', 'hunter'].filter(t => reached[t]);
+    r.offGrid = BuildingManager.getAll().filter(b => b.pixelX % T || b.pixelY % T).length;
+    return r;
+}
+
+// Places a house through the real input: mouse move + click, or tap + tap on the ghost
+async function placeByInput(page, name, touch) {
+    const target = await page.evaluate(() => {
+        const T = TILE_SIZE, s = Game.getState();
+        s.resources.wood = Math.max(s.resources.wood, 100); s.resources.stone = Math.max(s.resources.stone, 100);
+        const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+        Renderer.setZoom(1.5);
+        for (let d = 7; d < 30; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+            const x = castle.pixelX + dx * T + 11, y = castle.pixelY + dy * T + 19; // top-left, off grid
+            if (!Game.canPlace('house', x - 3, y - 3).ok || !Game.canPlace('house', x + 3, y + 3).ok) continue;
+            const cx = x + T, cy = y + T; // ghost is centred on the pointer
+            Renderer.centerOn(cx, cy);
+            const p = Renderer.worldToScreen(cx, cy);
+            if (document.elementFromPoint(p.x, p.y)?.id !== 'game-canvas') continue;
+            UI.selectBuilding('house');
+            return { x: p.x, y: p.y, count: BuildingManager.countByType('house') };
+        }
+        return null;
+    });
+    if (!target) { check(false, `${name}: free spot for a house found`); return; }
+    if (touch) await page.touchscreen.tap(target.x, target.y);
+    else await page.mouse.move(target.x, target.y);
+    await page.waitForTimeout(250);
+    const ghost = await page.evaluate(() => UI.getPlacementPreview());
+    await page.screenshot({ path: path.join(OUT, `${name}-ghost.png`) });
+    if (touch) await page.touchscreen.tap(target.x, target.y);
+    else await page.mouse.click(target.x, target.y);
+    await page.waitForTimeout(300);
+    const res = await page.evaluate((count) => {
+        const houses = BuildingManager.getAll().filter(b => b.type === 'house');
+        const h = houses[houses.length - 1];
+        UI.deselectBuilding(true);
+        Renderer.setZoom(1);
+        return { built: houses.length === count + 1, x: h && h.pixelX, y: h && h.pixelY };
+    }, target.count);
+    check(ghost && ghost.valid && (ghost.x % 32 !== 0 || ghost.y % 32 !== 0),
+        `${name}: ghost follows the ${touch ? 'tap' : 'cursor'} off the tile grid (${ghost && ghost.x},${ghost && ghost.y})`);
+    check(res.built && (res.x % 32 !== 0 || res.y % 32 !== 0) && res.x === ghost.x && res.y === ghost.y,
+        `${name}: house placed off the grid by ${touch ? 'tap + tap' : 'click'} (${JSON.stringify(res)})`);
 }
 
 // Centers a building and returns its screen position
@@ -57,7 +165,11 @@ async function focusBuilding(page, type) {
     const pos = await page.evaluate((type) => {
         const b = BuildingManager.getAll().find(x => x.type === type);
         Renderer.centerOn(b.pixelX + b.width / 2, b.pixelY + b.height / 2);
-        return Renderer.worldToScreen(b.pixelX + b.width / 2, b.pixelY + b.height / 2 - 6);
+        // a spot on the building where no villager walks (a tap on a villager opens the villager)
+        const pts = [[0.5, 0.4], [0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7], [0.5, 0.15]];
+        const p = pts.map(([fx, fy]) => ({ x: b.pixelX + b.width * fx, y: b.pixelY + b.height * fy }))
+            .find(q => !Villagers.pick(q.x, q.y) && !Villagers.pick(q.x, q.y + 6)) || { x: b.pixelX + b.width / 2, y: b.pixelY + b.height / 2 - 6 };
+        return Renderer.worldToScreen(p.x, p.y);
     }, type);
     await page.waitForTimeout(200);
     return pos;
@@ -82,15 +194,17 @@ function lumberjackPrice() {
     const near = (type, cx, cy, r = 25) => {
         for (let d = 0; d <= r; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
             if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
-            if (Game.canPlace(type, cx + dx, cy + dy).ok) return { b: Game.placeBuilding(type, cx + dx, cy + dy), x: cx + dx, y: cy + dy };
+            const x = (cx + dx) * TILE_SIZE, y = (cy + dy) * TILE_SIZE;
+            if (Game.canPlace(type, x, y).ok) return { b: Game.placeBuilding(type, x, y), x: cx + dx, y: cy + dy };
         }
         return null;
     };
     const spot = (cx, cy, r = 25) => {
         for (let d = 0; d <= r; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
             if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
-            if (GameMap.isBuildable(cx + dx, cy + dy, 2, 2, BuildingManager.getAll()) &&
-                GameMap.hasNearbyResource(cx + dx, cy + dy, 2, 2, 'FOREST')) return [cx + dx, cy + dy];
+            const x = (cx + dx) * TILE_SIZE, y = (cy + dy) * TILE_SIZE, w = 2 * TILE_SIZE;
+            if (GameMap.isBuildable(x, y, w, w, BuildingManager.getAll()) &&
+                GameMap.hasNearbyResource(x, y, w, w, 'FOREST')) return [x, y];
         }
         return null;
     };
@@ -123,7 +237,7 @@ function lumberjackPrice() {
     s.resources.wood = 40;
     r.richCost = Game.getCost('lumberjack').wood;
     // a lumberjack from an old save (no `paid`) loads as one that cost nothing
-    const saved = BuildingManager.serialize().concat([{ id: 999, type: 'lumberjack', tileX: x, tileY: y, workers: 2, active: true }]);
+    const saved = BuildingManager.serialize().concat([{ id: 999, type: 'lumberjack', tileX: x / TILE_SIZE, tileY: y / TILE_SIZE, workers: 2, active: true }]);
     BuildingManager.deserialize(saved);
     r.oldSavePaid = BuildingManager.getById(999)?.paid?.wood;
     return r;
@@ -199,7 +313,7 @@ function walkUnits(sec) {
         Units.getAll().forEach(u => {
             const tx = Math.floor(u.x / TILE_SIZE), ty = Math.floor((u.y - 1) / TILE_SIZE);
             if (GameMap.getTerrain(tx, ty) === TERRAIN.WATER) bad++;
-            const b = BuildingManager.getBuildingAt(tx, ty);
+            const b = BuildingManager.getBuildingAt(u.x, u.y - 1);
             if (b && b.type !== 'barracks') bad++; // they start at the barracks' edge
         });
     }
@@ -628,6 +742,19 @@ async function run(browser, name, ctxOpts, touch) {
     await page.evaluate(() => Game.update(20000));
     check(await page.evaluate(() => Villagers.getAll().length > 0), `${name}: villagers are out working`);
 
+    // ---- free placement (issue #31) ----
+    await placeByInput(page, name, touch);
+    if (name === 'desktop') {
+        const pr = await page.evaluate(placementRules);
+        check(pr.placed && pr.touch && pr.touchPlaced, `desktop: two houses off the grid touch edge to edge (${JSON.stringify({ placed: pr.placed, touch: pr.touch, both: pr.touchPlaced })})`);
+        check(pr.overlapReason, `desktop: 1 px overlap is refused with a reason (${pr.overlap})`);
+        check(pr.water && pr.water.refused, `desktop: footprint 4 px into water is refused (${JSON.stringify(pr.water)})`);
+        check(pr.quarryLow && !pr.quarryLow.ok && pr.quarryLow.onStone, `desktop: quarry under half on stone is refused (${JSON.stringify(pr.quarryLow)})`);
+        check(pr.quarryOk && pr.quarryOk.placed, `desktop: off-grid quarry at least half on stone is allowed (${JSON.stringify(pr.quarryOk)})`);
+        check(pr.working.length === 3, `desktop: villagers reach their off-grid workplaces (${pr.working.join(', ')})`);
+        check(pr.offGrid >= 6, `desktop: ${pr.offGrid} buildings stand off the tile grid`);
+    }
+
     // the map must stay visible above the menus
     const vp = page.viewportSize();
     const mapVisible = await page.evaluate(([w, h]) => document.elementFromPoint(w / 2, h * 0.4)?.id === 'game-canvas', [vp.width, vp.height]);
@@ -758,6 +885,7 @@ async function run(browser, name, ctxOpts, touch) {
     if (name === 'desktop') {
         await page.evaluate(() => Game.save());
         const before = await page.evaluate(() => BuildingManager.getAll().length);
+        const spots = await page.evaluate(() => BuildingManager.getAll().map(b => b.type + '@' + b.pixelX + ',' + b.pixelY).join(' '));
         await page.reload();
         await page.waitForTimeout(500);
         const cont = await page.isVisible('#continue-btn');
@@ -766,6 +894,9 @@ async function run(browser, name, ctxOpts, touch) {
         await page.waitForTimeout(400);
         const after = await page.evaluate(() => BuildingManager.getAll().length);
         check(after === before, `desktop: save restores ${before} buildings (got ${after})`);
+        const spotsAfter = await page.evaluate(() => BuildingManager.getAll().map(b => b.type + '@' + b.pixelX + ',' + b.pixelY).join(' '));
+        const offGrid = await page.evaluate(() => BuildingManager.getAll().filter(b => b.pixelX % TILE_SIZE || b.pixelY % TILE_SIZE).length);
+        check(spotsAfter === spots && offGrid > 0, `desktop: ${offGrid} off-grid positions survive a reload`);
         const kept = await page.evaluate(() => ({ units: Units.getAll().map(u => u.type).join(','), product: BuildingManager.getAll().find(b => b.type === 'weaponsmith')?.product }));
         check(kept.units === 'swordsman,swordsman' && kept.product === 'sword', `desktop: save keeps the soldiers and the smith's choice (${JSON.stringify(kept)})`);
         const patrol = await page.evaluate(() => {
@@ -774,6 +905,26 @@ async function run(browser, name, ctxOpts, touch) {
             return { states: Units.getAll().map(u => u.state), pts: before, moved: Units.getAll().every(u => u.path || u.state !== 'patrol') };
         });
         check(patrol.states.every(x => x === 'patrol') && patrol.pts.every(n => n === 2) && patrol.moved, `desktop: save keeps the patrol (${JSON.stringify(patrol)})`);
+
+        // A v4 save (tile positions, from before free placement) loads with every building in place
+        const v4 = await page.evaluate(() => {
+            const data = JSON.parse(localStorage.getItem(SAVE_KEY));
+            data.version = 4;
+            data.buildings.forEach((b, i) => { b.tileX = Math.floor(b.x / TILE_SIZE) + (i % 2); b.tileY = Math.floor(b.y / TILE_SIZE); delete b.x; delete b.y; });
+            Game.getState().gameOver = true; // keeps the page from overwriting the crafted save on unload
+            localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+            return data.buildings.map(b => b.type + '@' + b.tileX * TILE_SIZE + ',' + b.tileY * TILE_SIZE).join(' ');
+        });
+        await page.reload();
+        await page.waitForTimeout(500);
+        if (await page.isVisible('#continue-btn')) await page.click('#continue-btn');
+        await page.waitForTimeout(400);
+        const v4Loaded = await page.evaluate(() => ({
+            started: Game.getState().started,
+            spots: BuildingManager.getAll().map(b => b.type + '@' + b.pixelX + ',' + b.pixelY).join(' '),
+        }));
+        check(v4Loaded.started && v4Loaded.spots === v4, `desktop: v4 save with tile positions loads every building in the same place`);
+        await page.evaluate(() => Game.save());
 
         // An old v3 save with a blacksmith must still load: it is dropped and refunded
         const old = await page.evaluate(() => {
@@ -785,7 +936,7 @@ async function run(browser, name, ctxOpts, touch) {
             data.units = undefined;
             data.buildings = data.buildings.filter(b => !newer.includes(b));
             const c = data.buildings.find(b => b.type === 'castle');
-            data.buildings.push({ id: 999, type: 'blacksmith', tileX: c.tileX - 3, tileY: c.tileY, workers: 1, active: true, dayPlaced: 1, grown: true, paid: { wood: 30, stone: 20, iron: 10 } });
+            data.buildings.push({ id: 999, type: 'blacksmith', tileX: c.x / TILE_SIZE - 3, tileY: c.y / TILE_SIZE, workers: 1, active: true, dayPlaced: 1, grown: true, paid: { wood: 30, stone: 20, iron: 10 } });
             data.state.populationUsed += 1;
             data.state.milestones = (data.state.milestones || []).concat('smith');
             data.state.weapons = undefined;
@@ -817,7 +968,8 @@ async function run(browser, name, ctxOpts, touch) {
             let smith = null;
             for (let d = 0; d <= 30 && !smith; d++) for (let dy = -d; dy <= d && !smith; dy++) for (let dx = -d; dx <= d && !smith; dx++) {
                 if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
-                if (Game.canPlace('weaponsmith', castle.tileX + dx, castle.tileY + dy).ok) smith = Game.placeBuilding('weaponsmith', castle.tileX + dx, castle.tileY + dy);
+                const x = castle.pixelX + dx * TILE_SIZE, y = castle.pixelY + dy * TILE_SIZE;
+                if (Game.canPlace('weaponsmith', x, y).ok) smith = Game.placeBuilding('weaponsmith', x, y);
             }
             if (!smith) return { placed: false };
             Game.setSmithProduct(smith.id, 'sword');
