@@ -227,12 +227,22 @@ async function tabStateAndEdgeScroll(page, name, touch) {
         active: [...document.querySelectorAll('#cp-cats .cp-cat.active')].map(t => t.dataset.cat),
         info: !document.getElementById('info-panel').classList.contains('hidden'),
         strip: [...document.querySelectorAll('#cp-build .cp-bld.in-cat')].filter(b => b.offsetParent).length,
+        cats: document.getElementById('cp-cats').offsetParent !== null,
     }));
     const withInfo = await tabs();
-    check(withInfo.info && withInfo.active.length === 0, `${name}: no tab looks open while the info is shown (${withInfo.active})`);
+    check(withInfo.info && !withInfo.cats, `${name}: category tabs are hidden while the info is shown (${JSON.stringify(withInfo)})`);
+    // the info scroll fits without being cut off (no inner scrollbar)
+    const fit = await page.evaluate(() => {
+        const m = document.getElementById('info-main');
+        return { scroll: m.scrollHeight, client: m.clientHeight };
+    });
+    check(fit.scroll <= fit.client + 1, `${name}: building info fits its scroll (${fit.scroll} <= ${fit.client})`);
+    await press(page, touch, '#info-close');
+    const closed = await tabs();
+    check(!closed.info && closed.cats, `${name}: closing the info brings the tabs back (${JSON.stringify(closed)})`);
     await press(page, touch, '#cp-cats .cp-cat[data-cat="industry"]');
     const back = await tabs();
-    check(!back.info && back.active.join() === 'industry' && back.strip > 0, `${name}: one tap on a tab closes the info and opens it (${JSON.stringify(back)})`);
+    check(!back.info && back.active.join() === 'industry' && back.strip > 0, `${name}: one tap on a tab opens it (${JSON.stringify(back)})`);
     await press(page, touch, '#cp-cats .cp-cat[data-cat="castle"]');
 
     const vp = page.viewportSize();

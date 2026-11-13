@@ -1238,6 +1238,12 @@ kbd {
     display: none;
 }
 .cp-cat.goal .cat-dot { display: block; }
+/* while the scroll shows a building, villager or soldiers the tabs step aside
+   and the info gets the whole height (close with x / Esc brings them back) */
+#command-panel.info-open #cp-cats { display: none; }
+#command-panel.info-open #cp-body { border-top: none; }
+/* the castle / warehouse scroll needs a bit more room than the build strip */
+#command-panel.info-open { height: 220px; }
 
 /* ---- parchment body ---- */
 #cp-body {
@@ -1363,15 +1369,19 @@ kbd {
 #info-content .info-desc { grid-column: 1 / -1; color: var(--ink-soft); font-style: italic; margin: 0 0 3px; font-size: 12.5px; }
 #info-content .stat {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    gap: 10px;
+    gap: 0 10px;
     padding: 2px 0;
     border-bottom: 1px dashed rgba(106, 74, 42, 0.35);
     color: var(--ink);
     font-weight: 600;
 }
-#info-content .stat-label { color: var(--ink-soft); font-weight: 600; }
+#info-content .stat-label { color: var(--ink-soft); font-weight: 600; white-space: nowrap; }
+/* a long value ("9 working · 15 housing · 6 free") drops under its label as a
+   whole, right-aligned, instead of breaking word by word next to it */
+#info-content .stat:not(.stat-bar) > :last-child:not(.stat-label) { margin-left: auto; text-align: right; }
 #info-content .ok { color: #2f6a1c; }
 #info-content .bad { color: #a82418; }
 #info-content .ic { width: 16px; height: 16px; vertical-align: -3px; image-rendering: pixelated; }
@@ -1380,6 +1390,10 @@ kbd {
 #info-content .rate.up { color: #2f6a1c; }
 #info-content .rate.down { color: #a82418; }
 .stat.stat-bar { grid-column: 1 / -1; }
+/* only when the scroll holds 3+ columns (3 x 230px + gaps); with two it would push
+   its neighbour onto a row of its own */
+#info-main { container-type: inline-size; }
+@container (min-width: 726px) { #info-content .stat-wide { grid-column: span 2; } }
 .pbar {
     position: relative;
     flex: 1;
@@ -1393,14 +1407,15 @@ kbd {
 .pbar-fill { height: 100%; transition: width 0.25s linear; box-shadow: inset 0 1px 0 rgba(255,255,255,0.35); }
 .pbar-label { position: absolute; inset: 0; font-size: 10.5px; line-height: 13px; text-align: center; color: #1e1206; font-weight: 700; text-shadow: 0 1px 0 rgba(255,255,255,0.5); }
 .stock-head { grid-column: 1 / -1; margin-top: 4px; font-family: Georgia, serif; font-weight: 700; font-size: 13px; color: #2a180a; }
-.stock-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 6px 10px; margin-bottom: 4px; }
+/* all goods (4 resources + weapons) in one row where the scroll is wide enough */
+.stock-grid { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 8px; margin-bottom: 3px; }
 .stock-item {
     display: grid;
     grid-template-columns: auto 1fr;
     grid-template-areas: "ic val" "ic bar";
     column-gap: 7px;
     align-items: center;
-    padding: 3px 7px;
+    padding: 2px 6px;
     background: rgba(255, 250, 230, 0.45);
     border: 1px solid rgba(140, 100, 50, 0.5);
     border-radius: 3px;
@@ -1408,7 +1423,7 @@ kbd {
 .stock-item .stock-ic { grid-area: ic; display: flex; align-items: center; }
 .stock-item .stock-ic .ic { width: 24px; height: 24px; }
 .stock-item .stock-name { display: none; }
-.stock-item .stock-val { grid-area: val; font-size: 14px; font-weight: 800; color: var(--ink); white-space: nowrap; }
+.stock-item .stock-val { grid-area: val; font-size: 14px; font-weight: 800; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stock-item .stock-max { font-size: 11px; color: var(--ink-soft); font-weight: 600; }
 .stock-item .rate { font-size: 10.5px; }
 .stock-item .pbar { grid-area: bar; max-width: none; height: 6px; }
@@ -1548,7 +1563,8 @@ kbd {
     .ctl-btn small { font-size: 10px; }
     #info-content .info-desc { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .stock-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    #command-panel.info-open #cp-body { height: 220px; }
+    #command-panel.info-open { height: auto; }
+    #command-panel.info-open #cp-body { height: 266px; border-bottom: none; }
 }
 /* landscape phones: a slim desktop-style bar (tabs on top), no minimap / goal column */
 @media (max-height: 520px) and (orientation: landscape) {
@@ -1565,12 +1581,17 @@ kbd {
     .cp-cat.active { margin: 0 0 -2px; padding: 3px 10px 6px 6px; }
     .cp-cat .cat-ic { width: 16px; height: 16px; }
     #cp-body { height: 84px; flex: 0 0 auto; border-top: 2px solid #a8844a; border-bottom: none; }
-    #command-panel.info-open #cp-body { height: 132px; }
+    #command-panel.info-open { height: auto; }
+    #command-panel.info-open #cp-body { height: 176px; }
+    #info-content .info-desc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stock-item { padding: 1px 6px; }
+    .stock-item .stock-ic .ic { width: 20px; height: 20px; }
+    .stock-item .stock-val { font-size: 12.5px; }
     .bld-pic { flex-basis: 48px; height: 48px; }
     .bld-pic img { width: 44px; height: 44px; }
     #info-portrait { width: 76px; }
     #info-content { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
-    .stock-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .stock-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
     #info-panel { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "pic main act"; grid-template-rows: 1fr; padding-right: 38px; }
     #info-actions { align-self: end; }
     #info-actions .danger-btn { width: auto; white-space: nowrap; font-size: 12px; padding: 5px 10px; }
