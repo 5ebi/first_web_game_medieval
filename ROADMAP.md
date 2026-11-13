@@ -47,8 +47,11 @@ _Last updated: 2026-11-06_
   `https://5ebi.github.io/first_web_game_medieval/`, or for an unmerged branch
   `https://raw.githack.com/5ebi/first_web_game_medieval/<branch>/index.html`
   (githack caches; a fresh push can take a few minutes to appear).
-- Music and sound are synthesized; no database. Saves live in `localStorage`. A DB
-  only becomes relevant for accounts, cloud saves or leaderboards.
+- Music is licensed recordings (Epidemic Sound, `assets/music/`, see its README): a
+  shuffled playlist with 5-15 s pauses, loaded one track at a time after the first
+  tap, routed through `musicGain`. The procedural music is only the fallback when a
+  track can't load. SFX and ambience stay synthesized. No database: saves live in
+  `localStorage`; a DB only becomes relevant for accounts, cloud saves or leaderboards.
 
 ## Backlog (rough priority)
 
