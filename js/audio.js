@@ -1,6 +1,8 @@
 // ============================================
-// Audio - procedural sound effects & music (Web Audio API)
-// No external files: everything is synthesized at runtime.
+// Audio - sound effects, ambience and music (Web Audio API)
+// SFX and ambience are synthesized at runtime. Music is the licensed recordings in
+// assets/music/ (shuffled playlist); the procedural composer below is only a fallback
+// for when a track can't be loaded (offline, 404).
 // ============================================
 
 const AudioSys = (() => {
@@ -33,6 +35,7 @@ const AudioSys = (() => {
     function init() {
         if (ctx) {
             if (ctx.state === 'suspended') ctx.resume();
+            if (musicAudible()) resumeTrack();   // retry a play() blocked by autoplay rules
             return;
         }
         const AC = window.AudioContext || window.webkitAudioContext;
@@ -48,7 +51,7 @@ const AudioSys = (() => {
         sfxGain.connect(master);
 
         musicGain = ctx.createGain();
-        musicGain.gain.value = musicOn ? 0.16 : 0;
+        musicGain.gain.value = 0;   // set by startTracks / fallbackToSynth
         musicGain.connect(master);
 
         ambientGain = ctx.createGain();
@@ -57,7 +60,7 @@ const AudioSys = (() => {
 
         started = true;
         startAmbient();
-        startMusic();
+        startTracks();
     }
 
     function isReady() { return !!ctx; }
@@ -694,8 +697,126 @@ const AudioSys = (() => {
         return eighth * 8;
     }
 
+    // ---------- recorded tracks ----------
+    // One <audio> element, reused for every track (iOS only lets an element play
+    // without a gesture once a gesture has started it). It is routed through
+    // musicGain, so the music toggle, mute and the hidden-tab suspend apply to it.
+    // preload="none" and a src set only when a track starts: phones fetch one track
+    // at a time, never the whole folder.
+    const TRACKS = [
+        'merry-on-the-moor', 'highland-hymn', 'river-walk',
+        'dawn-of-the-long-road', 'winds-of-aetheria',
+    ];
+    const MUSIC_DIR = 'assets/music/';
+    const TRACK_LEVEL = 0.32;          // musicGain level for recordings (synth uses 0.16)
+    const SYNTH_LEVEL = 0.16;
+    let trackEl = null;
+    let trackBag = [];                 // shuffled names still to play this round
+    let lastTrack = null;
+    let currentTrack = null;
+    let gapTimer = null;
+    let pendingNext = false;           // a gap ended while music was off/muted/hidden
+    let pauseTimer = null;
+    let useSynth = false;              // a track failed: procedural fallback for this session
+    const played = [];                 // track history (getMusicState, tests)
+
+    function musicLevel() { return useSynth ? SYNTH_LEVEL : TRACK_LEVEL; }
+    function musicAudible() { return musicOn && !muted && document.visibilityState !== 'hidden'; }
+
+    function pickTrack() {
+        if (!trackBag.length) {
+            trackBag = TRACKS.slice();
+            for (let i = trackBag.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [trackBag[i], trackBag[j]] = [trackBag[j], trackBag[i]];
+            }
+            // never the same track twice in a row across rounds
+            if (trackBag.length > 1 && trackBag[trackBag.length - 1] === lastTrack) {
+                [trackBag[0], trackBag[trackBag.length - 1]] = [trackBag[trackBag.length - 1], trackBag[0]];
+            }
+        }
+        return trackBag.pop();
+    }
+
+    function startTracks() {
+        if (!ctx || trackEl || useSynth) return;
+        if (typeof Audio === 'undefined' || !ctx.createMediaElementSource) { fallbackToSynth(); return; }
+        trackEl = new Audio();
+        trackEl.preload = 'none';
+        try {
+            const src = ctx.createMediaElementSource(trackEl);
+            src.connect(musicGain);
+        } catch (e) { trackEl = null; fallbackToSynth(); return; }
+        trackEl.addEventListener('ended', onTrackEnded);
+        trackEl.addEventListener('error', onTrackError);
+        musicGain.gain.value = musicOn ? TRACK_LEVEL : 0;
+        playNextTrack();
+    }
+
+    function playNextTrack() {
+        if (!trackEl || useSynth) return;
+        pendingNext = false;
+        if (!musicAudible()) { pendingNext = true; return; }
+        currentTrack = pickTrack();
+        lastTrack = currentTrack;
+        played.push(currentTrack);
+        trackEl.src = MUSIC_DIR + currentTrack + '.mp3';
+        resumeTrack();
+    }
+
+    function resumeTrack() {
+        if (!trackEl || useSynth) return;
+        clearTimeout(pauseTimer);
+        if (pendingNext) { playNextTrack(); return; }
+        if (!currentTrack || !trackEl.paused || trackEl.ended) return;
+        const p = trackEl.play();
+        if (p && p.catch) p.catch(e => {
+            // blocked by autoplay rules: try again on the next gesture (init / toggle)
+            if (e && e.name === 'NotAllowedError') return;
+            if (e && e.name !== 'AbortError') fallbackToSynth();
+        });
+    }
+
+    // pause once the gain fade is done, so nothing is cut hard
+    function pauseTrackSoon() {
+        if (!trackEl) return;
+        clearTimeout(pauseTimer);
+        pauseTimer = setTimeout(() => { if (!musicAudible()) trackEl.pause(); }, 700);
+    }
+
+    function onTrackEnded() {
+        currentTrack = null;
+        clearTimeout(gapTimer);
+        // a breath of silence between tracks, like between the procedural pieces
+        gapTimer = setTimeout(playNextTrack, (5 + Math.random() * 10) * 1000);
+    }
+
+    // A track that never started (offline, 404, can't decode) -> procedural fallback.
+    // One that breaks after playing a while (connection dropped mid-stream) just counts
+    // as finished; if the next one can't load either, the fallback takes over then.
+    function onTrackError() {
+        if (!trackEl || useSynth || !trackEl.getAttribute('src')) return;
+        if (currentTrack && trackEl.currentTime > 1) onTrackEnded();
+        else fallbackToSynth();
+    }
+
+    function fallbackToSynth() {
+        if (useSynth) return;
+        useSynth = true;
+        clearTimeout(gapTimer);
+        clearTimeout(pauseTimer);
+        if (trackEl) {
+            trackEl.pause();
+            trackEl.removeAttribute('src');
+            trackEl.load();
+        }
+        currentTrack = null;
+        if (musicGain) musicGain.gain.setTargetAtTime(musicOn ? SYNTH_LEVEL : 0, now(), 0.05);
+        startMusic();
+    }
+
     function startMusic() {
-        if (!ctx || musicTimer) return;
+        if (!ctx || musicTimer || !useSynth) return;
         nextNoteTime = now() + 0.3;
         piece = null;
         musicTimer = setInterval(scheduler, 150);
@@ -724,6 +845,7 @@ const AudioSys = (() => {
     function setMuted(m) {
         muted = m;
         if (master) master.gain.setTargetAtTime(muted ? 0 : 1, now(), 0.02);
+        if (musicAudible()) resumeTrack(); else pauseTrackSoon();
         saveSettings();
     }
 
@@ -734,7 +856,9 @@ const AudioSys = (() => {
 
     function setMusic(on) {
         musicOn = on;
-        if (musicGain) musicGain.gain.setTargetAtTime(on ? 0.16 : 0, now(), 0.05);
+        // ~0.2 s time constant: a soft fade, never a hard cut
+        if (musicGain) musicGain.gain.setTargetAtTime(on ? musicLevel() : 0, now(), 0.2);
+        if (musicAudible()) resumeTrack(); else pauseTrackSoon();
         saveSettings();
     }
 
@@ -761,9 +885,37 @@ const AudioSys = (() => {
     // Pause ambient/music when tab hidden (saves CPU, avoids surprise noise)
     document.addEventListener('visibilitychange', () => {
         if (!ctx) return;
-        if (document.visibilityState === 'hidden') ctx.suspend();
-        else ctx.resume();
+        if (document.visibilityState === 'hidden') {
+            ctx.suspend();
+            if (trackEl) trackEl.pause();     // the element would keep running silently
+        } else {
+            ctx.resume();
+            if (musicAudible()) resumeTrack();
+        }
     });
+
+    // Browsers only allow sound after a user gesture. Start audio (and with it the
+    // music) on the very first tap / click / key anywhere, e.g. already on the title
+    // screen, not only on the Start button. init() is idempotent.
+    const UNLOCK_EVENTS = ['pointerdown', 'touchend', 'click', 'keydown'];
+    function unlockOnGesture() {
+        init();
+        if (ctx && ctx.state !== 'suspended') UNLOCK_EVENTS.forEach(e => document.removeEventListener(e, unlockOnGesture, true));
+    }
+    UNLOCK_EVENTS.forEach(e => document.addEventListener(e, unlockOnGesture, true));
+
+    // for tests / debugging
+    function getMusicState() {
+        return {
+            mode: useSynth ? 'synth' : 'tracks',
+            track: currentTrack,
+            playing: !!(trackEl && !trackEl.paused && !trackEl.ended),
+            time: trackEl ? trackEl.currentTime : 0,
+            gain: musicGain ? musicGain.gain.value : null,
+            synthRunning: !!musicTimer,
+            played: played.slice(),
+        };
+    }
 
     loadSettings();
 
@@ -777,6 +929,7 @@ const AudioSys = (() => {
         toggleMusic,
         setMusic,
         isMusicOn,
+        getMusicState,
         toggleSfx,
         setSfx,
         isSfxOn,
