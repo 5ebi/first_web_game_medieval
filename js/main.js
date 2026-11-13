@@ -31,6 +31,8 @@
             const shown = Math.round(amount * 10) / 10;
             Effects.floatText(b.pixelX + b.width / 2, b.pixelY - 4, `+${shown}`, COLORS[res] || '#fff');
         },
+        // A lumberjack's delivery felled trees: chips fly where they stood
+        onFell: (b, trees) => trees.forEach(tr => Effects.chips(tr.x, tr.y + 12, COLORS.wood)),
         onBuildingsChanged: () => UI.updateBuildingButtons(),
     });
 

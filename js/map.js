@@ -9,6 +9,15 @@ const GameMap = (() => {
     let decorations = []; // Flowers, etc.
     let currentSeed = 42;
     let elevation = null; // tile-resolution elevation (0..1) for hill shading
+    // Trees are a resource: a lumberjack fells them, they grow back (t.g: 0 = stump,
+    // 1 = standing). Standing trees are counted per tile; summed-area tables answer
+    // "how many trees / forest tiles / stone tiles in this tile rect" in O(1).
+    let treeCount = null;     // Uint16Array [y * MAP_WIDTH + x], standing trees per tile
+    let felled = [];          // trees with g < 1 (stumps and saplings)
+    let treesByTile = [];     // [y * MAP_WIDTH + x] -> trees on that tile (any growth)
+    let version = 0;          // bumps whenever terrain or trees change
+    let satVersion = -1;
+    const sats = {};          // kind -> Int32Array (MAP_WIDTH + 1) * (MAP_HEIGHT + 1)
 
     // Seeded random
     function seededRandom(seed) {
@@ -158,8 +167,14 @@ const GameMap = (() => {
                 }
             }
         }
-        // Sort trees by y for depth
+        // Sort trees by y for depth; the index after sorting is a stable id (saves refer to it)
         treeMap.sort((a, b) => a.y - b.y);
+        treeMap.forEach((t, i) => {
+            t.id = i;
+            t.g = 1;
+            t.tx = Math.floor(t.x / TILE_SIZE);
+            t.ty = Math.floor(t.y / TILE_SIZE);
+        });
 
         // Generate stone pile positions
         for (let y = 0; y < MAP_HEIGHT; y++) {
@@ -187,6 +202,131 @@ const GameMap = (() => {
                 }
             }
         }
+        rebuildTreeState();
+    }
+
+    // ---- Trees as a resource ----
+    function rebuildTreeState() {
+        treeCount = new Uint16Array(MAP_WIDTH * MAP_HEIGHT);
+        felled = [];
+        treesByTile = new Array(MAP_WIDTH * MAP_HEIGHT);
+        treeMap.forEach(t => {
+            const i = t.ty * MAP_WIDTH + t.tx;
+            (treesByTile[i] || (treesByTile[i] = [])).push(t);
+            if (t.g >= 1) treeCount[t.ty * MAP_WIDTH + t.tx]++;
+            else felled.push(t);
+        });
+        version++;
+    }
+
+    function treesOnTile(tx, ty) {
+        if (!treeCount || tx < 0 || ty < 0 || tx >= MAP_WIDTH || ty >= MAP_HEIGHT) return 0;
+        return treeCount[ty * MAP_WIDTH + tx];
+    }
+
+    // Fell up to n standing trees in a tile rect (inclusive), nearest to (cx, cy) first.
+    // Returns the felled trees.
+    function fellTrees(x0, y0, x1, y1, cx, cy, n = 1) {
+        const cand = [];
+        for (const t of treeMap) {
+            if (t.g < 1 || t.tx < x0 || t.tx > x1 || t.ty < y0 || t.ty > y1) continue;
+            cand.push(t);
+        }
+        if (!cand.length) return [];
+        const d = t => (t.x - cx) * (t.x - cx) + (t.y + 12 - cy) * (t.y + 12 - cy);
+        cand.sort((a, b) => d(a) - d(b));
+        const out = cand.slice(0, n);
+        out.forEach(t => {
+            t.g = 0;
+            treeCount[t.ty * MAP_WIDTH + t.tx]--;
+            felled.push(t);
+        });
+        version++;
+        return out;
+    }
+
+    // Felled trees grow back. Returns true when one stood up again (yields change).
+    function growTrees(dt) {
+        if (!felled.length) return false;
+        const step = dt / TREE_REGROW_SECONDS;
+        let stood = false;
+        for (let i = felled.length - 1; i >= 0; i--) {
+            const t = felled[i];
+            t.g += step;
+            if (t.g >= 1) {
+                t.g = 1;
+                treeCount[t.ty * MAP_WIDTH + t.tx]++;
+                felled.splice(i, 1);
+                stood = true;
+            }
+        }
+        if (stood) version++;
+        return stood;
+    }
+
+    // Save: only trees that are not fully grown, as [id, growth]
+    function serializeTrees() {
+        return felled.map(t => [t.id, Math.round(t.g * 1000) / 1000]);
+    }
+
+    function deserializeTrees(list) {
+        if (!Array.isArray(list) || !list.length) return;
+        const byId = new Map(treeMap.map(t => [t.id, t]));
+        list.forEach(e => {
+            const t = Array.isArray(e) ? byId.get(e[0]) : null;
+            if (t && Number.isFinite(e[1])) t.g = Math.max(0, Math.min(1, e[1]));
+        });
+        rebuildTreeState();
+    }
+
+    function getFelledCount() { return felled.length; }
+
+    // Felled trees (stumps, saplings) in a tile rect, inclusive
+    function countFelledInRect(x0, y0, x1, y1) {
+        let n = 0;
+        for (const t of felled) if (t.tx >= x0 && t.tx <= x1 && t.ty >= y0 && t.ty <= y1) n++;
+        return n;
+    }
+    function getVersion() { return version; }
+
+    // Summed-area tables over standing trees and resource terrain, rebuilt lazily
+    function buildSats() {
+        const W = MAP_WIDTH + 1, H = MAP_HEIGHT + 1;
+        const kinds = {
+            trees: (x, y) => treeCount[y * MAP_WIDTH + x],
+            FOREST: (x, y) => terrain[y][x] === TERRAIN.FOREST ? 1 : 0,
+            STONE_DEPOSIT: (x, y) => terrain[y][x] === TERRAIN.STONE_DEPOSIT ? 1 : 0,
+        };
+        Object.keys(kinds).forEach(k => {
+            const a = sats[k] && sats[k].length === W * H ? sats[k] : new Int32Array(W * H);
+            const f = kinds[k];
+            for (let y = 0; y < MAP_HEIGHT; y++) {
+                let row = 0;
+                for (let x = 0; x < MAP_WIDTH; x++) {
+                    row += f(x, y);
+                    a[(y + 1) * W + x + 1] = a[y * W + x + 1] + row;
+                }
+            }
+            sats[k] = a;
+        });
+        satVersion = version;
+    }
+
+    // Number of standing trees ('trees') or tiles of a terrain ('FOREST', 'STONE_DEPOSIT')
+    // in a tile rect (inclusive bounds, clamped to the map)
+    function countInRect(kind, x0, y0, x1, y1) {
+        if (satVersion !== version) buildSats();
+        x0 = Math.max(0, x0); y0 = Math.max(0, y0);
+        x1 = Math.min(MAP_WIDTH - 1, x1); y1 = Math.min(MAP_HEIGHT - 1, y1);
+        if (x1 < x0 || y1 < y0) return 0;
+        const W = MAP_WIDTH + 1, a = sats[kind];
+        return a[(y1 + 1) * W + x1 + 1] - a[y0 * W + x1 + 1] - a[(y1 + 1) * W + x0] + a[y0 * W + x0];
+    }
+
+    // Tile rect a producer at this footprint draws its resource from
+    function rangeTiles(x, y, w, h, radius = RESOURCE_RADIUS) {
+        const r = rectTiles(x, y, w, h);
+        return { x0: r.x0 - radius, y0: r.y0 - radius, x1: r.x1 + radius, y1: r.y1 + radius };
     }
 
     // Tile range a pixel rect overlaps (any positive area), inclusive bounds.
@@ -220,7 +360,7 @@ const GameMap = (() => {
             }
         }
         const nTrees = treeMap.length, nStones = stoneMap.length;
-        treeMap = treeMap.filter(t => !(t.x >= x0 - 6 && t.x < x1 + 6 && t.y + 16 >= y0 && t.y + 16 < y1 + 10));
+        treeMap = treeMap.filter(t => !treeUnder(t, x0, y0, x1, y1));
         stoneMap = stoneMap.filter(s => !(s.x + 32 > x0 + 4 && s.x < x1 - 4 && s.y + 24 > y0 + 4 && s.y < y1));
         const nDec = decorations.length;
         // decorations sit on tile coordinates: same centre rule as the terrain
@@ -229,7 +369,40 @@ const GameMap = (() => {
             return !(cx >= x0 && cx < x1 && cy >= y0 && cy < y1);
         });
         if (decorations.length !== nDec) changed = true;
+        if (changed || treeMap.length !== nTrees) rebuildTreeState();
         return changed || treeMap.length !== nTrees || stoneMap.length !== nStones;
+    }
+
+    // A tree whose trunk stands under a footprint (x0..x1, y0..y1) is cleared with it
+    function treeUnder(t, x0, y0, x1, y1) {
+        return t.x >= x0 - 6 && t.x < x1 + 6 && t.y + 16 >= y0 && t.y + 16 < y1 + 10;
+    }
+
+    // What placing a footprint here would clear of a resource: standing trees ('trees') or
+    // tiles of a terrain type (tile centre under the footprint), so a ghost's yield already
+    // leaves out what the building itself removes. 0 for a building that already stands.
+    function countCleared(kind, x, y, w, h) {
+        const x1 = x + w, y1 = y + h;
+        let n = 0;
+        if (kind === 'trees') {
+            const r = rectTiles(x - 6, y - 16, w + 12, h + 10);   // where trunks under it can stand
+            for (let ty = Math.max(0, r.y0); ty <= Math.min(MAP_HEIGHT - 1, r.y1); ty++) {
+                for (let tx = Math.max(0, r.x0); tx <= Math.min(MAP_WIDTH - 1, r.x1); tx++) {
+                    const list = treesByTile[ty * MAP_WIDTH + tx];
+                    if (list) for (const t of list) if (t.g >= 1 && treeUnder(t, x, y, x1, y1)) n++;
+                }
+            }
+            return n;
+        }
+        const type = TERRAIN[kind];
+        const r = rectTiles(x, y, w, h);
+        for (let ty = r.y0; ty <= r.y1; ty++) {
+            for (let tx = r.x0; tx <= r.x1; tx++) {
+                const cx = tx * TILE_SIZE + TILE_SIZE / 2, cy = ty * TILE_SIZE + TILE_SIZE / 2;
+                if (cx >= x && cx < x1 && cy >= y && cy < y1 && getTerrain(tx, ty) === type) n++;
+            }
+        }
+        return n;
     }
 
     function getTerrain(x, y) {
@@ -303,14 +476,9 @@ const GameMap = (() => {
 
     // Check if there's a required resource near a footprint (within N tiles of
     // every tile it touches)
-    function hasNearbyResource(x, y, w, h, terrainType, radius = 5) {
-        const r = rectTiles(x, y, w, h);
-        for (let ty = r.y0 - radius; ty <= r.y1 + radius; ty++) {
-            for (let tx = r.x0 - radius; tx <= r.x1 + radius; tx++) {
-                if (getTerrain(tx, ty) === TERRAIN[terrainType]) return true;
-            }
-        }
-        return false;
+    function hasNearbyResource(x, y, w, h, terrainType, radius = RESOURCE_RADIUS) {
+        const r = rangeTiles(x, y, w, h, radius);
+        return countInRect(terrainType, r.x0, r.y0, r.x1, r.y1) > 0;
     }
 
     return {
@@ -330,5 +498,16 @@ const GameMap = (() => {
         overlapsBuilding,
         clearArea,
         hasNearbyResource,
+        rangeTiles,
+        countInRect,
+        countCleared,
+        treesOnTile,
+        fellTrees,
+        growTrees,
+        serializeTrees,
+        deserializeTrees,
+        getFelledCount,
+        countFelledInRect,
+        getVersion,
     };
 })();
