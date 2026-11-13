@@ -434,6 +434,22 @@ const Sprites = (() => {
         return c;
     }
 
+    // Tree stump left by a lumberjack (snow on top in winter)
+    function getStump(season) {
+        const key = 'stump_' + (season === 'winter' ? 'w' : 's');
+        if (cache[key]) return cache[key];
+        const c = createCanvas(10, 7);
+        const ctx = c.getContext('2d');
+        const px = (col, x, y, w, h) => { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); };
+        px('#5a3418', 1, 2, 8, 5);      // bark
+        px('#3e2410', 7, 2, 2, 5);
+        px('#4a2a12', 0, 6, 10, 1);     // roots
+        px(season === 'winter' ? '#eef4fa' : '#c89a5a', 1, 1, 8, 2);   // cut face
+        if (season !== 'winter') { px('#a87a40', 3, 1, 4, 1); px('#8a5a2a', 4, 2, 2, 1); }
+        cache[key] = c;
+        return c;
+    }
+
     function drawTree() { return getTree('oak', 'spring', 0); }
     function drawPineTree() { return getTree('pine', 'spring', 0); }
 
@@ -1164,6 +1180,72 @@ const Sprites = (() => {
         return c;
     }
 
+    // Well: stone ring with a little shingle roof, windlass, rope and bucket (1x1 tile,
+    // the roof rises above the footprint)
+    function drawWell() {
+        const key = 'well';
+        if (cache[key]) return cache[key];
+        const w = TILE_SIZE, h = TILE_SIZE + 12;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+        const px = (col, x, y, ww, hh) => { ctx.fillStyle = col; ctx.fillRect(x, y, ww, hh); };
+
+        // Posts behind the ring
+        px('#6b4226', 6, 10, 3, 22);
+        px('#6b4226', 23, 10, 3, 22);
+        px('#4a2a12', 8, 10, 1, 22);
+        px('#4a2a12', 25, 10, 1, 22);
+
+        // Windlass with crank, rope and bucket
+        px('#5a3a18', 8, 14, 16, 2);
+        px('#7a5a30', 8, 14, 16, 1);
+        px('#5a3a18', 26, 13, 1, 4);
+        px('#5a3a18', 26, 16, 3, 1);
+        px('#c8b080', 16, 16, 1, 9);
+        px('#7a5030', 13, 23, 7, 5);
+        px('#3a3a3a', 13, 24, 7, 1);
+        px('#9a6a40', 14, 23, 2, 4);
+
+        // Stone ring: rim with dark water inside, then the front face
+        px('#b4b2aa', 4, 28, 24, 4);
+        px('#1e3a5a', 7, 29, 18, 2);
+        px('#2e5a86', 9, 29, 6, 1);
+        px('#8a8a84', 4, 32, 24, 10);
+        px('#6a6a64', 4, 41, 24, 1);
+        // mortar lines in a brick pattern
+        px('#6a6a64', 4, 35, 24, 1);
+        px('#6a6a64', 4, 38, 24, 1);
+        [9, 15, 21].forEach(x => px('#6a6a64', x, 32, 1, 3));
+        [6, 12, 18, 24].forEach(x => px('#6a6a64', x, 36, 1, 2));
+        [9, 15, 21].forEach(x => px('#6a6a64', x, 39, 1, 2));
+        // light from the upper left, shade on the right
+        px('#a6a6a0', 5, 33, 3, 1);
+        px('#a6a6a0', 10, 36, 3, 1);
+        px('#a6a6a0', 5, 39, 3, 1);
+        px('rgba(0,0,0,0.18)', 24, 32, 4, 9);
+
+        // Roof (same shingles as the houses)
+        ctx.fillStyle = '#8B4513';
+        ctx.beginPath();
+        ctx.moveTo(2, 12);
+        ctx.lineTo(w / 2, 1);
+        ctx.lineTo(w - 2, 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#9B5523';
+        ctx.beginPath();
+        ctx.moveTo(4, 11);
+        ctx.lineTo(w / 2, 3);
+        ctx.lineTo(w / 2, 11);
+        ctx.closePath();
+        ctx.fill();
+        px('rgba(0,0,0,0.15)', 10, 7, 12, 1);
+        px('#5a2e0c', 2, 11, w - 4, 2);
+
+        cache[key] = c;
+        return c;
+    }
+
     function drawTavern() {
         const key = 'tavern';
         if (cache[key]) return cache[key];
@@ -1834,6 +1916,7 @@ const Sprites = (() => {
             case 'iron_mine': return drawIronMine();
             case 'weaponsmith': return drawWeaponsmith();
             case 'barracks': return drawBarracks();
+            case 'well': return drawWell();
             case 'hunter': return drawHunter();
             case 'chicken_hut': return drawChickenHut();
             case 'apple_orchard': return drawAppleOrchard(grown);
@@ -2151,6 +2234,7 @@ const Sprites = (() => {
         getSeasonalTile,
         getTree,
         getTreeFrame,
+        getStump,
         getSilhouette,
         getStonePile,
         getBuildingThumb,

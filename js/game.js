@@ -138,11 +138,146 @@ const Game = (() => {
         return 1;
     }
 
+    // ---- Yields: where a building stands matters ----
+    // One function for the simulation, the rates, the ghost while placing and the
+    // info panel. (x, y) is the footprint's top-left in world pixels; opts.self is a
+    // standing building to leave out of its own neighbour checks.
+    // Returns null when the spot does not matter for this type, else
+    //   { kind: 'prod' | 'house' | 'well', value, base, factor, quality (0..1),
+    //     parts: [{ k, v }] (i18n keys with vars), resource?, count? }
+    //  - prod:  value = rate per minute at 1x before the season, factor scales the cycle
+    //  - house: value = villagers housed (base + well bonus)
+    //  - well:  value = extra villagers it would add (only houses no other well reaches)
+    function wellDef() { return BUILDINGS.well.well; }
+
+    // Does a well whose footprint top-left is (wx, wy) reach a footprint?
+    function wellReaches(wx, wy, x, y, w, h) {
+        const half = BUILDINGS.well.width * TILE_SIZE / 2;
+        const cx = wx + half, cy = wy + half;
+        const dx = Math.max(x - cx, 0, cx - (x + w));
+        const dy = Math.max(y - cy, 0, cy - (y + h));
+        const r = wellDef().radius * TILE_SIZE;
+        return dx * dx + dy * dy <= r * r;
+    }
+
+    // Well bonus for a house / tavern footprint (several wells don't stack)
+    function wellBonusAt(type, x, y, w, h, excludeId) {
+        const bonus = wellDef().bonus[type];
+        if (!bonus) return 0;
+        const reached = BuildingManager.getAll().some(b => b.type === 'well' && b.id !== excludeId &&
+            wellReaches(b.pixelX, b.pixelY, x, y, w, h));
+        return reached ? bonus : 0;
+    }
+
+    function getYield(type, x, y, opts = {}) {
+        const def = BUILDINGS[type];
+        if (!def) return null;
+        const w = def.width * TILE_SIZE, h = def.height * TILE_SIZE;
+        const selfId = opts.self ? opts.self.id : -1;
+
+        if (def.production && YIELD[type]) {
+            const p = def.production, cfg = YIELD[type];
+            const base = p.amount * 60 / p.cycle;
+            const parts = [];
+            let factor, quality, count = 0;
+            if (cfg.by === 'onStone') {
+                const share = GameMap.terrainArea(x, y, w, h, TERRAIN.STONE_DEPOSIT) / (w * h);
+                factor = 0.25 + share;
+                quality = Math.max(0, Math.min(1, (share - 0.5) / 0.5));
+                parts.push({ k: 'y.onstone', v: { n: Math.round(share * 100) } });
+            } else {
+                const r = GameMap.rangeTiles(x, y, w, h);
+                // what the footprint clears on placement doesn't count (0 once it stands)
+                count = GameMap.countInRect(cfg.by, r.x0, r.y0, r.x1, r.y1) - GameMap.countCleared(cfg.by, x, y, w, h);
+                factor = Math.max(cfg.min, Math.min(cfg.max, count / cfg.full));
+                quality = Math.max(0, Math.min(1, count / (cfg.full * cfg.max)));
+                parts.push({ k: 'y.' + cfg.by, v: { n: count } });
+                if (cfg.by === 'trees' && !opts.brief) {
+                    const stumps = GameMap.countFelledInRect(r.x0, r.y0, r.x1, r.y1);
+                    if (stumps > 0) parts.push({ k: 'y.stumps', v: { n: stumps } });
+                }
+            }
+            parts.push({ k: 'y.factor', v: { n: factor } });
+            return { kind: 'prod', resource: p.resource, value: base * factor, base, factor, quality, parts, count };
+        }
+
+        if (def.provides.populationCap && wellDef().bonus[type]) {
+            const base = def.provides.populationCap;
+            const bonus = wellBonusAt(type, x, y, w, h);
+            return {
+                kind: 'house', value: base + bonus, base, factor: 1, quality: bonus ? 1 : 0.5,
+                parts: [bonus ? { k: 'y.well', v: { n: bonus } } : { k: 'y.nowell', v: {} }],
+            };
+        }
+
+        if (def.well) {
+            let reach = 0, gain = 0, covered = 0, total = 0;
+            BuildingManager.getAll().forEach(b => {
+                const bonus = def.well.bonus[b.type];
+                if (!bonus || !wellReaches(x, y, b.pixelX, b.pixelY, b.width, b.height)) return;
+                reach++;
+                total += bonus;
+                // another well already gives this house its bonus
+                if (wellBonusAt(b.type, b.pixelX, b.pixelY, b.width, b.height, selfId)) covered++;
+                else gain += bonus;
+            });
+            const parts = [{ k: 'y.reach', v: { n: reach } }];
+            if (covered) parts.push({ k: 'y.covered', v: { n: covered } });
+            return { kind: 'well', value: opts.self ? total : gain, base: 0, factor: 1, quality: Math.min(1, gain / 8), parts, count: reach };
+        }
+        return null;
+    }
+
+    function fmtLocal(n, digits) {
+        return Number(n).toLocaleString(Lang.get() === 'de' ? 'de-DE' : 'en-US', { maximumFractionDigits: digits });
+    }
+    function fmtFactor(f) { return fmtLocal(f, 2); }
+    function fmtRate(n) { return fmtLocal(n, n >= 10 ? 0 : 1); }
+
+    // Text for a yield: { main: '+9 wood/min', parts: ['14 trees', '×0.7'] }.
+    // Producers include the current season, so the number is what it produces now.
+    function describeYield(y, type) {
+        if (!y) return null;
+        const parts = y.parts.map(p => t(p.k, p.k === 'y.factor' ? { n: fmtFactor(p.v.n) } : p.v));
+        if (y.kind === 'prod') {
+            const m = getSeasonMultiplier(type);
+            if (m !== 1) parts.push(t('y.season', { s: t('season.' + getSeason().id), n: fmtFactor(m) }));
+            return { main: t('menu.prod', { n: fmtRate(y.value * m), res: resName(y.resource) }), parts };
+        }
+        return { main: t('menu.villagers', { n: y.value }), parts };
+    }
+
+    // Yield of a standing building, cached until buildings or trees change
+    function buildingYield(b) {
+        const gv = GameMap.getVersion(), bv = BuildingManager.getVersion();
+        if (b._yield === undefined || b._yieldG !== gv || b._yieldB !== bv) {
+            b._yield = getYield(b.type, b.pixelX, b.pixelY, { self: b });
+            b._yieldG = gv; b._yieldB = bv;
+        }
+        return b._yield;
+    }
+
+    // Spot factor of a producer (1 when its spot doesn't matter)
+    function getSpotFactor(b) {
+        const y = b.def.production ? buildingYield(b) : null;
+        return y && y.kind === 'prod' ? y.factor : 1;
+    }
+
     // Production of one building in units per minute
     function getBuildingOutput(b, season) {
         if (!b.def.production) return 0;
         const p = b.def.production;
-        return p.amount * 60 / p.cycle * getCycleFactor(b, season);
+        return p.amount * 60 / p.cycle * getSpotFactor(b) * getCycleFactor(b, season);
+    }
+
+    // Villagers all houses and taverns hold (with well bonuses), optionally without one building
+    function computePopulationCap(excludeId) {
+        let cap = 0;
+        BuildingManager.getAll().forEach(b => {
+            if (b.id === excludeId || !b.def.provides.populationCap) return;
+            cap += b.def.provides.populationCap + wellBonusAt(b.type, b.pixelX, b.pixelY, b.width, b.height, excludeId);
+        });
+        return cap;
     }
 
     function getRates(season) {
@@ -220,25 +355,80 @@ const Game = (() => {
 
         const reason = getUnavailableReason(type);
         if (reason) return { ok: false, reason };
+        return checkSpot(type, x, y);
+    }
 
+    // Is the spot itself fine for this type (ignores cost and workers)?
+    function checkSpot(type, x, y) {
+        const problem = spotProblem(type, x, y);
+        if (!problem) return { ok: true };
+        const def = BUILDINGS[type];
+        const reasons = {
+            unknown: 'g.unknown', water: 'g.water', occupied: 'g.occupied', onstone: 'g.onstone',
+            resource: def?.production?.requires === 'FOREST' ? 'g.nearforest' : 'g.nearstone',
+        };
+        return { ok: false, reason: t(reasons[problem]) };
+    }
+
+    // What is wrong with a spot (null = fine): 'unknown' | 'water' | 'occupied' | 'onstone' | 'resource'
+    function spotProblem(type, x, y) {
+        const def = BUILDINGS[type];
+        if (!def) return 'unknown';
         ({ x, y } = snapPos(x, y));
         const w = def.width * TILE_SIZE, h = def.height * TILE_SIZE;
         if (!GameMap.isBuildable(x, y, w, h, BuildingManager.getAll())) {
-            const water = GameMap.rectHasTerrain(x, y, w, h, [TERRAIN.WATER, TERRAIN.SAND]);
-            return { ok: false, reason: water ? t('g.water') : t('g.occupied') };
+            return GameMap.rectHasTerrain(x, y, w, h, [TERRAIN.WATER, TERRAIN.SAND]) ? 'water' : 'occupied';
         }
-
         // Quarries must stand (at least partly) on a stone field, measured by covered area
-        if (def.onStone) {
-            if (GameMap.terrainArea(x, y, w, h, TERRAIN.STONE_DEPOSIT) < w * h * def.onStone) return { ok: false, reason: t('g.onstone') };
-        }
+        if (def.onStone && GameMap.terrainArea(x, y, w, h, TERRAIN.STONE_DEPOSIT) < w * h * def.onStone) return 'onstone';
+        if (def.production?.requires && !GameMap.hasNearbyResource(x, y, w, h, def.production.requires)) return 'resource';
+        return null;
+    }
 
-        if (def.production?.requires) {
-            if (!GameMap.hasNearbyResource(x, y, w, h, def.production.requires)) {
-                return { ok: false, reason: def.production.requires === 'FOREST' ? t('g.nearforest') : t('g.nearstone') };
+    // Does the spot change what this type yields (producers, houses, taverns, the well)?
+    function hasSpotYield(type) {
+        const def = BUILDINGS[type];
+        return !!def && (!!YIELD[type] || !!def.well || !!(def.provides.populationCap && wellDef().bonus[type]));
+    }
+
+    // Quality (0..1) of every tile for placing this type with its footprint centred on
+    // the tile, -1 where it can't stand or gains nothing from the spot (a well reaching no
+    // house, a house without a well). Used for the red-to-green map tint; callers cache it.
+    function getQualityGrid(type) {
+        if (!hasSpotYield(type)) return null;
+        const def = BUILDINGS[type];
+        const w = def.width * TILE_SIZE, h = def.height * TILE_SIZE;
+        const grid = new Float32Array(MAP_WIDTH * MAP_HEIGHT).fill(-1);
+        // The well's reach is checked against a prepared list instead of getYield (O(houses))
+        let homes = null;
+        if (def.well) {
+            homes = BuildingManager.getAll().filter(b => def.well.bonus[b.type]).map(b => ({
+                b, bonus: def.well.bonus[b.type],
+                covered: !!wellBonusAt(b.type, b.pixelX, b.pixelY, b.width, b.height),
+            }));
+        }
+        for (let ty = 0; ty < MAP_HEIGHT; ty++) {
+            for (let tx = 0; tx < MAP_WIDTH; tx++) {
+                const x = Math.round(tx * TILE_SIZE + TILE_SIZE / 2 - w / 2);
+                const y = Math.round(ty * TILE_SIZE + TILE_SIZE / 2 - h / 2);
+                if (spotProblem(type, x, y)) continue;
+                let q;
+                if (homes) {
+                    let gain = 0;
+                    for (const hm of homes) {
+                        if (!hm.covered && wellReaches(x, y, hm.b.pixelX, hm.b.pixelY, hm.b.width, hm.b.height)) gain += hm.bonus;
+                    }
+                    if (!gain) continue;          // reaches no house: leave the map untinted there
+                    q = Math.min(1, gain / 8);
+                } else {
+                    const yl = getYield(type, x, y, { brief: true });
+                    if (yl.kind === 'house' && yl.value === yl.base) continue;   // no well: untinted
+                    q = yl.quality;
+                }
+                grid[ty * MAP_WIDTH + tx] = q;
             }
         }
-        return { ok: true };
+        return grid;
     }
 
     function clearUnder(b) {
@@ -269,7 +459,7 @@ const Game = (() => {
             building.active = true;
             state.populationUsed += def.workers;
         }
-        if (def.provides.populationCap) state.populationCap += def.provides.populationCap;
+        state.populationCap = computePopulationCap();
         if (def.provides.storage) state.maxStorage += def.provides.storage;
 
         state.stats.built++;
@@ -297,10 +487,10 @@ const Game = (() => {
     function canDemolish(building) {
         if (!building) return { ok: false, reason: t('g.notavailable') };
         if (building.type === 'castle') return { ok: false, reason: t('g.castlenodemolish') };
-        if (building.def.provides.populationCap) {
-            const capAfter = state.populationCap - building.def.provides.populationCap;
+        if (building.def.provides.populationCap || building.def.well) {
+            const capAfter = computePopulationCap(building.id);
             if (capAfter < state.populationUsed) {
-                return { ok: false, reason: t('g.stillliving', { n: state.populationUsed - capAfter }) };
+                return { ok: false, reason: t(building.def.well ? 'g.wellneeded' : 'g.stillliving', { n: state.populationUsed - capAfter }) };
             }
         }
         return { ok: true };
@@ -328,7 +518,6 @@ const Game = (() => {
             }
         });
         if (b.workers > 0) state.populationUsed -= b.workers;
-        if (def.provides.populationCap) state.populationCap -= def.provides.populationCap;
         if (def.provides.storage) {
             state.maxStorage -= def.provides.storage;
             Object.keys(state.resources).forEach(r => {
@@ -336,6 +525,7 @@ const Game = (() => {
             });
         }
         BuildingManager.remove(id);
+        state.populationCap = computePopulationCap();
         state.stats.demolished++;
 
         const refundStr = Object.entries(refund).map(([r, a]) => `+${a} ${resName(r)}`).join(', ');
@@ -462,9 +652,10 @@ const Game = (() => {
         const season = getSeason();
         BuildingManager.getProductionBuildings().forEach(b => {
             const p = b.def.production;
-            b.progress = (b.progress || 0) + dt * getCycleFactor(b, season) / p.cycle;
+            b.progress = (b.progress || 0) + dt * getSpotFactor(b) * getCycleFactor(b, season) / p.cycle;
             while (b.progress >= 1) {
                 b.progress -= 1;
+                if (YIELD[b.type]?.by === 'trees') fellFor(b);
                 const res = p.resource;
                 const before = state.resources[res];
                 state.resources[res] = Math.min(before + p.amount, state.maxStorage);
@@ -481,6 +672,7 @@ const Game = (() => {
         });
 
         if (simulateSmiths(dt)) changed = true;
+        GameMap.growTrees(dt);
 
         // Workers eat continuously
         const eat = getFoodConsumption() / 60 * dt;
@@ -545,6 +737,13 @@ const Game = (() => {
         if (saveTimer >= 20) { saveTimer = 0; save(); }
     }
 
+    // A wood delivery fells the nearest standing trees in the lumberjack's range
+    function fellFor(b) {
+        const r = GameMap.rangeTiles(b.pixelX, b.pixelY, b.width, b.height);
+        const trees = GameMap.fellTrees(r.x0, r.y0, r.x1, r.y1, b.pixelX + b.width / 2, b.pixelY + b.height, TREES_PER_DELIVERY);
+        if (trees.length && callbacks.onFell) callbacks.onFell(b, trees);
+    }
+
     // ---- Milestones ----
     function checkMilestones() {
         MILESTONES.forEach(m => {
@@ -578,6 +777,7 @@ const Game = (() => {
                 state: Object.assign({}, state, { started: true }),
                 buildings: BuildingManager.serialize(),
                 units: Units.serialize(),
+                trees: GameMap.serializeTrees(),   // felled trees [id, growth]; missing = all standing
                 savedAt: Date.now(),
             };
             localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -606,6 +806,7 @@ const Game = (() => {
             if (data.version === 3) migrateV3(data);
             // v3/v4 buildings carry tileX/tileY: BuildingManager.deserialize turns them into pixels
             GameMap.generate(data.seed);
+            GameMap.deserializeTrees(data.trees);
             state = Object.assign(freshState(), data.state);
             state.weapons = Object.assign(freshWeapons(), data.state.weapons);
             state.milestones = (state.milestones || []).filter(id => MILESTONES.some(m => m.id === id));
@@ -615,6 +816,7 @@ const Game = (() => {
             state.started = true;
             BuildingManager.deserialize(data.buildings);
             BuildingManager.getAll().forEach(clearUnder);
+            state.populationCap = computePopulationCap();
             Units.deserialize(data.units);
             return true;
         } catch (e) {
@@ -653,6 +855,12 @@ const Game = (() => {
         getCost,
         isLumberjackFree,
         canPlace,
+        checkSpot,
+        hasSpotYield,
+        getQualityGrid,
+        getYield,
+        getBuildingYield: buildingYield,
+        describeYield,
         placeBuilding,
         canDemolish,
         demolishBuilding,

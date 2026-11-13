@@ -104,6 +104,19 @@ Why they work (check new features against these):
   other building (touching is fine). Trees/stones/flowers are cleared on tiles whose centre
   is under the footprint. Soldiers' A* treats a tile as blocked when a footprint covers any
   part of it. `pixelX`/`pixelY` are the only position (no `tileX`/`tileY`).
+- **Yields depend on the spot** (#32): one function, `Game.getYield(type, x, y)`, gives the
+  yield and its parts for the simulation, the top-bar rates, the winter forecast, the ghost and
+  the info panel (numbers in `YIELD`, `constants.js`). Lumberjack: standing trees within
+  `RESOURCE_RADIUS` (5 tiles), factor trees/60 up to ×1.25, no floor; every delivery fells the
+  2 nearest trees, which regrow over 2 days (stump, sapling, tree). Hunter: forest tiles in range
+  (×0.5 to ×1.25). Iron mine: stone tiles in range (×0.4 to ×1.25). Quarry: 0.25 + share of the
+  footprint on stone (×0.75 to ×1.25). What a footprint clears on placement is not counted, so the
+  ghost's number is what the building then produces. **Well** (1×1, 5 wood + 10 stone): houses
+  within 4 tiles of its centre hold +2, taverns +3; wells don't stack; `populationCap` is
+  recomputed from the buildings. While placing, the map is tinted red -> yellow -> green per tile
+  (brightness rises too, for colour blindness; spots that gain nothing from a well stay untinted),
+  cached until buildings or trees change. Saves store felled trees as `trees: [[id, growth]]`
+  (same save version; saves without it load with every tree standing).
 - Save format v5 (same `SAVE_KEY`): buildings store `x`/`y` in pixels; v4 tile positions
   are migrated (× `TILE_SIZE`), v3 saves are migrated too (a blacksmith is dropped and its
   cost refunded).
@@ -121,8 +134,8 @@ Why they work (check new features against these):
 
 1. **Free placement:** buildings sit wherever there is room, not on the tile grid.
    Terrain stays a tile grid.
-2. **Reward placement** (after 1): lumberjack yield depends on the trees in its radius
-   and trees get fewer; neighbour bonuses (e.g. house near a well); Civilization-style
+2. **Reward placement** (#32, PR open): lumberjack yield depends on the trees in its radius
+   and trees get fewer; neighbour bonuses (house near a well); Civilization-style
    display while placing (red-to-green map tint, yield and bonuses at the ghost).
 3. **Open question for the owner:** "houses fill over days, more buffer at the start"
    came from the stale build. On `main` only working villagers eat, so a new house costs

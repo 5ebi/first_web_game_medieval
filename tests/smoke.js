@@ -54,6 +54,105 @@ function buildMilitary() {
     return out;
 }
 
+// Yields depend on the spot (issue #32): dense forest vs. edge, felling and regrowth,
+// the well's neighbour bonus, the quality grid behind the map tint
+function placementYields() {
+    const T = TILE_SIZE, s = Game.getState();
+    s.maxStorage = Math.max(s.maxStorage, 5000);
+    s.resources = { wood: 500, stone: 500, iron: 100, food: 5000 };
+    const r = {};
+    const spotOf = (type, i) => {
+        const def = BUILDINGS[type];
+        return { x: Math.round((i % MAP_WIDTH) * T + T / 2 - def.width * T / 2), y: Math.round(Math.floor(i / MAP_WIDTH) * T + T / 2 - def.height * T / 2) };
+    };
+    // the quality grid (map tint): computed fast, with poor and great spots
+    let t0 = performance.now();
+    const grid = Game.getQualityGrid('lumberjack');
+    r.gridMs = Math.round(performance.now() - t0);
+    let best = -1, bi = -1, edge = 2, ei = -1;
+    for (let i = 0; i < grid.length; i++) {
+        if (grid[i] > best) { best = grid[i]; bi = i; }
+        if (grid[i] > 0 && grid[i] < edge) { edge = grid[i]; ei = i; }
+    }
+    const dense = spotOf('lumberjack', bi), thin = spotOf('lumberjack', ei);
+    r.denseRate = Game.getYield('lumberjack', dense.x, dense.y).value;
+    r.edgeRate = Game.getYield('lumberjack', thin.x, thin.y).value;
+    // room for the crew
+    s.populationCap += 0;
+    for (let k = 0; k < 4 && Game.getFreeWorkers() < 3; k++) {
+        const c = BuildingManager.getAll().find(b => b.type === 'castle');
+        for (let d = 3; d < 30; d++) {
+            const x = c.pixelX + d * T, y = c.pixelY + (k - 2) * 3 * T;
+            if (Game.canPlace('house', x, y).ok) { Game.placeBuilding('house', x, y); break; }
+        }
+    }
+    // the ghost's number is what the building then produces
+    const ghost = Game.describeYield(Game.getYield('lumberjack', dense.x, dense.y), 'lumberjack').main;
+    const lj = Game.placeBuilding('lumberjack', dense.x, dense.y);
+    r.placed = !!lj;
+    if (!lj) return r;
+    r.ghost = ghost;
+    r.built = Game.describeYield(Game.getBuildingYield(lj), 'lumberjack').main;
+    r.outputMatches = Math.abs(Game.getBuildingOutput(lj) - Game.getYield('lumberjack', dense.x, dense.y).value * Game.getSeasonMultiplier('lumberjack')) < 1e-9;
+    r.ratesUseYield = Math.abs(Game.getRates().wood - BuildingManager.getProductionBuildings()
+        .filter(b => b.def.production.resource === 'wood').reduce((a, b) => a + Game.getBuildingOutput(b), 0)) < 1e-9;
+    // felling: five game minutes, wood counted while the forest thins
+    const rng = GameMap.rangeTiles(lj.pixelX, lj.pixelY, lj.width, lj.height);
+    r.treesBefore = GameMap.countInRect('trees', rng.x0, rng.y0, rng.x1, rng.y1);
+    const out0 = Game.getBuildingOutput(lj);
+    s.resources.wood = 0;
+    lj.progress = 0;
+    Game.update(60000);
+    r.woodFirstMinute = Math.round(s.resources.wood);
+    r.expectedFirstMinute = Math.round(out0 * 10) / 10;
+    Game.update(4 * 60000);
+    r.treesAfter = GameMap.countInRect('trees', rng.x0, rng.y0, rng.x1, rng.y1);
+    r.felled = GameMap.getFelledCount();
+    r.outBefore = Math.round(out0 * 10) / 10;
+    r.outAfter = Math.round(Game.getBuildingOutput(lj) * 10) / 10;
+    // regrowth: with every lumberjack gone, all stumps grow back
+    BuildingManager.getAll().filter(b => b.type === 'lumberjack').forEach(b => Game.demolishBuilding(b.id));
+    s.resources.food = s.maxStorage;
+    Game.update((TREE_REGROW_SECONDS + 5) * 1000);
+    r.felledAfterRegrow = GameMap.getFelledCount();
+    r.treesRegrown = GameMap.countInRect('trees', rng.x0, rng.y0, rng.x1, rng.y1);
+    s.resources.wood = 100;
+    Game.placeBuilding('lumberjack', dense.x, dense.y);   // the village keeps a lumberjack
+    // well: a house in reach holds 2 more, a second well adds nothing
+    s.resources = { wood: 500, stone: 500, iron: 100, food: s.maxStorage };
+    const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+    let house = null;
+    for (let d = 4; d < 30 && !house; d++) for (let dy = -d; dy <= d && !house; dy++) for (let dx = -d; dx <= d && !house; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+        const x = castle.pixelX + dx * T + 3, y = castle.pixelY + dy * T + 5;
+        if (!Game.canPlace('house', x, y).ok) continue;
+        if (Game.getYield('house', x, y).value !== BUILDINGS.house.provides.populationCap) continue;   // no well yet
+        if (!Game.checkSpot('well', x + 2 * T, y + T / 2).ok || !Game.checkSpot('well', x - T, y + T / 2).ok) continue;
+        house = Game.placeBuilding('house', x, y);
+    }
+    r.house = !!house;
+    if (!house) return r;
+    const capBefore = s.populationCap;
+    const wellGhost = Game.getYield('well', house.pixelX + 2 * T, house.pixelY + T / 2);
+    r.wellGhostGain = wellGhost.value;
+    const well = Game.placeBuilding('well', house.pixelX + 2 * T, house.pixelY + T / 2);
+    r.well = !!well;
+    r.capGain = s.populationCap - capBefore;
+    r.houseYield = Game.getBuildingYield(house).value;
+    const well2 = Game.placeBuilding('well', house.pixelX - T, house.pixelY + T / 2);
+    r.capGain2 = s.populationCap - capBefore;
+    r.secondWellGhost = well2 ? Game.getBuildingYield(well2).parts.some(p => p.k === 'y.covered') : null;
+    if (well2) Game.demolishBuilding(well2.id);
+    // the house tint: green where a well reaches, untinted elsewhere
+    const hg = Game.getQualityGrid('house');
+    r.houseTint = { green: hg.filter(q => q === 1).length, other: hg.filter(q => q >= 0 && q < 1).length };
+    t0 = performance.now();
+    Game.getQualityGrid('well');
+    r.wellGridMs = Math.round(performance.now() - t0);
+    r.houseId = house.id;
+    return r;
+}
+
 // Free placement rules (issue #31): touching, overlap, water, quarry on stone, workers' routes
 function placementRules() {
     const T = TILE_SIZE, s = Game.getState();
@@ -760,6 +859,30 @@ async function run(browser, name, ctxOpts, touch) {
 
     // ---- free placement (issue #31) ----
     await placeByInput(page, name, touch);
+
+    // ---- map tint while placing (issue #32): visible on phones, no slower frames ----
+    if (touch) {
+        const measure = () => page.evaluate(() => new Promise(res => {
+            let n = 0; const t0 = performance.now();
+            const f = () => { n++; if (performance.now() - t0 < 1500) requestAnimationFrame(f); else res((performance.now() - t0) / n); };
+            requestAnimationFrame(f);
+        }));
+        await page.evaluate(() => UI.deselectBuilding(true));
+        const idle = await measure();
+        const lj = await page.evaluate(() => {
+            Game.getState().resources.wood = Math.max(Game.getState().resources.wood, 100);
+            UI.selectBuilding('lumberjack');
+            const b = BuildingManager.getAll().find(x => x.type === 'lumberjack');
+            if (b) Renderer.centerOn(b.pixelX + b.width / 2, b.pixelY + b.height / 2);
+            const g = Game.getQualityGrid('lumberjack');
+            return { tinted: g.filter(q => q >= 0).length, red: g.filter(q => q >= 0 && q < 0.34).length, green: g.filter(q => q > 0.66).length };
+        });
+        const placing = await measure();
+        check(lj.tinted > 0 && lj.red > 0 && lj.green > 0, `${name}: lumberjack tint has poor and great spots (${JSON.stringify(lj)})`);
+        check(placing <= idle * 1.25 + 3, `${name}: frame time while placing is not worse (${placing.toFixed(1)} vs ${idle.toFixed(1)} ms)`);
+        await page.screenshot({ path: path.join(OUT, `${name}-tint.png`) });
+        await page.evaluate(() => UI.deselectBuilding(true));
+    }
     if (name === 'desktop') {
         const pr = await page.evaluate(placementRules);
         check(pr.placed && pr.touch && pr.touchPlaced, `desktop: two houses off the grid touch edge to edge (${JSON.stringify({ placed: pr.placed, touch: pr.touch, both: pr.touchPlaced })})`);
@@ -769,6 +892,44 @@ async function run(browser, name, ctxOpts, touch) {
         check(pr.quarryOk && pr.quarryOk.placed, `desktop: off-grid quarry at least half on stone is allowed (${JSON.stringify(pr.quarryOk)})`);
         check(pr.working.length === 3, `desktop: villagers reach their off-grid workplaces (${pr.working.join(', ')})`);
         check(pr.offGrid >= 6, `desktop: ${pr.offGrid} buildings stand off the tile grid`);
+
+        // ---- yields depend on the spot (issue #32) ----
+        const y = await page.evaluate(placementYields);
+        check(y.denseRate > y.edgeRate * 3, `desktop: lumberjack in dense forest yields far more than at the edge (${y.denseRate} vs ${y.edgeRate}/min)`);
+        check(y.gridMs < 150 && y.wellGridMs < 150, `desktop: spot quality grid is cheap (lumberjack ${y.gridMs} ms, well ${y.wellGridMs} ms)`);
+        check(y.placed && y.ghost === y.built && y.outputMatches, `desktop: the ghost's yield is what the lumberjack produces (${y.ghost} -> ${y.built})`);
+        check(Math.abs(y.woodFirstMinute - y.expectedFirstMinute) <= 4, `desktop: first minute's wood matches the yield (${y.woodFirstMinute} vs ${y.expectedFirstMinute})`);
+        check(y.ratesUseYield, 'desktop: top-bar rates use the real yields');
+        check(y.treesAfter < y.treesBefore && y.outAfter < y.outBefore && y.felled > 0, `desktop: felling thins the forest and the yield drops (trees ${y.treesBefore} -> ${y.treesAfter}, ${y.outBefore} -> ${y.outAfter}/min)`);
+        check(y.felledAfterRegrow === 0 && y.treesRegrown >= y.treesBefore, `desktop: felled trees grow back (stumps left ${y.felledAfterRegrow}, trees ${y.treesRegrown})`);
+        check(y.house && y.well && y.wellGhostGain >= 2 && y.capGain === y.wellGhostGain && y.houseYield === 7, `desktop: a well makes houses in reach hold more, as its ghost said (ghost +${y.wellGhostGain}, cap +${y.capGain}, house ${y.houseYield})`);
+        check(y.capGain2 === y.capGain && y.secondWellGhost === true, `desktop: a second well on the same houses adds nothing (cap +${y.capGain2})`);
+        check(y.houseTint.green > 0 && y.houseTint.other === 0, `desktop: house tint is green only where a well reaches (${JSON.stringify(y.houseTint)})`);
+        // the house's info panel names the bonus
+        const houseInfo = await page.evaluate((id) => {
+            UI.deselectBuilding(true);
+            const b = BuildingManager.getById(id);
+            UI.showBuildingInfo(b);
+            return document.getElementById('info-content')?.textContent || '';
+        }, y.houseId);
+        check(houseInfo.includes(await page.evaluate(() => t('y.well', { n: 2 }))), `desktop: house info shows the well bonus`);
+        // Civilization-style display: tint plus the yield at the ghost while placing
+        const spot = await page.evaluate(() => {
+            UI.hideInfo();
+            const g = Game.getQualityGrid('lumberjack');
+            let bi = 0; g.forEach((q, i) => { if (q > g[bi]) bi = i; });
+            const wx = (bi % MAP_WIDTH) * TILE_SIZE + TILE_SIZE / 2, wy = Math.floor(bi / MAP_WIDTH) * TILE_SIZE + TILE_SIZE / 2;
+            Game.getState().resources.wood = 100;
+            UI.selectBuilding('lumberjack');
+            Renderer.centerOn(wx, wy);
+            return Renderer.worldToScreen(wx, wy);
+        });
+        await page.mouse.move(spot.x, spot.y);
+        await page.waitForTimeout(300);
+        const pv = await page.evaluate(() => UI.getPlacementPreview());
+        check(pv && pv.valid && pv.yield && /\+\d/.test(pv.yield.main) && pv.yield.parts.length >= 2, `desktop: ghost shows the yield and its parts (${pv?.yield ? pv.yield.main + ' | ' + pv.yield.parts.join(' · ') : 'none'})`);
+        await page.screenshot({ path: path.join(OUT, 'desktop-yield-tint.png') });
+        await page.evaluate(() => UI.deselectBuilding(true));
     }
 
     // the map must stay visible above the menus
@@ -899,6 +1060,11 @@ async function run(browser, name, ctxOpts, touch) {
     }
 
     if (name === 'desktop') {
+        // a few stumps that must survive the reload (issue #32)
+        const treesSaved = await page.evaluate(() => {
+            GameMap.fellTrees(0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1, 100, 100, 5);
+            return GameMap.serializeTrees().map(e => e[0]).sort((a, b) => a - b).join(',');
+        });
         await page.evaluate(() => Game.save());
         const before = await page.evaluate(() => BuildingManager.getAll().length);
         const spots = await page.evaluate(() => BuildingManager.getAll().map(b => b.type + '@' + b.pixelX + ',' + b.pixelY).join(' '));
@@ -913,6 +1079,8 @@ async function run(browser, name, ctxOpts, touch) {
         const spotsAfter = await page.evaluate(() => BuildingManager.getAll().map(b => b.type + '@' + b.pixelX + ',' + b.pixelY).join(' '));
         const offGrid = await page.evaluate(() => BuildingManager.getAll().filter(b => b.pixelX % TILE_SIZE || b.pixelY % TILE_SIZE).length);
         check(spotsAfter === spots && offGrid > 0, `desktop: ${offGrid} off-grid positions survive a reload`);
+        const treesLoaded = await page.evaluate(() => GameMap.serializeTrees().map(e => e[0]).sort((a, b) => a - b).join(','));
+        check(treesSaved.length > 0 && treesLoaded === treesSaved, `desktop: felled trees survive a reload (${treesSaved.split(',').length} stumps)`);
         const kept = await page.evaluate(() => ({ units: Units.getAll().map(u => u.type).join(','), product: BuildingManager.getAll().find(b => b.type === 'weaponsmith')?.product }));
         check(kept.units === 'swordsman,swordsman' && kept.product === 'sword', `desktop: save keeps the soldiers and the smith's choice (${JSON.stringify(kept)})`);
         const patrol = await page.evaluate(() => {
@@ -927,6 +1095,7 @@ async function run(browser, name, ctxOpts, touch) {
             const data = JSON.parse(localStorage.getItem(SAVE_KEY));
             data.version = 4;
             data.buildings.forEach((b, i) => { b.tileX = Math.floor(b.x / TILE_SIZE) + (i % 2); b.tileY = Math.floor(b.y / TILE_SIZE); delete b.x; delete b.y; });
+            delete data.trees;   // saves from before issue #32 have no tree state
             Game.getState().gameOver = true; // keeps the page from overwriting the crafted save on unload
             localStorage.setItem(SAVE_KEY, JSON.stringify(data));
             return data.buildings.map(b => b.type + '@' + b.tileX * TILE_SIZE + ',' + b.tileY * TILE_SIZE).join(' ');
@@ -940,6 +1109,11 @@ async function run(browser, name, ctxOpts, touch) {
             spots: BuildingManager.getAll().map(b => b.type + '@' + b.pixelX + ',' + b.pixelY).join(' '),
         }));
         check(v4Loaded.started && v4Loaded.spots === v4, `desktop: v4 save with tile positions loads every building in the same place`);
+        const stillFelled = await page.evaluate((ids) => {
+            const felled = new Set(GameMap.serializeTrees().map(e => e[0]));
+            return ids.split(',').map(Number).filter(id => felled.has(id)).length;
+        }, treesSaved);
+        check(stillFelled === 0, `desktop: a save without tree state loads with its trees standing (${stillFelled} of the old stumps left)`);
         await page.evaluate(() => Game.save());
 
         // An old v3 save with a blacksmith must still load: it is dropped and refunded

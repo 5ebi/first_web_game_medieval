@@ -1374,6 +1374,7 @@ kbd {
     font-size: 12.5px;
 }
 #info-content .info-desc { grid-column: 1 / -1; color: var(--ink-soft); font-style: italic; margin: 0 0 3px; font-size: 12.5px; }
+#info-content .info-note { grid-column: 1 / -1; color: var(--ink-soft); margin: 2px 0; font-size: 12px; }
 #info-content .stat {
     display: flex;
     flex-wrap: wrap;

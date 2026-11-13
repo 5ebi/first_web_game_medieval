@@ -5,11 +5,15 @@
 const BuildingManager = (() => {
     let placedBuildings = [];
     let nextId = 1;
+    let version = 0;   // bumps on every place / remove (placement tint and yields cache on it)
 
     function reset() {
         placedBuildings = [];
         nextId = 1;
+        version++;
     }
+
+    function getVersion() { return version; }
 
     // (x, y): top-left of the footprint in world pixels. pixelX/pixelY are the one
     // source of truth for the position; tiles are derived from them when needed.
@@ -39,11 +43,13 @@ const BuildingManager = (() => {
         }
 
         placedBuildings.push(building);
+        version++;
         return building;
     }
 
     function remove(id) {
         placedBuildings = placedBuildings.filter(b => b.id !== id);
+        version++;
     }
 
     function getAll() {
@@ -126,6 +132,7 @@ const BuildingManager = (() => {
         getBuildingAt,
         countByType,
         getProductionBuildings,
+        getVersion,
         serialize,
         deserialize,
     };

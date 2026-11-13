@@ -473,6 +473,20 @@ const Renderer = (() => {
                 const sway = Math.sin(timeSec * (0.9 + wind * 1.4) + ph) + Math.sin(timeSec * 2.3 + ph * 1.7) * 0.25;
                 const frame = Math.max(-2, Math.min(2, Math.round(sway * swayAmp)));
                 const sprite = Sprites.getTreeFrame(kind, season, variant, frame);
+                // Felled trees: a stump, then a sapling that grows back to full size
+                if (t.g < 1) {
+                    const stump = Sprites.getStump(season);
+                    const sxp = Math.round(t.x - 5), syp = Math.round(t.y + 10);
+                    if (t.g < 0.3) {
+                        drawables.push({ y: t.y + 16, draw: () => ctx.drawImage(stump, sxp, syp) });
+                        return;
+                    }
+                    const k = t.g < 0.65 ? 0.4 : 0.7;
+                    const sw = Math.round(sprite.width * k), sh = Math.round(sprite.height * k);
+                    const sox = Math.round(t.x - sw / 2), soy = Math.round(t.y - sh + 16);
+                    drawables.push({ y: t.y + 16, draw: () => ctx.drawImage(sprite, sox, soy, sw, sh) });
+                    return;
+                }
                 const ox = Math.round(t.x - sprite.width / 2), oy = Math.round(t.y - sprite.height + 16);
                 drawables.push({
                     y: t.y + 16,
@@ -586,6 +600,9 @@ const Renderer = (() => {
         Effects.draw(ctx);
         Atmosphere.drawSky(ctx, view);
 
+        // How good every spot is for the building being placed (red -> yellow -> green)
+        if (hoverInfo?.placing) drawSpotTint(hoverInfo.placing, nowT);
+
         // Placement preview
         if (placementPreview) drawPlacementPreview(placementPreview);
 
@@ -619,6 +636,9 @@ const Renderer = (() => {
 
         // Weather, light halos, rain
         Atmosphere.drawScreen(ctx, view);
+
+        // Yield the ghost would get there, with its parts (Civilization style)
+        if (placementPreview?.yield) drawYieldLabel(placementPreview);
 
         // Placement hint text near the cursor
         if (placementPreview && placementPreview.reason && placementPreview.screenX !== undefined) {
@@ -838,7 +858,7 @@ const Renderer = (() => {
 
         // Resource radius for production buildings that need a nearby resource
         if (def.production?.requires) {
-            const r = 5 * TILE_SIZE;
+            const r = RESOURCE_RADIUS * TILE_SIZE;
             ctx.fillStyle = pp.valid ? 'rgba(255,255,255,0.07)' : 'rgba(255,120,120,0.07)';
             ctx.fillRect(px - r, py - r, pw + 2 * r, ph + 2 * r);
             ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -846,6 +866,33 @@ const Renderer = (() => {
             ctx.setLineDash([4, 4]);
             ctx.strokeRect(px - r, py - r, pw + 2 * r, ph + 2 * r);
             ctx.setLineDash([]);
+        }
+
+        // Wells: the reach of the one being placed (houses it reaches get a ring), and of
+        // the standing ones while placing a house or tavern
+        const wellR = BUILDINGS.well.well.radius * TILE_SIZE;
+        const ring = (cx, cy, alpha) => {
+            ctx.strokeStyle = `rgba(150, 210, 255, ${alpha})`;
+            ctx.lineWidth = 1.5 / zoom;
+            ctx.setLineDash([5 / zoom, 4 / zoom]);
+            ctx.beginPath();
+            ctx.arc(cx, cy, wellR, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        };
+        if (def.well) {
+            ring(px + pw / 2, py + ph / 2, 0.8);
+            BuildingManager.getAll().forEach(b => {
+                if (!def.well.bonus[b.type]) return;
+                const dx = Math.max(b.pixelX - (px + pw / 2), 0, px + pw / 2 - (b.pixelX + b.width));
+                const dy = Math.max(b.pixelY - (py + ph / 2), 0, py + ph / 2 - (b.pixelY + b.height));
+                if (dx * dx + dy * dy > wellR * wellR) return;
+                ctx.strokeStyle = 'rgba(150, 210, 255, 0.9)';
+                ctx.lineWidth = 2 / zoom;
+                ctx.strokeRect(b.pixelX + 1, b.pixelY + 1, b.width - 2, b.height - 2);
+            });
+        } else if (BUILDINGS.well.well.bonus[pp.type]) {
+            BuildingManager.getAll().forEach(b => { if (b.type === 'well') ring(b.pixelX + b.width / 2, b.pixelY + b.height / 2, 0.55); });
         }
 
         // Footprint (free placement: no tile grid inside it)
@@ -860,6 +907,95 @@ const Renderer = (() => {
         ctx.strokeStyle = pp.valid ? 'rgba(80, 255, 80, 0.9)' : 'rgba(255, 60, 60, 0.9)';
         ctx.lineWidth = 2 / zoom;
         ctx.strokeRect(px, py, pw, ph);
+    }
+
+    // ---------- Spot quality tint ----------
+    // One pixel per tile, alpha baked in, scaled up crisp over the map: one drawImage per
+    // frame. Rebuilt when the type changes or buildings/trees change (at most once a
+    // second for tree changes, which happen with every wood delivery).
+    let tint = { type: null, gv: -1, bv: -1, at: 0, canvas: null, empty: true };
+
+    // Quality 0..1 -> [r, g, b, a]: dark red (poor) -> yellow -> bright green (great).
+    // Brightness rises with quality too, so it reads without telling red from green.
+    function qualityColor(q) {
+        const lerp = (a, b, k) => a + (b - a) * k;
+        let r, g, b;
+        if (q < 0.5) { const k = q / 0.5; r = lerp(150, 235, k); g = lerp(25, 200, k); b = lerp(25, 40, k); }
+        else { const k = (q - 0.5) / 0.5; r = lerp(235, 110, k); g = lerp(200, 245, k); b = lerp(40, 120, k); }
+        return [Math.round(r), Math.round(g), Math.round(b), lerp(0.46, 0.32, q)];
+    }
+
+    function rebuildTint(type, nowT) {
+        const grid = Game.getQualityGrid(type);
+        if (!tint.canvas) {
+            tint.canvas = document.createElement('canvas');
+            tint.canvas.width = MAP_WIDTH;
+            tint.canvas.height = MAP_HEIGHT;
+        }
+        const tctx = tint.canvas.getContext('2d');
+        const img = tctx.createImageData(MAP_WIDTH, MAP_HEIGHT);
+        let empty = true;
+        if (grid) {
+            for (let i = 0; i < grid.length; i++) {
+                const q = grid[i];
+                if (q < 0) continue;
+                const c = qualityColor(q);
+                img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2];
+                img.data[i * 4 + 3] = Math.round(c[3] * 255);
+                empty = false;
+            }
+        }
+        tctx.putImageData(img, 0, 0);
+        tint.type = type; tint.gv = GameMap.getVersion(); tint.bv = BuildingManager.getVersion();
+        tint.at = nowT; tint.empty = empty;
+    }
+
+    function drawSpotTint(type, nowT) {
+        if (!Game.hasSpotYield(type)) return;
+        const stale = tint.type !== type || tint.bv !== BuildingManager.getVersion() ||
+            (tint.gv !== GameMap.getVersion() && nowT - tint.at > 1000);
+        if (stale) rebuildTint(type, nowT);
+        if (tint.empty) return;
+        const was = ctx.imageSmoothingEnabled;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(tint.canvas, 0, 0, MAP_PIXEL_W, MAP_PIXEL_H);
+        ctx.imageSmoothingEnabled = was;
+    }
+
+    // Label above the ghost: "+9 wood/min" and the parts ("14 trees · ×0.7")
+    function drawYieldLabel(pp) {
+        const def = BUILDINGS[pp.type];
+        const sprite = Sprites.getBuilding(pp.type);
+        const pw = def.width * TILE_SIZE, ph = def.height * TILE_SIZE;
+        const topY = pp.y + ph - (sprite ? Math.max(ph, sprite.height) : ph);
+        const s = worldToScreen(pp.x + pw / 2, topY);
+        const y = pp.yield;
+        const c = qualityColor(y.quality);
+        const col = `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+        const line2 = y.parts.join(' · ');
+        ctx.font = '700 14px "Segoe UI", sans-serif';
+        const w1 = ctx.measureText(y.main).width;
+        ctx.font = '600 11px "Segoe UI", sans-serif';
+        const w2 = line2 ? ctx.measureText(line2).width : 0;
+        const w = Math.ceil(Math.max(w1, w2)) + 16, h = line2 ? 38 : 24;
+        let x = Math.round(s.x - w / 2), yy = Math.round(s.y - h - 8);
+        x = Math.max(insets.left + 4, Math.min(canvasWidth - insets.right - 4 - w, x));
+        yy = Math.max(insets.top + 4, Math.min(canvasHeight - insets.bottom - 4 - h, yy));
+        ctx.fillStyle = 'rgba(25, 18, 8, 0.92)';
+        ctx.fillRect(x, yy, w, h);
+        ctx.fillStyle = col;
+        ctx.fillRect(x, yy, 4, h);           // quality stripe
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, yy + 0.5, w - 1, h - 1);
+        ctx.font = '700 14px "Segoe UI", sans-serif';
+        ctx.fillStyle = '#fff6dc';
+        ctx.fillText(y.main, x + 10, yy + 17);
+        if (line2) {
+            ctx.font = '600 11px "Segoe UI", sans-serif';
+            ctx.fillStyle = '#e8d8b0';
+            ctx.fillText(line2, x + 10, yy + 32);
+        }
     }
 
     function drawHint(x, y, text, color) {

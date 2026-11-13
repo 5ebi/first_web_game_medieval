@@ -146,6 +146,19 @@ const BUILDINGS = {
         lights: [[24, 30, 16, 12]],
         hotkey: 'B',
     },
+    // Neighbour bonus: houses and taverns within `well.radius` tiles (measured from the
+    // well's centre to the nearest point of their footprint) house more villagers.
+    // Bonuses from several wells don't stack.
+    well: {
+        width: 1, height: 1,
+        cost: { wood: 5, stone: 10, iron: 0 },
+        workers: 0,
+        provides: {},
+        production: null,
+        well: { radius: 4, bonus: { house: 2, tavern: 3 } },
+        limit: null,
+        hotkey: 'U',
+    },
     // Turns a free villager plus a weapon from the stock into a soldier (see WEAPONS[].unit)
     barracks: {
         width: 3, height: 2,
@@ -172,6 +185,7 @@ const BUILD_ANIM = {
     iron_mine: { ms: 1600, material: 'stone' },
     weaponsmith: { ms: 1700, material: 'stone' },
     barracks: { ms: 1900, material: 'stone' },
+    well: { ms: 1100, material: 'stone' },
 };
 
 // Give every definition its own key so translations can be looked up from a def
@@ -180,8 +194,27 @@ Object.keys(BUILDINGS).forEach(k => { BUILDINGS[k].key = k; });
 // Build order (for menu display)
 const BUILD_ORDER = [
     'castle', 'warehouse', 'lumberjack', 'hunter', 'quarry',
-    'house', 'tavern', 'iron_mine', 'weaponsmith', 'barracks',
+    'house', 'tavern', 'well', 'iron_mine', 'weaponsmith', 'barracks',
 ];
+
+// ---- Position matters ----
+// Producers look for their resource within this many tiles of any tile they touch.
+const RESOURCE_RADIUS = 5;
+// How a producer's yield depends on its spot (Game.getYield). factor = count / full,
+// clamped to [min, max]; the base rate (amount per cycle) is multiplied by it.
+//  - trees:  standing trees in range (lumberjack; felling makes them fewer)
+//  - FOREST / STONE_DEPOSIT: tiles of that terrain in range
+//  - onStone: share of the footprint on stone, factor = 0.25 + share (quarry: 0.75 to 1.25)
+const YIELD = {
+    lumberjack: { by: 'trees', full: 60, min: 0, max: 1.25 },
+    hunter:     { by: 'FOREST', full: 20, min: 0.5, max: 1.25 },
+    iron_mine:  { by: 'STONE_DEPOSIT', full: 10, min: 0.4, max: 1.25 },
+    quarry:     { by: 'onStone' },
+};
+// Each wood delivery fells this many trees (the nearest standing ones in range)
+const TREES_PER_DELIVERY = 2;
+// A felled tree is a stump, then a sapling, and stands again after this many game seconds
+const TREE_REGROW_SECONDS = DAY_SECONDS * 2;
 
 // Weapons the weapon smith can forge, in menu order. Data-driven: a new weapon is one
 // entry here plus its icon (Sprites.drawIcon), soldier art (Sprites.drawSoldier) and the

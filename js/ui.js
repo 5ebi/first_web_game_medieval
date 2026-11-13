@@ -210,7 +210,7 @@ const UI = (() => {
         { id: 'castle', icon: 'castle', types: ['castle', 'warehouse'] },
         { id: 'industry', icon: 'wood', types: ['lumberjack', 'quarry', 'iron_mine'] },
         { id: 'food', icon: 'food', types: ['hunter'] },
-        { id: 'town', icon: 'pop', types: ['house', 'tavern'] },
+        { id: 'town', icon: 'pop', types: ['house', 'tavern', 'well'] },
         { id: 'military', icon: 'sword', types: ['weaponsmith', 'barracks'] },
     ];
     const catOf = type => (CATEGORIES.find(c => c.types.includes(type)) || CATEGORIES[0]).id;
@@ -330,6 +330,7 @@ const UI = (() => {
             parts.push(`<span class="ci up">${ic(p.resource)}+${fmtNum(p.amount * 60 / p.cycle)}/min</span>`);
         }
         if (def.provides.populationCap) parts.push(`<span class="ci up">+${def.provides.populationCap} ${ic('pop')}</span>`);
+        if (def.well) parts.push(`<span class="ci up">${ic('pop')}+${def.well.bonus.house}/+${def.well.bonus.tavern}</span>`);
         if (def.provides.storage) parts.push(`<span class="ci up">${ic('storage')}+${def.provides.storage}</span>`);
         if (def.crafts) parts.push(`<span class="ci up">${Object.keys(WEAPONS).map(w => ic(w)).join('')}</span>`);
         if (def.recruits) parts.push(`<span class="ci up">${ic('shield')}</span>`);
@@ -365,6 +366,7 @@ const UI = (() => {
         if (def.workers > 0) parts.push(t(def.workers > 1 ? 'menu.workers' : 'menu.worker', { n: def.workers }));
         if (def.provides.populationCap) parts.push(t('menu.villagers', { n: def.provides.populationCap }));
         if (def.provides.storage) parts.push(t('menu.storage', { n: def.provides.storage }));
+        if (def.well) parts.push(t('tt.y.well'));
         if (def.crafts) parts.push(`${t('info.forges')}: ${Object.keys(WEAPONS).map(w => wName(w, 2)).join(', ')}`);
         if (def.production) {
             parts.push(t('menu.prod', { n: fmtNum(def.production.amount * 60 / def.production.cycle), res: resName(def.production.resource) }));
@@ -390,6 +392,8 @@ const UI = (() => {
             if (wm !== undefined && wm !== 1) html += `<div class="tt-row"><span>${t('tt.winter')}</span><span>${wm === 0 ? t('season.rest') : '×' + fmtNum(wm)}</span></div>`;
         }
         if (def.production?.requires) html += `<div class="tt-row"><span>${t('tt.needs')}</span><span>${def.production.requires === 'FOREST' ? t('tt.forest') : t('tt.stone')}</span></div>`;
+        const yk = YIELD[type] ? 'tt.y.' + YIELD[type].by : def.well ? 'tt.y.well' : null;
+        if (yk) html += `<div class="tt-row"><span>${t('tt.yield')}</span><span>${t(yk)}</span></div>`;
         if (reason) html += `<div class="tt-reason">${reason}</div>`;
         html += `<div class="tt-hint">${t('tt.hotkey', { k: def.hotkey })}</div>`;
         els.tooltip.innerHTML = html;
@@ -632,6 +636,7 @@ const UI = (() => {
                 valid: check.ok, reason: check.ok ? null : check.reason,
                 hint: check.ok ? t('cv.tap', { name: bName(def) }) : null,
                 screenX: s.x - 10, screenY: s.y - 14,
+                yield: previewYield(selectedBuilding, pendingTouch.x, pendingTouch.y),
             };
             return;
         }
@@ -658,7 +663,25 @@ const UI = (() => {
             reason: check.ok ? null : check.reason,
             screenX: lastPointer.x,
             screenY: lastPointer.y,
+            yield: previewYield(selectedBuilding, pos.x, pos.y),
         };
+    }
+
+    // What the ghost would yield on this spot ({ main, parts, quality }), null when the
+    // spot can't take it or the type doesn't care where it stands. Cached per spot.
+    let yieldCache = { key: '' , val: null };
+    function previewYield(type, x, y) {
+        if (!Game.hasSpotYield(type)) return null;
+        const key = `${type}|${x}|${y}|${GameMap.getVersion()}|${BuildingManager.getVersion()}|${Game.getSeason().id}|${Lang.get()}`;
+        if (yieldCache.key === key) return yieldCache.val;
+        let val = null;
+        if (Game.checkSpot(type, x, y).ok) {
+            const y0 = Game.getYield(type, x, y);
+            const d = Game.describeYield(y0, type);
+            val = { main: d.main, parts: d.parts, quality: y0.quality };
+        }
+        yieldCache = { key, val };
+        return val;
     }
 
     function anyOverlayOpen() {
@@ -1289,7 +1312,8 @@ const UI = (() => {
             const cls = out > base + 0.01 ? 'ok' : out < base - 0.01 ? 'bad' : '';
             html += stat(t('info.production'), `${ic(prod.resource)} ${t('menu.prod', { n: fmtNum(out), res: resName(prod.resource) })}`, cls);
             html += stat(t('info.status'), status);
-            if (building.active && !resting) {
+            html += spotHtml(building);
+            if (building.active && !resting && out > 0) {
                 const mult = out / base || 1;
                 const left = Math.max(0, Math.ceil((1 - (building.progress || 0)) * prod.cycle / mult));
                 html += `<div class="stat stat-bar"><span class="stat-label">${t('info.delivery')}</span>${bar(building.progress || 0, COLORS[prod.resource] || '#ffd24a', t('info.next', { a: prod.amount, res: resName(prod.resource), s: left }))}</div>`;
@@ -1301,7 +1325,14 @@ const UI = (() => {
             }
         }
         if (def.provides.populationCap) {
-            html += stat(t('info.housing'), `${ic('pop')} ${t('menu.villagers', { n: def.provides.populationCap })}`);
+            const y = Game.getBuildingYield(building);
+            const n = y ? y.value : def.provides.populationCap;
+            html += stat(t('info.housing'), `${ic('pop')} ${t('menu.villagers', { n })}`, n > def.provides.populationCap ? 'ok' : '');
+            if (y) html += stat(t('info.wellbonus'), Game.describeYield(y, building.type).parts.join(' · '), y.value > y.base ? 'ok' : '');
+        }
+        if (def.well) {
+            const y = Game.getBuildingYield(building);
+            html += stat(t('info.reach'), `${t('y.reach', { n: y.count })} · ${ic('pop')} ${t('menu.villagers', { n: y.value })}`, y.value > 0 ? 'ok' : 'bad');
         }
         if (def.crafts) html += smithInfoHtml(building);
         if (def.recruits) html += barracksInfoHtml();
@@ -1315,6 +1346,18 @@ const UI = (() => {
             html += stockHtml();
         }
         html += stat(t('info.built'), t('info.day', { n: building.dayPlaced }));
+        return html;
+    }
+
+    // Why a producer yields what it does on its spot, and why it dropped
+    function spotHtml(building) {
+        const y = Game.getBuildingYield(building);
+        if (!y || y.kind !== 'prod') return '';
+        const d = Game.describeYield(y, building.type);
+        let html = stat(t('info.spot'), d.parts.join(' · '), y.factor >= 1 ? 'ok' : y.factor < 0.6 ? 'bad' : '');
+        const cfg = YIELD[building.type];
+        if (cfg.by === 'trees' && y.count < cfg.full * 0.35) html += `<p class="info-note bad">${t('y.cutdown')}</p>`;
+        else if (y.quality < 0.3) html += `<p class="info-note">${t('y.poor')}</p>`;
         return html;
     }
 
@@ -1705,6 +1748,7 @@ const UI = (() => {
         hoverInfo.orderHint = orderMode && pointerOverCanvas && !lastInputTouch
             ? t(orderMode === 'move' ? 'sel.pick.move' : orderMode === 'patrol' ? 'sel.pick.patrol' : 'sel.pick.add') : null;
         hoverInfo.pointer = lastPointer;
+        hoverInfo.placing = selectedBuilding;   // the map tint shows how good each spot is for it
         return hoverInfo;
     }
 
@@ -1727,6 +1771,7 @@ const UI = (() => {
         hideWelcome,
         showWelcome,
         hideInfo,
+        showBuildingInfo,
         showSelection,
         getOrderMode: () => orderMode,
         getPlacementPreview,
