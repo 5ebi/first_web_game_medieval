@@ -166,9 +166,14 @@ async function focusBuilding(page, type) {
         const b = BuildingManager.getAll().find(x => x.type === type);
         Renderer.centerOn(b.pixelX + b.width / 2, b.pixelY + b.height / 2);
         // a spot on the building where no villager walks (a tap on a villager opens the villager)
-        const pts = [[0.5, 0.4], [0.3, 0.3], [0.7, 0.3], [0.3, 0.7], [0.7, 0.7], [0.5, 0.15]];
-        const p = pts.map(([fx, fy]) => ({ x: b.pixelX + b.width * fx, y: b.pixelY + b.height * fy }))
-            .find(q => !Villagers.pick(q.x, q.y) && !Villagers.pick(q.x, q.y + 6)) || { x: b.pixelX + b.width / 2, y: b.pixelY + b.height / 2 - 6 };
+        // (they keep walking until the tap lands, so take the point farthest from all of them)
+        let p = null, best = -1;
+        for (let fy = 0.15; fy < 0.9; fy += 0.15) for (let fx = 0.2; fx < 0.85; fx += 0.15) {
+            const q = { x: b.pixelX + b.width * fx, y: b.pixelY + b.height * fy };
+            let d = 1e9;
+            Villagers.getAll().forEach(v => { d = Math.min(d, Math.hypot(v.x - q.x, (v.y - 10) - q.y)); });
+            if (d > best) { best = d; p = q; }
+        }
         return Renderer.worldToScreen(p.x, p.y);
     }, type);
     await page.waitForTimeout(200);
@@ -513,11 +518,12 @@ async function soldierControl(page, ctx, name, touch) {
         const st = await page.evaluate(() => Units.getSelected().map(u => u.state));
         check(one === 1 && panelOk && st.length === 1 && st[0] === 'move', `${name}: tap selects (${one}), order buttons visible (${panelOk}), tap on the map moves (${st})`);
         // one-finger pan still works with a selection, without giving an order
-        await page.evaluate(() => { for (let i = 0; i < 100; i++) Units.update(0.1); });
+        // let him arrive (paths around off-grid buildings can be longer); a stuck soldier still fails below
+        const walkSteps = await page.evaluate(() => { let i = 0; for (; i < 600 && Units.getSelected().some(u => u.state !== 'idle'); i++) Units.update(0.1); return i; });
         const cam2 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
         await touchDrag(cdp, page, mid, { x: mid.x + 120, y: mid.y });
         const after = await page.evaluate(() => ({ cam: { ...Renderer.getCamera() }, st: Units.getSelected().map(u => u.state) }));
-        check(Math.abs(after.cam.x - cam2.x) > 30 && after.st[0] === 'idle', `${name}: drag with a selection pans, no order (${after.st})`);
+        check(Math.abs(after.cam.x - cam2.x) > 30 && after.st[0] === 'idle', `${name}: drag with a selection pans, no order (${after.st}, arrived after ${walkSteps / 10} s)`);
         // Deselect button
         await press(page, true, '#info-controls [data-order="deselect"]');
         const none = await nSel();
