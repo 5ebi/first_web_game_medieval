@@ -83,8 +83,12 @@ accessibility tree. Add a check to `tests/smoke.js` when you change behaviour.
 
 ## Useful handles (browser console / Playwright `page.evaluate`)
 
-- `Game.getState()`, `Game.canPlace(type, x, y)`, `Game.placeBuilding(type, x, y)`,
-  `Game.update(ms)` (`Game.update(60000)` = one game minute at 1×; a day is 6 minutes).
+- `Game.getState()`, `Game.canPlace(type, x, y)`, `Game.placeBuilding(type, x, y)` (x, y = top-left
+  of the footprint in **world pixels**, free placement, not tiles), `Game.update(ms)`
+  (`Game.update(60000)` = one game minute at 1×; a day is 6 minutes).
+- Buildings: `b.pixelX`, `b.pixelY` (the only position), `b.width`, `b.height` in pixels;
+  `BuildingManager.getBuildingAt(wx, wy)` takes a world point; `GameMap.rectTiles(x, y, w, h)`
+  gives the terrain tiles a footprint touches.
 - `UI.selectBuilding(type)`, `UI.deselectBuilding()`, `UI.getPlacementPreview()`.
 - `Renderer.getCamera()`, `Renderer.setZoom(z)`, `Renderer.centerOn(wx, wy)`,
   `Renderer.worldToScreen(wx, wy)`. Tile → world: `tile * TILE_SIZE` (32).

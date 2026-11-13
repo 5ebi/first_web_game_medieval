@@ -1,6 +1,6 @@
 # Roadmap and status
 
-_Last updated: 2026-11-06_
+_Last updated: 2026-11-13_
 
 ## Where things stand
 
@@ -41,8 +41,16 @@ _Last updated: 2026-11-06_
   Desktop: left-drag box-selects once you own soldiers, right/middle-drag pans, right-click
   moves, P patrol, L stop. Phones: tap selects, tap on the map moves, long press + drag
   draws a box, one-finger drag always pans. Raids and combat later.
-- Save format v4 (same `SAVE_KEY`): v3 saves are migrated (a blacksmith is dropped and
-  its cost refunded).
+- **Free placement** (#31): a building stands at any whole-pixel world position, not on
+  the 32 px grid; terrain stays a tile grid. A spot is valid when no tile under the footprint
+  is water/sand (off-map counts as water), at least half of a quarry's *area* is on stone,
+  the resource for producers is within 5 tiles of any tile it touches, and it overlaps no
+  other building (touching is fine). Trees/stones/flowers are cleared on tiles whose centre
+  is under the footprint. Soldiers' A* treats a tile as blocked when a footprint covers any
+  part of it. `pixelX`/`pixelY` are the only position (no `tileX`/`tileY`).
+- Save format v5 (same `SAVE_KEY`): buildings store `x`/`y` in pixels; v4 tile positions
+  are migrated (× `TILE_SIZE`), v3 saves are migrated too (a blacksmith is dropped and its
+  cost refunded).
 - Every reply to the owner and every PR body ends with a test link: live
   `https://5ebi.github.io/first_web_game_medieval/`, or for an unmerged branch
   `https://raw.githack.com/5ebi/first_web_game_medieval/<branch>/index.html`
