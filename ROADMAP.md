@@ -115,8 +115,14 @@ Why they work (check new features against these):
 - **Yields depend on the spot** (#32): one function, `Game.getYield(type, x, y)`, gives the
   yield and its parts for the simulation, the top-bar rates, the winter forecast, the ghost and
   the info panel (numbers in `YIELD`, `constants.js`). Lumberjack: standing trees within
-  `RESOURCE_RADIUS` (5 tiles), factor trees/60 up to ×1.25, no floor; every delivery fells the
-  2 nearest trees, which regrow over 2 days (stump, sapling, tree). Hunter: forest tiles in range
+  `RESOURCE_RADIUS` (5 tiles), factor trees/60 between 5/12 and ×1.25, i.e. 5 to 15 wood/min
+  (a thinned lumberjack never drops below 5); every 4-wood delivery fells the nearest tree
+  (`TREES_PER_DELIVERY` 1). **Felled trees don't regrow by themselves** (#35): a stump stays a
+  stump until a **forester** (2×2, 15 wood, 1 worker, Industry tab; an empty one plants nothing)
+  replants it, nearest stump within 5 tiles first, one every 15 s; the sapling counts as a tree
+  again after half a game day (`SAPLING_GROW_SECONDS`). One forester next to one lumberjack in
+  dense forest keeps it at about 12 wood/min for good; a cut-down forest leaves the 5/min floor
+  about 2 days after a forester is built and is back near 12/min after about 6. Hunter: forest tiles in range
   (×0.5 to ×1.25). Iron mine: stone tiles in range (×0.4 to ×1.25). Quarry: 0.25 + share of the
   footprint on stone (×0.75 to ×1.25). What a footprint clears on placement is not counted, so the
   ghost's number is what the building then produces. **Well** (1×1, 5 wood + 10 stone): houses
@@ -124,7 +130,8 @@ Why they work (check new features against these):
   recomputed from the buildings. While placing, the map is tinted red -> yellow -> green per tile
   (brightness rises too, for colour blindness; spots that gain nothing from a well stay untinted),
   cached until buildings or trees change. Saves store felled trees as `trees: [[id, growth]]`
-  (same save version; saves without it load with every tree standing).
+  (growth 0 = stump, above 0 = sapling; same save version; saves without it load with every tree
+  standing, trees that were regrowing in older saves continue as saplings).
 - Save format v5 (same `SAVE_KEY`): buildings store `x`/`y` in pixels; v4 tile positions
   are migrated (× `TILE_SIZE`), v3 saves are migrated too (a blacksmith is dropped and its
   cost refunded).

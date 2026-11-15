@@ -143,11 +143,12 @@ const Game = (() => {
     // info panel. (x, y) is the footprint's top-left in world pixels; opts.self is a
     // standing building to leave out of its own neighbour checks.
     // Returns null when the spot does not matter for this type, else
-    //   { kind: 'prod' | 'house' | 'well', value, base, factor, quality (0..1),
+    //   { kind: 'prod' | 'house' | 'well' | 'forester', value, base, factor, quality (0..1),
     //     parts: [{ k, v }] (i18n keys with vars), resource?, count? }
     //  - prod:  value = rate per minute at 1x before the season, factor scales the cycle
     //  - house: value = villagers housed (base + well bonus)
     //  - well:  value = extra villagers it would add (only houses no other well reaches)
+    //  - forester: value = stumps in range it can replant, saplings = saplings growing there
     function wellDef() { return BUILDINGS.well.well; }
 
     // Does a well whose footprint top-left is (wx, wy) reach a footprint?
@@ -193,8 +194,10 @@ const Game = (() => {
                 quality = Math.max(0, Math.min(1, count / (cfg.full * cfg.max)));
                 parts.push({ k: 'y.' + cfg.by, v: { n: count } });
                 if (cfg.by === 'trees' && !opts.brief) {
-                    const stumps = GameMap.countFelledInRect(r.x0, r.y0, r.x1, r.y1);
+                    const stumps = GameMap.countInRect('stumps', r.x0, r.y0, r.x1, r.y1);
+                    const saplings = GameMap.countInRect('saplings', r.x0, r.y0, r.x1, r.y1);
                     if (stumps > 0) parts.push({ k: 'y.stumps', v: { n: stumps } });
+                    if (saplings > 0) parts.push({ k: 'y.saplings', v: { n: saplings } });
                 }
             }
             parts.push({ k: 'y.factor', v: { n: factor } });
@@ -208,6 +211,15 @@ const Game = (() => {
                 kind: 'house', value: base + bonus, base, factor: 1, quality: bonus ? 1 : 0.5,
                 parts: [bonus ? { k: 'y.well', v: { n: bonus } } : { k: 'y.nowell', v: {} }],
             };
+        }
+
+        if (def.plants) {
+            const r = GameMap.rangeTiles(x, y, w, h, def.plants.radius);
+            const inRange = kind => GameMap.countInRect(kind, r.x0, r.y0, r.x1, r.y1) - GameMap.countCleared(kind, x, y, w, h);
+            const stumps = inRange('stumps'), saplings = inRange('saplings');
+            const parts = [{ k: 'y.stumpsreach', v: { n: stumps } }];
+            if (saplings > 0) parts.push({ k: 'y.saplings', v: { n: saplings } });
+            return { kind: 'forester', value: stumps, saplings, base: 0, factor: 1, quality: Math.min(1, stumps / 20), parts, count: stumps };
         }
 
         if (def.well) {
@@ -244,6 +256,7 @@ const Game = (() => {
             if (m !== 1) parts.push(t('y.season', { s: t('season.' + getSeason().id), n: fmtFactor(m) }));
             return { main: t('menu.prod', { n: fmtRate(y.value * m), res: resName(y.resource) }), parts };
         }
+        if (y.kind === 'forester') return { main: t('y.forester', { n: y.value }), parts };
         return { main: t('menu.villagers', { n: y.value }), parts };
     }
 
@@ -449,7 +462,7 @@ const Game = (() => {
     // Does the spot change what this type yields (producers, houses, taverns, the well)?
     function hasSpotYield(type) {
         const def = BUILDINGS[type];
-        return !!def && (!!YIELD[type] || !!def.well || !!(def.provides.populationCap && wellDef().bonus[type]));
+        return !!def && (!!YIELD[type] || !!def.well || !!def.plants || !!(def.provides.populationCap && wellDef().bonus[type]));
     }
 
     // Quality (0..1) of every tile for placing this type with its footprint centred on
@@ -484,6 +497,7 @@ const Game = (() => {
                 } else {
                     const yl = getYield(type, x, y, { brief: true });
                     if (yl.kind === 'house' && yl.value === yl.base) continue;   // no well: untinted
+                    if (yl.kind === 'forester' && !yl.value && !yl.saplings) continue;   // nothing to replant
                     q = yl.quality;
                 }
                 grid[ty * MAP_WIDTH + tx] = q;
@@ -741,6 +755,7 @@ const Game = (() => {
         });
 
         if (simulateSmiths(dt)) changed = true;
+        simulateForesters(dt);
         GameMap.growTrees(dt);
 
         // Workers eat continuously
@@ -811,6 +826,31 @@ const Game = (() => {
         const r = GameMap.rangeTiles(b.pixelX, b.pixelY, b.width, b.height);
         const trees = GameMap.fellTrees(r.x0, r.y0, r.x1, r.y1, b.pixelX + b.width / 2, b.pixelY + b.height, TREES_PER_DELIVERY);
         if (trees.length && callbacks.onFell) callbacks.onFell(b, trees);
+    }
+
+    // A forester replants the nearest stump in its range every `plants.every` seconds
+    // (slower with a partial crew). With no stump in range it waits, ready to plant.
+    function simulateForesters(dt) {
+        BuildingManager.getAll().forEach(b => {
+            const pl = b.def.plants;
+            const crew = getCrewFactor(b);
+            if (!pl || !b.active || crew <= 0) return;   // an empty lodge plants nothing
+            b.progress = Math.min(1, (b.progress || 0) + dt * crew / pl.every);
+            if (b.progress < 1) return;
+            const r = GameMap.rangeTiles(b.pixelX, b.pixelY, b.width, b.height, pl.radius);
+            const tree = GameMap.plantStump(r.x0, r.y0, r.x1, r.y1, b.pixelX + b.width / 2, b.pixelY + b.height);
+            if (!tree) return;
+            b.progress = 0;
+            if (callbacks.onPlant) callbacks.onPlant(b, tree);
+        });
+    }
+
+    // 'noworkers' | 'notime' | 'idle' (no stump in range) | 'working'
+    function getForesterStatus(b) {
+        if (!b.active || b.workers <= 0) return 'noworkers';
+        if (!state.clockStarted) return 'notime';
+        const y = buildingYield(b);
+        return y && y.value > 0 ? 'working' : 'idle';
     }
 
     // ---- Milestones ----
@@ -930,6 +970,7 @@ const Game = (() => {
         hasSpotYield,
         getQualityGrid,
         getYield,
+        getForesterStatus,
         getBuildingYield: buildingYield,
         describeYield,
         placeBuilding,

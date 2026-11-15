@@ -36,6 +36,55 @@ function buildVillage() {
     return BuildingManager.getAll().map(b => b.type);
 }
 
+// Forestry in the long run (issue #35): one forester next to one lumberjack in dense
+// forest keeps it near 12 wood/min; a forester without a crew plants nothing
+function forestryLongRun() {
+    const T = TILE_SIZE, s = Game.getState();
+    const keep = { maxStorage: s.maxStorage };
+    s.maxStorage = Math.max(s.maxStorage, 100000);
+    s.resources = { wood: 1000, stone: 1000, iron: 100, food: 100000 };
+    const r = { placed: false };
+    const done = () => { s.maxStorage = keep.maxStorage; s.resources = { wood: 200, stone: 200, iron: 50, food: Math.min(400, keep.maxStorage) }; return r; };
+    // only this pair works the forest: other lumberjacks and foresters go
+    BuildingManager.getAll().filter(b => b.type === 'lumberjack' || b.type === 'forester').forEach(b => Game.demolishBuilding(b.id));
+    // room for the crews: houses next to the castle
+    const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+    for (let k = 0; k < 6 && Game.getFreeWorkers() < 4; k++) {
+        for (let d = 3; d < 40; d++) {
+            const x = castle.pixelX - d * T, y = castle.pixelY + (k - 3) * 2 * T;
+            if (Game.canPlace('house', x, y).ok) { Game.placeBuilding('house', x, y); break; }
+        }
+    }
+    const g = Game.getQualityGrid('lumberjack');
+    let bi = -1; g.forEach((q, i) => { if (bi < 0 || q > g[bi]) bi = i; });
+    if (bi < 0) return done();
+    const lx = Math.round((bi % MAP_WIDTH) * T + T / 2 - T), ly = Math.round(Math.floor(bi / MAP_WIDTH) * T + T / 2 - T);
+    const lj = Game.placeBuilding('lumberjack', lx, ly);
+    let fo = null;
+    for (let d = 2; d < 8 && !fo; d++) for (let dy = -d; dy <= d && !fo; dy++) for (let dx = -d; dx <= d && !fo; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+        const x = lx + dx * T, y = ly + dy * T;
+        if (Game.canPlace('forester', x, y).ok) fo = Game.placeBuilding('forester', x, y);
+    }
+    if (!lj || !fo || !lj.workers || !fo.workers) { Object.assign(r, { lj: !!lj, fo: !!fo }); return done(); }
+    r.placed = true;
+    r.start = Math.round(Game.getBuildingOutput(lj) * 10) / 10;
+    // empty lodge: a minute without its crew plants nothing (no stump becomes a sapling)
+    const crew = fo.workers;
+    GameMap.fellTrees(0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1, fo.pixelX + T, fo.pixelY + 2 * T, 3);
+    const stumps = GameMap.getTrees().filter(t => t.g <= 0);
+    fo.workers = 0; fo.active = false;
+    s.resources.food = 100000;
+    Game.update(60000);
+    r.emptyPlanted = stumps.filter(t => t.g > 0).length;
+    fo.workers = crew; fo.active = true;
+    // ten game days with both working
+    for (let m = 0; m < 60; m++) { s.resources.food = 100000; Game.update(60000); }
+    r.rate = Math.round(Game.getBuildingOutput(lj) * 10) / 10;
+    r.trees = Game.getBuildingYield(lj).count;
+    return done();
+}
+
 // Iron mine, weapon smith and barracks next to the village
 function buildMilitary() {
     const near = (type, cx, cy, r = 30) => {
@@ -114,14 +163,43 @@ function placementYields() {
     r.felled = GameMap.getFelledCount();
     r.outBefore = Math.round(out0 * 10) / 10;
     r.outAfter = Math.round(Game.getBuildingOutput(lj) * 10) / 10;
-    // regrowth: with every lumberjack gone, all stumps grow back
+    // no natural regrowth (issue #35): with every lumberjack gone, stumps stay stumps for days
     BuildingManager.getAll().filter(b => b.type === 'lumberjack').forEach(b => Game.demolishBuilding(b.id));
     s.resources.food = s.maxStorage;
-    Game.update((TREE_REGROW_SECONDS + 5) * 1000);
-    r.felledAfterRegrow = GameMap.getFelledCount();
-    r.treesRegrown = GameMap.countInRect('trees', rng.x0, rng.y0, rng.x1, rng.y1);
+    Game.update((2 * DAY_SECONDS + 5) * 1000);
+    s.resources.food = s.maxStorage;
+    Game.update((DAY_SECONDS + 5) * 1000);
+    r.felledAfterWait = GameMap.getFelledCount();
+    r.treesAfterWait = GameMap.countInRect('trees', rng.x0, rng.y0, rng.x1, rng.y1);
+    // every tree in range felled: the lumberjack still brings its floor of ~5 wood/min
+    GameMap.fellTrees(rng.x0, rng.y0, rng.x1, rng.y1, 0, 0, 100000);
+    r.floorRate = Game.getYield('lumberjack', dense.x, dense.y).value;
+    // forester (issue #35): its ghost names the stumps, it turns them into saplings, then trees
+    const fy = Game.getYield('forester', dense.x, dense.y);
+    r.foresterGhost = Game.describeYield(fy, 'forester').main;
+    r.foresterGhostStumps = fy.value;
+    r.stumpsBefore = GameMap.countInRect('stumps', rng.x0, rng.y0, rng.x1, rng.y1);
     s.resources.wood = 100;
-    Game.placeBuilding('lumberjack', dense.x, dense.y);   // the village keeps a lumberjack
+    const fo = Game.placeBuilding('forester', dense.x, dense.y);
+    r.foresterPlaced = !!fo;
+    if (fo) {
+        r.foresterStumps = Game.getBuildingYield(fo).value;
+        s.resources.food = s.maxStorage;
+        Game.update(61000);
+        r.saplingsAfterMinute = GameMap.countInRect('saplings', rng.x0, rng.y0, rng.x1, rng.y1);
+        r.treesAfterMinute = GameMap.countInRect('trees', rng.x0, rng.y0, rng.x1, rng.y1);
+        // trees stand again a day after planting; the yield leaves its floor once ~25 stand
+        for (let d = 0; d < 3; d++) { s.resources.food = s.maxStorage; Game.update(SAPLING_GROW_SECONDS * 1000); }
+        r.treesBack = GameMap.countInRect('trees', rng.x0, rng.y0, rng.x1, rng.y1);
+        r.rateBack = Game.getYield('lumberjack', dense.x, dense.y).value;
+        r.foresterStatus = Game.getForesterStatus(fo);
+        r.foresterId = fo.id;
+    }
+    // the village keeps a lumberjack, on the best spot left
+    s.resources.wood = 100;
+    const g2 = Game.getQualityGrid('lumberjack');
+    let b2 = -1; g2.forEach((q, i) => { if (q > (b2 < 0 ? -1 : g2[b2])) b2 = i; });
+    if (b2 >= 0) { const sp = spotOf('lumberjack', b2); Game.placeBuilding('lumberjack', sp.x, sp.y); }
     // well: a house in reach holds 2 more, a second well adds nothing
     s.resources = { wood: 500, stone: 500, iron: 100, food: s.maxStorage };
     const castle = BuildingManager.getAll().find(b => b.type === 'castle');
@@ -998,13 +1076,17 @@ async function run(browser, name, ctxOpts, touch) {
 
         // ---- yields depend on the spot (issue #32) ----
         const y = await page.evaluate(placementYields);
-        check(y.denseRate > y.edgeRate * 3, `desktop: lumberjack in dense forest yields far more than at the edge (${y.denseRate} vs ${y.edgeRate}/min)`);
+        check(Math.abs(y.edgeRate - 5) < 0.01 && y.denseRate >= 12 && y.denseRate <= 15, `desktop: lumberjack yields 5/min at the forest edge and up to 15 in dense forest (${y.edgeRate} vs ${y.denseRate}/min)`);
         check(y.gridMs < 150 && y.wellGridMs < 150, `desktop: spot quality grid is cheap (lumberjack ${y.gridMs} ms, well ${y.wellGridMs} ms)`);
         check(y.placed && y.fullCrew && y.ghost === y.built && y.outputMatches, `desktop: the ghost's yield is what the lumberjack produces (${y.ghost} -> ${y.built})`);
         check(Math.abs(y.woodFirstMinute - y.expectedFirstMinute) <= 4, `desktop: first minute's wood matches the yield (${y.woodFirstMinute} vs ${y.expectedFirstMinute})`);
         check(y.ratesUseYield, 'desktop: top-bar rates use the real yields');
         check(y.treesAfter < y.treesBefore && y.outAfter < y.outBefore && y.felled > 0, `desktop: felling thins the forest and the yield drops (trees ${y.treesBefore} -> ${y.treesAfter}, ${y.outBefore} -> ${y.outAfter}/min)`);
-        check(y.felledAfterRegrow === 0 && y.treesRegrown >= y.treesBefore, `desktop: felled trees grow back (stumps left ${y.felledAfterRegrow}, trees ${y.treesRegrown})`);
+        check(y.felledAfterWait === y.felled && y.treesAfterWait === y.treesAfter, `desktop: without a forester stumps stay stumps for 3 days (stumps ${y.felled} -> ${y.felledAfterWait}, trees ${y.treesAfter} -> ${y.treesAfterWait})`);
+        check(Math.abs(y.floorRate - 5) < 0.01, `desktop: with every tree in range felled a lumberjack still yields 5/min (${y.floorRate})`);
+        check(y.foresterPlaced && y.foresterGhostStumps > 0 && y.foresterStumps === y.foresterGhostStumps, `desktop: forester ghost names the stumps it reaches (${y.foresterGhost}, built ${y.foresterStumps})`);
+        check(y.saplingsAfterMinute >= 3 && y.saplingsAfterMinute <= 5 && y.treesAfterMinute === 0, `desktop: a forester replants about 4 stumps a minute as saplings (${y.saplingsAfterMinute} saplings, ${y.treesAfterMinute} trees)`);
+        check(y.treesBack >= y.saplingsAfterMinute && y.rateBack > y.floorRate, `desktop: saplings grow into trees and the lumberjack yield rises again after 3 days (${y.treesBack} trees, ${y.floorRate} -> ${y.rateBack}/min)`);
         check(y.house && y.well && y.wellGhostGain >= 2 && y.capGain === y.wellGhostGain && y.houseYield === 7, `desktop: a well makes houses in reach hold more, as its ghost said (ghost +${y.wellGhostGain}, cap +${y.capGain}, house ${y.houseYield})`);
         check(y.capGain2 === y.capGain && y.secondWellGhost === true, `desktop: a second well on the same houses adds nothing (cap +${y.capGain2})`);
         check(y.houseTint.green > 0 && y.houseTint.other === 0, `desktop: house tint is green only where a well reaches (${JSON.stringify(y.houseTint)})`);
@@ -1016,6 +1098,17 @@ async function run(browser, name, ctxOpts, touch) {
             return document.getElementById('info-content')?.textContent || '';
         }, y.houseId);
         check(houseInfo.includes(await page.evaluate(() => t('y.well', { n: 2 }))), `desktop: house info shows the well bonus`);
+        const foInfo = await page.evaluate((id) => {
+            const b = BuildingManager.getById(id);
+            if (!b) return null;
+            UI.showBuildingInfo(b);
+            const txt = document.getElementById('info-content')?.textContent || '';
+            return { stumps: txt.includes(t('forester.stumps')), saplings: txt.includes(t('forester.saplings')), status: [t('forester.working'), t('forester.idle'), t('info.building')].some(x => txt.includes(x)) };
+        }, y.foresterId);
+        check(foInfo && foInfo.stumps && foInfo.saplings && foInfo.status, `desktop: forester info shows its status, stumps and saplings (${JSON.stringify(foInfo)})`);
+        const lr = await page.evaluate(forestryLongRun);
+        check(lr.placed && lr.emptyPlanted === 0, `desktop: a forester without a crew plants nothing (${JSON.stringify({ placed: lr.placed, planted: lr.emptyPlanted })})`);
+        check(lr.placed && lr.rate >= 11 && lr.rate <= 15, `desktop: one forester keeps a dense-forest lumberjack at about 12 wood/min for 10 days (${lr.start} -> ${lr.rate}/min, ${lr.trees} trees)`);
         // Civilization-style display: tint plus the yield at the ghost while placing
         const spot = await page.evaluate(() => {
             UI.hideInfo();
@@ -1168,9 +1261,10 @@ async function run(browser, name, ctxOpts, touch) {
             // no delivery (and so no felling) may land between this save and the reload
             BuildingManager.getAll().forEach(b => { b.progress = 0; });
             GameMap.fellTrees(0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1, 100, 100, 5);
-            return GameMap.serializeTrees().map(e => e[0]).sort((a, b) => a - b).join(',');
+            GameMap.plantStump(0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1, 100, 100);   // one becomes a sapling
+            Game.save();
+            return GameMap.serializeTrees().map(e => e[0] + (e[1] > 0 ? 's' : '')).sort().join(',');
         });
-        await page.evaluate(() => Game.save());
         const before = await page.evaluate(() => BuildingManager.getAll().length);
         const spots = await page.evaluate(() => BuildingManager.getAll().map(b => b.type + '@' + b.pixelX + ',' + b.pixelY).join(' '));
         await page.reload();
@@ -1184,8 +1278,18 @@ async function run(browser, name, ctxOpts, touch) {
         const spotsAfter = await page.evaluate(() => BuildingManager.getAll().map(b => b.type + '@' + b.pixelX + ',' + b.pixelY).join(' '));
         const offGrid = await page.evaluate(() => BuildingManager.getAll().filter(b => b.pixelX % TILE_SIZE || b.pixelY % TILE_SIZE).length);
         check(spotsAfter === spots && offGrid > 0, `desktop: ${offGrid} off-grid positions survive a reload`);
-        const treesLoaded = await page.evaluate(() => GameMap.serializeTrees().map(e => e[0]).sort((a, b) => a - b).join(','));
-        check(treesSaved.length > 0 && treesLoaded === treesSaved, `desktop: felled trees survive a reload (${treesSaved.split(',').length} stumps)`);
+        // the game runs on after loading (a forester may plant a stump), so: every saved stump
+        // is still felled, every saved sapling still a sapling
+        const treesLoaded = await page.evaluate((saved) => {
+            const g = new Map(GameMap.serializeTrees());
+            const list = saved.split(',');
+            return {
+                stumps: list.filter(e => !e.endsWith('s')).length,
+                saplings: list.filter(e => e.endsWith('s')).length,
+                lost: list.filter(e => !g.has(parseInt(e, 10)) || (e.endsWith('s') && !(g.get(parseInt(e, 10)) > 0))).length,
+            };
+        }, treesSaved);
+        check(treesLoaded.stumps > 0 && treesLoaded.saplings > 0 && treesLoaded.lost === 0, `desktop: stumps and saplings survive a reload (${JSON.stringify(treesLoaded)})`);
         const kept = await page.evaluate(() => ({ units: Units.getAll().map(u => u.type).join(','), product: BuildingManager.getAll().find(b => b.type === 'weaponsmith')?.product }));
         check(kept.units === 'swordsman,swordsman' && kept.product === 'sword', `desktop: save keeps the soldiers and the smith's choice (${JSON.stringify(kept)})`);
         const patrol = await page.evaluate(() => {
@@ -1217,7 +1321,7 @@ async function run(browser, name, ctxOpts, touch) {
         check(v4Loaded.started && v4Loaded.spots === v4, `desktop: v4 save with tile positions loads every building in the same place`);
         const stillFelled = await page.evaluate((ids) => {
             const felled = new Set(GameMap.serializeTrees().map(e => e[0]));
-            return ids.split(',').map(Number).filter(id => felled.has(id)).length;
+            return ids.split(',').map(id => parseInt(id, 10)).filter(id => felled.has(id)).length;
         }, treesSaved);
         check(stillFelled === 0, `desktop: a save without tree state loads with its trees standing (${stillFelled} of the old stumps left)`);
         await page.evaluate(() => Game.save());

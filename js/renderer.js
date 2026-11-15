@@ -473,15 +473,15 @@ const Renderer = (() => {
                 const sway = Math.sin(timeSec * (0.9 + wind * 1.4) + ph) + Math.sin(timeSec * 2.3 + ph * 1.7) * 0.25;
                 const frame = Math.max(-2, Math.min(2, Math.round(sway * swayAmp)));
                 const sprite = Sprites.getTreeFrame(kind, season, variant, frame);
-                // Felled trees: a stump, then a sapling that grows back to full size
+                // Felled trees stay stumps; a forester's sapling grows back to full size
                 if (t.g < 1) {
-                    const stump = Sprites.getStump(season);
-                    const sxp = Math.round(t.x - 5), syp = Math.round(t.y + 10);
-                    if (t.g < 0.3) {
+                    if (t.g <= 0) {
+                        const stump = Sprites.getStump(season);
+                        const sxp = Math.round(t.x - 5), syp = Math.round(t.y + 10);
                         drawables.push({ y: t.y + 16, draw: () => ctx.drawImage(stump, sxp, syp) });
                         return;
                     }
-                    const k = t.g < 0.65 ? 0.4 : 0.7;
+                    const k = t.g < 0.34 ? 0.3 : t.g < 0.67 ? 0.5 : 0.72;
                     const sw = Math.round(sprite.width * k), sh = Math.round(sprite.height * k);
                     const sox = Math.round(t.x - sw / 2), soy = Math.round(t.y - sh + 16);
                     drawables.push({ y: t.y + 16, draw: () => ctx.drawImage(sprite, sox, soy, sw, sh) });
@@ -686,12 +686,12 @@ const Renderer = (() => {
         }
 
         // Work cycle: a thin bar under production buildings shows when the next delivery arrives
-        if (b.def.production && b.active && Game.isClockRunning()) {
+        if ((b.def.production || b.def.plants) && b.active && Game.isClockRunning()) {
             const bw = Math.min(b.width - 12, 40);
             const bx = Math.round(b.pixelX + (b.width - bw) / 2), by = b.pixelY + b.height - 3;
             ctx.fillStyle = 'rgba(0,0,0,0.5)';
             ctx.fillRect(bx - 1, by - 1, bw + 2, 3);
-            ctx.fillStyle = COLORS[b.def.production.resource] || '#ffd24a';
+            ctx.fillStyle = b.def.plants ? '#6cc04a' : COLORS[b.def.production.resource] || '#ffd24a';
             ctx.fillRect(bx, by, Math.round(bw * Math.min(1, b.progress || 0)), 1);
         }
 
@@ -859,8 +859,8 @@ const Renderer = (() => {
         const ph = def.height * TILE_SIZE;
 
         // Resource radius for production buildings that need a nearby resource
-        if (def.production?.requires) {
-            const r = RESOURCE_RADIUS * TILE_SIZE;
+        if (def.production?.requires || def.plants) {
+            const r = (def.plants ? def.plants.radius : RESOURCE_RADIUS) * TILE_SIZE;
             ctx.fillStyle = pp.valid ? 'rgba(255,255,255,0.07)' : 'rgba(255,120,120,0.07)';
             ctx.fillRect(px - r, py - r, pw + 2 * r, ph + 2 * r);
             ctx.strokeStyle = 'rgba(255,255,255,0.25)';

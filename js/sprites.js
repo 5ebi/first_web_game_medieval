@@ -603,6 +603,7 @@ const Sprites = (() => {
             if (carry === 'wood') { R(3, ly, 10, 2, '#8a5a2a'); R(3, ly, 10, 1, '#a8743c'); R(12, ly, 1, 2, '#d8b070'); R(2, ly, 1, 2, '#d8b070'); }
             else if (carry === 'stone') { R(6, ly - 2, 5, 4, '#8e8e86'); R(6, ly - 2, 5, 1, '#b6b6ae'); R(10, ly - 1, 1, 3, '#5a5a52'); }
             else if (carry === 'iron') { R(6, ly - 1, 5, 3, '#4a4e58'); R(6, ly - 1, 5, 1, '#7a808e'); }
+            else if (carry === 'sapling') { R(7, ly + 1, 1, 2, '#7a5230'); R(5, ly - 3, 5, 3, '#4e9e34'); R(6, ly - 4, 3, 1, '#6cc04a'); R(6, ly + 1, 3, 1, '#6a4424'); }
             else if (carry === 'food') { R(6, ly - 1, 5, 3, '#a8443a'); R(6, ly - 1, 5, 1, '#c86a5a'); P(10, ly + 1, '#f0e0d0'); }
             line(9, shoulderY, 10, ty - 1, tunic); P(10, ty - 1, skin);
         } else if (working) {
@@ -793,6 +794,15 @@ const Sprites = (() => {
                 line(4, 19, 12, 19, '#6a3e1c'); line(8, 22, 17, 22, '#6a3e1c'); line(14, 18, 18, 18, '#a8743c');
                 ell(21, 20.5, 5, 5.5, '#e0bc7c'); ell(21, 20.5, 3.6, 4, '#c0925a'); ell(21, 20.5, 2.2, 2.6, '#e0bc7c');
                 ell(21, 20.5, 1, 1.2, '#9a6834'); P(18, 17, '#f4dca4'); P(19, 16, '#f4dca4');
+                break;
+            }
+            case 'sapling': {
+                // a young tree in a mound of soil
+                ell(16, 26, 11, 4, '#6a4424'); R(6, 26, 21, 2, '#5a3618'); ell(14, 25, 5, 1.5, '#8a5c32');
+                R(15, 13, 2, 13, '#7a5230'); R(15, 13, 1, 13, '#9a6a3c');
+                ell(11, 15, 5, 3.5, '#3f8a2c'); ell(21, 12, 5, 3.5, '#3f8a2c'); ell(16, 7, 5, 4.5, '#4e9e34');
+                ell(10, 14, 2.5, 1.5, '#6cc04a'); ell(20, 11, 2.5, 1.5, '#6cc04a'); ell(15, 5, 2.5, 2, '#7ed05a');
+                P(12, 17, '#2a6a1c'); P(22, 14, '#2a6a1c'); P(18, 9, '#2a6a1c');
                 break;
             }
             case 'stone':
@@ -1423,6 +1433,50 @@ const Sprites = (() => {
         return c;
     }
 
+    // Forester's lodge: a log cabin with a moss roof, a nursery bed of saplings in
+    // front and a spade leaning by the door
+    function drawForester() {
+        const key = 'forester';
+        if (cache[key]) return cache[key];
+        const w = 2 * TILE_SIZE, h = 2 * TILE_SIZE;
+        const c = createCanvas(w, h);
+        const ctx = c.getContext('2d');
+        const R = (x, y, ww, hh, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, ww, hh); };
+
+        // log walls
+        R(10, 24, 40, 22, '#7a5428');
+        for (let y = 25; y < 46; y += 4) { R(10, y, 40, 1, '#5e3e1c'); R(10, y + 1, 40, 1, '#94683a'); }
+        R(8, 25, 3, 21, '#a07040'); R(49, 25, 3, 21, '#a07040');      // log ends
+        for (let y = 26; y < 46; y += 4) { R(8, y, 3, 2, '#c8985c'); R(49, y, 3, 2, '#c8985c'); }
+        R(42, 26, 7, 20, 'rgba(0,0,0,0.14)');
+        // moss-green shingle roof
+        for (let i = 0; i < 16; i++) {
+            const y = 9 + i, x0 = 30 - i * 2 - 4, x1 = 30 + i * 2 + 4;
+            R(x0, y, x1 - x0, 1, i % 3 === 0 ? '#3e5e26' : '#4e7230');
+        }
+        R(4, 24, 52, 2, '#2e4a1c');
+        R(30, 9, 1, 15, '#3a5a22');
+        R(14, 14, 6, 1, '#6a8e3e'); R(36, 18, 8, 1, '#6a8e3e'); R(24, 20, 5, 1, '#6a8e3e');
+        // door and window
+        R(25, 33, 10, 13, '#4a2a0e'); R(26, 34, 8, 12, '#5a3616'); R(32, 39, 1, 2, '#c8a040');
+        R(14, 30, 7, 6, '#2a1a0a'); R(15, 31, 5, 4, '#6a8aa0'); R(17, 31, 1, 4, '#2a1a0a');
+        // spade by the door
+        R(38, 32, 1, 12, '#7a5230'); R(37, 31, 3, 1, '#7a5230'); R(37, 44, 3, 4, '#a8a8b0'); R(37, 44, 3, 1, '#d0d0d8');
+        // nursery bed with three saplings
+        R(4, 50, 56, 10, '#5a3a1a'); R(4, 50, 56, 1, '#7a5228'); R(4, 59, 56, 1, '#3e2610');
+        for (let x = 8; x < 58; x += 4) R(x, 54, 2, 1, '#6a4622');
+        [[12, 0], [30, 1], [48, 0]].forEach(([sx, big]) => {
+            R(sx, 47 - big * 2, 1, 7 + big * 2, '#6a4424');
+            R(sx - 3, 42 - big * 3, 7, 4 + big, '#3f8a2c');
+            R(sx - 2, 40 - big * 3, 5, 2, '#4e9e34');
+            R(sx - 1, 39 - big * 3, 2, 1, '#7ed05a');
+            R(sx + 2, 44 - big * 3, 1, 1, '#2a6a1c');
+        });
+
+        cache[key] = c;
+        return c;
+    }
+
     function drawQuarry() {
         const key = 'quarry';
         if (cache[key]) return cache[key];
@@ -1912,6 +1966,7 @@ const Sprites = (() => {
             case 'tavern': return drawTavern();
             case 'warehouse': return drawWarehouse();
             case 'lumberjack': return drawLumberjack();
+            case 'forester': return drawForester();
             case 'quarry': return drawQuarry();
             case 'iron_mine': return drawIronMine();
             case 'weaponsmith': return drawWeaponsmith();
