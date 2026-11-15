@@ -1,5 +1,9 @@
-/* Jersey 10 (SIL OFL 1.1, see fonts/Jersey10-OFL.txt) — bundled so it works offline.
-   Chosen for unambiguous digits: in many pixel fonts "5" and "S" look identical. */
+/* Type: one pixel family by The Soft Type Project (SIL OFL 1.1, licenses in fonts/),
+   bundled so it works offline.
+   - Jacquard 24: blackletter for titles only (28px and up, never all caps)
+   - Jersey 10:   numbers and labels. Chosen for unambiguous digits: in many pixel
+                  fonts "5" and "S" look identical.
+   - Jersey 15:   running text */
 @font-face {
     font-family: 'Jersey 10';
     src: url('../fonts/Jersey10-latin.woff2') format('woff2');
@@ -8,22 +12,70 @@
     font-display: swap;
 }
 
-:root {
-    --panel: rgba(40, 28, 16, 0.95);
-    --panel-deep: rgba(25, 18, 8, 0.96);
-    --line: #8B6914;
-    --line-dim: #6B4F10;
-    --line-bright: #c49a1c;
-    --gold: #ffd700;
-    --text: #e8d5a3;
-    --text-dim: #b8a878;
-    --text-faint: #9a8a68;
-    --good: #9be39b;
-    --bad: #ff9a8f;
-    --warn: #ffcf6b;
+@font-face {
+    font-family: 'Jersey 15';
+    src: url('../fonts/Jersey15-latin.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
 
+@font-face {
+    font-family: 'Jacquard 24';
+    src: url('../fonts/Jacquard24-latin.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* The interface is made of materials, not translucent boxes: oak boards for the
+   frame (HUD, building menu), parchment for anything you read (charter, building
+   info, tooltips). Edges are hard 2px bevels, shadows have no blur, corners are
+   square. Brass is trim only; red is the one accent (seal / primary action).
+   Textures (--tex-*) come from js/theme.js; the flat colours are the fallback. */
+:root {
+    /* oak */
+    --oak: #4f321c;
+    --oak-light: #6d4829;
+    --oak-hi: #8a6038;
+    --oak-dark: #35210f;
+    --edge: #1c1008;
+
+    /* parchment and ink */
+    --parch: #e2d1a3;
+    --parch-hi: #efe2ba;
+    --parch-rule: #a78b56;
+    --ink: #2a1c10;
+    --ink-dim: #5e4a33;
+    --ink-good: #3a661d;
+    --ink-bad: #99281c;
+
+    /* brass trim */
+    --brass: #c9a24b;
+    --brass-hi: #ecd38c;
+    --brass-dark: #7c5e23;
+
+    /* heraldic accent */
+    --red: #8a2a20;
+    --red-hi: #b3463a;
+    --red-dark: #5c1711;
+    --green: #55752e;
+    --green-hi: #7fa046;
+    --green-dark: #36501b;
+
+    /* text on wood */
+    --text: #ecdcb0;
+    --text-dim: #bda97c;
+    --text-faint: #96825c;
+    --good: #a9d67c;
+    --bad: #f39482;
+    --warn: #f2c55c;
+
+    --font-title: 'Jacquard 24', 'Jersey 10', serif;
     --font-pixel: 'Jersey 10', 'Courier New', monospace;
-    --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --font-body: 'Jersey 15', 'Jersey 10', 'Courier New', monospace;
+
+    --drop: 4px 4px 0 rgba(0, 0, 0, 0.4);
 
     --safe-top: env(safe-area-inset-top, 0px);
     --safe-right: env(safe-area-inset-right, 0px);
@@ -31,11 +83,11 @@
     --safe-left: env(safe-area-inset-left, 0px);
 
     --hud-h: 46px;
-    --menu-w: 228px;
+    --menu-w: 248px;
 
     /* Screen area covered by HUD / building menu, measured by UI.measureLayout() */
     --inset-top: 48px;
-    --inset-right: 230px;
+    --inset-right: 250px;
     --inset-bottom: 0px;
 }
 
@@ -55,6 +107,7 @@ body {
     background: #1a3a1a;
     color: var(--text);
     font-family: var(--font-body);
+    font-size: 16px;
     font-synthesis: none;
     user-select: none;
     -webkit-user-select: none;
@@ -81,6 +134,11 @@ button {
     touch-action: manipulation;
 }
 
+button:focus-visible {
+    outline: 2px solid var(--brass-hi);
+    outline-offset: 2px;
+}
+
 #game-container {
     position: fixed;
     inset: 0;
@@ -104,6 +162,38 @@ button {
 
 #game-canvas.dragging {
     cursor: grabbing;
+}
+
+/* ---------- Materials ---------- */
+.mat-wood,
+#building-menu,
+#placement-bar {
+    background: var(--oak) var(--tex-wood, none);
+    background-size: 128px 96px;
+    image-rendering: pixelated;
+}
+
+#hud,
+.notification {
+    background: var(--oak-dark) var(--tex-wood-dark, none);
+    background-size: 128px 96px;
+    image-rendering: pixelated;
+}
+
+/* Parchment sheet: dark edge, then a ruled line inside like a manuscript border */
+.overlay-box,
+#info-panel,
+#tooltip {
+    background: var(--parch) var(--tex-parchment, none);
+    background-size: 96px 96px;
+    image-rendering: pixelated;
+    color: var(--ink);
+    border: 2px solid var(--edge);
+}
+
+.overlay-box,
+#info-panel {
+    box-shadow: inset 0 0 0 3px var(--parch-hi), inset 0 0 0 5px var(--parch-rule), var(--drop);
 }
 
 /* Pixel icons (data URLs set as --icon-* by UI.init) */
@@ -134,7 +224,7 @@ button {
     display: inline-block;
 }
 
-/* ---------- Top HUD ---------- */
+/* ---------- Top HUD: a dark oak beam with a brass strip ---------- */
 #hud {
     position: absolute;
     top: 0;
@@ -145,10 +235,9 @@ button {
     align-items: center;
     gap: 16px;
     min-height: calc(var(--hud-h) + var(--safe-top));
-    padding: var(--safe-top) calc(12px + var(--safe-right)) 0 calc(12px + var(--safe-left));
-    background: linear-gradient(180deg, rgba(40, 28, 16, 0.96) 0%, rgba(30, 20, 10, 0.96) 100%);
-    border-bottom: 2px solid var(--line);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    padding: var(--safe-top) calc(12px + var(--safe-right)) 2px calc(12px + var(--safe-left));
+    border-bottom: 2px solid var(--edge);
+    box-shadow: inset 0 -2px 0 var(--brass-dark), 0 3px 0 rgba(0, 0, 0, 0.3);
 }
 
 #resource-bar {
@@ -172,16 +261,16 @@ button {
     cursor: help;
 }
 
-/* Storage fill under each resource (amount / storage cap) */
+/* Storage fill under each resource (amount / storage cap): a groove in the wood */
 .res-fill,
 .day-bar {
     position: absolute;
     left: 26px;
     right: 0;
-    bottom: -3px;
-    height: 3px;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.12);
+    bottom: -4px;
+    height: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 0 rgba(255, 225, 170, 0.12);
     overflow: hidden;
 }
 
@@ -192,11 +281,11 @@ button {
     height: 100%;
     transform-origin: left center;
     transform: scaleX(0);
-    background: var(--text-faint);
+    background: var(--text-dim);
 }
 
 .day-bar > span {
-    background: #f6c63a;
+    background: var(--brass-hi);
 }
 
 #day-pill.paused .day-bar > span {
@@ -208,7 +297,7 @@ button {
 }
 
 .resource.full .res-fill > span {
-    background: #ff8a3d;
+    background: #f08a3c;
 }
 
 .resource.full .res-value,
@@ -231,6 +320,7 @@ button {
     font-size: 21px;
     letter-spacing: 0.5px;
     font-variant-numeric: tabular-nums;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
 .res-rate {
@@ -265,35 +355,39 @@ button {
     font-family: var(--font-pixel);
     font-size: 20px;
     white-space: nowrap;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
 #game-speed {
     display: flex;
-    gap: 4px;
+    gap: 6px;
 }
 
+/* Raised wooden keys; the active one is pressed in and brass */
 .speed-btn {
     min-width: 34px;
     height: 30px;
-    padding: 0 8px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid var(--line);
-    border-radius: 4px;
+    padding: 0 8px 2px;
+    background: var(--oak-light);
+    border: 2px solid var(--edge);
+    box-shadow: inset 0 2px 0 var(--oak-hi), inset 0 -3px 0 var(--oak);
     cursor: pointer;
     font-family: var(--font-pixel);
     font-size: 17px;
-    transition: background 0.15s;
 }
 
 @media (hover: hover) {
     .speed-btn:hover {
-        background: rgba(255, 255, 255, 0.18);
+        background: #7b5330;
     }
 }
 
+.speed-btn:active,
 .speed-btn.active {
-    background: var(--line);
-    color: #fff;
+    padding: 2px 8px 0;
+    background: var(--brass);
+    color: var(--ink);
+    box-shadow: inset 0 3px 0 var(--brass-dark), inset 0 -2px 0 var(--brass-hi);
 }
 
 /* ---------- Building Menu (desktop: right sidebar) ---------- */
@@ -303,25 +397,25 @@ button {
     top: calc(var(--hud-h) + var(--safe-top) + 2px);
     bottom: 0;
     width: calc(var(--menu-w) + var(--safe-right));
-    padding: 12px calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) 12px;
-    background: linear-gradient(180deg, rgba(40, 28, 16, 0.92) 0%, rgba(25, 18, 8, 0.95) 100%);
-    border-left: 2px solid var(--line);
+    padding: 12px calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) 14px;
+    border-left: 2px solid var(--edge);
+    box-shadow: inset 2px 0 0 var(--brass-dark), -3px 0 0 rgba(0, 0, 0, 0.3);
     overflow-y: auto;
     overscroll-behavior: contain;
     z-index: 10;
-    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.5);
 }
 
 #building-menu h3 {
-    font-family: var(--font-pixel);
+    font-family: var(--font-title);
     font-weight: normal;
-    font-size: 21px;
-    margin-bottom: 12px;
+    font-size: 30px;
+    line-height: 1;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
     text-align: center;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 8px;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+    border-bottom: 2px solid var(--edge);
+    box-shadow: 0 2px 0 rgba(255, 225, 170, 0.14);
 }
 
 #building-list {
@@ -330,45 +424,50 @@ button {
     gap: 6px;
 }
 
+/* A card is a slot carved into the board; the selected one gets a brass frame */
 .building-btn {
     position: relative;
     display: grid;
     grid-template-columns: 44px 1fr;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
-    padding: 6px 8px;
-    background: rgba(80, 60, 30, 0.6);
-    border: 1px solid var(--line-dim);
-    border-radius: 4px;
+    padding: 6px 8px 6px 8px;
+    background: var(--oak-dark);
+    border: 2px solid var(--edge);
+    box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(255, 225, 170, 0.12);
     text-align: left;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
 }
 
 @media (hover: hover) {
     .building-btn:hover {
-        background: rgba(139, 105, 20, 0.5);
-        border-color: var(--line-bright);
+        background: #432a14;
     }
 }
 
 .building-btn.selected {
-    background: rgba(139, 105, 20, 0.75);
-    border-color: var(--gold);
-    box-shadow: 0 0 6px rgba(255, 215, 0, 0.35);
+    background: var(--oak-light);
+    border-color: var(--brass);
+    box-shadow: inset 0 2px 0 var(--oak-hi), inset 0 -2px 0 var(--oak), 0 0 0 2px var(--edge);
 }
 
 .building-btn.disabled {
-    opacity: 0.45;
     cursor: not-allowed;
 }
 
+.building-btn.disabled .b-thumb,
+.building-btn.disabled .b-body {
+    opacity: 0.45;
+}
+
+/* Sprite on a scrap of parchment, like an illustration in a ledger */
 .b-thumb {
     width: 44px !important;
     height: 44px !important;
-    border-radius: 3px;
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--parch) var(--tex-parchment, none);
+    background-size: 96px 96px;
+    box-shadow: 0 0 0 2px var(--edge);
 }
 
 .b-body {
@@ -380,8 +479,9 @@ button {
 
 .b-name {
     font-family: var(--font-pixel);
-    font-size: 19px;
+    font-size: 20px;
     line-height: 1;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
 .b-cost {
@@ -402,9 +502,9 @@ button {
 }
 
 .b-info {
-    font-size: 11px;
+    font-size: 15px;
+    line-height: 1.05;
     color: var(--text-faint);
-    line-height: 1.3;
 }
 
 .cost.short {
@@ -442,17 +542,15 @@ button {
 #placement-bar {
     position: absolute;
     left: calc((100% - var(--inset-right)) / 2);
-    bottom: calc(max(var(--inset-bottom), var(--safe-bottom)) + 10px);
+    bottom: calc(max(var(--inset-bottom), var(--safe-bottom)) + 12px);
     transform: translateX(-50%);
-    width: min(440px, calc(100% - var(--inset-right) - 16px));
+    width: min(440px, calc(100% - var(--inset-right) - 20px));
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px;
-    background: var(--panel);
-    border: 2px solid var(--line);
-    border-radius: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    gap: 10px;
+    padding: 8px;
+    border: 2px solid var(--edge);
+    box-shadow: inset 0 2px 0 var(--oak-hi), inset 0 -2px 0 var(--oak-dark), var(--drop);
     z-index: 13;
 }
 
@@ -460,30 +558,40 @@ button {
     flex: none;
     min-width: 44px;
     height: 44px;
-    border-radius: 4px;
+    border: 2px solid var(--edge);
     cursor: pointer;
     font-family: var(--font-pixel);
 }
 
 #pb-cancel {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid var(--line-dim);
+    background: var(--oak-light);
+    box-shadow: inset 0 2px 0 var(--oak-hi), inset 0 -3px 0 var(--oak);
     font-size: 26px;
     line-height: 1;
 }
 
 #pb-confirm {
-    padding: 0 18px;
-    background: linear-gradient(180deg, #4f8a2e, #3a6a20);
-    border: 2px solid #7fc04a;
-    color: #fff;
-    font-size: 21px;
+    padding: 0 18px 3px;
+    background: var(--green);
+    box-shadow: inset 0 2px 0 var(--green-hi), inset 0 -3px 0 var(--green-dark);
+    color: #f6ecc8;
+    font-size: 22px;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+#pb-cancel:active,
+#pb-confirm:active:not(:disabled) {
+    padding-top: 3px;
+    padding-bottom: 0;
+    box-shadow: inset 0 3px 0 rgba(0, 0, 0, 0.35);
 }
 
 #pb-confirm:disabled {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: var(--line-dim);
+    padding-bottom: 0;
+    background: var(--oak-dark);
+    box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.35);
     color: var(--text-faint);
+    text-shadow: none;
     cursor: not-allowed;
 }
 
@@ -497,91 +605,107 @@ button {
 
 #pb-name {
     font-family: var(--font-pixel);
-    font-size: 19px;
+    font-size: 20px;
     line-height: 1;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 
 .pb-hint {
-    font-size: 12px;
-    line-height: 1.25;
+    font-size: 15px;
+    line-height: 1.05;
     color: var(--text-dim);
 }
 
 .pb-hint.bad { color: var(--bad); }
 .pb-hint.good { color: var(--good); }
 
-/* ---------- Info Panel ---------- */
+/* ---------- Info Panel: a page from the steward's ledger ---------- */
 #info-panel {
     position: absolute;
-    left: calc(10px + var(--safe-left));
-    bottom: calc(var(--inset-bottom) + 10px + var(--safe-bottom));
-    width: 280px;
-    background: var(--panel);
-    border: 2px solid var(--line);
-    border-radius: 6px;
-    padding: 14px 16px;
+    left: calc(12px + var(--safe-left));
+    bottom: calc(var(--inset-bottom) + 12px + var(--safe-bottom));
+    width: 290px;
+    padding: 14px 18px 14px;
     z-index: 12;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 #info-close {
     position: absolute;
-    top: 2px;
-    right: 4px;
+    top: 6px;
+    right: 6px;
     width: 36px;
     height: 36px;
     background: none;
     border: none;
-    font-size: 22px;
+    font-family: var(--font-pixel);
+    font-size: 26px;
+    line-height: 1;
+    color: var(--ink-dim);
     cursor: pointer;
 }
 
 #info-title {
-    font-family: var(--font-pixel);
+    font-family: var(--font-title);
     font-weight: normal;
-    font-size: 23px;
-    margin-bottom: 10px;
-    border-bottom: 1px solid var(--line-dim);
+    font-size: 30px;
+    line-height: 1;
+    margin-bottom: 8px;
     padding-bottom: 6px;
+    border-bottom: 2px solid var(--parch-rule);
 }
 
 #info-content {
-    font-size: 13px;
-    line-height: 1.6;
+    font-size: 16px;
+    line-height: 1.15;
+}
+
+#info-content .info-desc {
+    margin-bottom: 8px;
+    color: var(--ink-dim);
 }
 
 #info-content .stat {
     display: flex;
     justify-content: space-between;
-    padding: 2px 0;
+    gap: 12px;
+    padding: 3px 0;
+    border-bottom: 1px dotted var(--parch-rule);
+}
+
+#info-content .stat:last-child {
+    border-bottom: none;
 }
 
 #info-content .stat-label {
-    color: var(--text-dim);
+    color: var(--ink-dim);
 }
 
-/* ---------- Tooltip ---------- */
+#info-content .stat > span:last-child {
+    font-family: var(--font-pixel);
+    font-size: 17px;
+    text-align: right;
+}
+
+/* ---------- Tooltip: a note on a scrap of parchment ---------- */
 #tooltip {
     position: absolute;
     top: 0;
     left: 0;
-    background: rgba(30, 20, 10, 0.96);
-    border: 1px solid var(--line);
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 12px;
+    padding: 6px 10px 7px;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.4);
+    font-size: 15px;
+    line-height: 1.1;
     pointer-events: none;
     z-index: 100;
     max-width: 250px;
-    line-height: 1.4;
 }
 
 #tooltip.tone-bad {
-    border-color: #c44;
-    color: #ffb0a8;
+    border-color: var(--red-dark);
+    color: var(--ink-bad);
 }
 
-/* ---------- Notifications ---------- */
+/* ---------- Notifications: plaques hung under the beam ---------- */
 #notifications {
     position: absolute;
     top: calc(var(--inset-top) + 10px);
@@ -590,31 +714,34 @@ button {
     z-index: 20;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     align-items: center;
     pointer-events: none;
 }
 
 .notification {
     max-width: 100%;
-    background: rgba(40, 28, 16, 0.94);
-    border: 1px solid var(--line);
-    padding: 8px 18px;
-    border-radius: 4px;
+    padding: 7px 18px 9px;
+    border: 2px solid var(--edge);
+    box-shadow: inset 0 0 0 2px var(--brass-dark), 3px 3px 0 rgba(0, 0, 0, 0.4);
     font-family: var(--font-pixel);
-    font-size: 18px;
+    font-size: 19px;
+    line-height: 1;
     text-align: center;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
     animation: notif-in 0.3s ease, notif-out 0.5s ease 2.5s forwards;
 }
 
 .notification.warning {
-    border-color: #c44;
-    color: #ffb0a8;
+    background: var(--red);
+    box-shadow: inset 0 0 0 2px var(--red-hi), 3px 3px 0 rgba(0, 0, 0, 0.4);
+    color: #f8e7c6;
 }
 
 .notification.success {
-    border-color: #4a4;
-    color: #b8f5b8;
+    background: var(--green-dark);
+    box-shadow: inset 0 0 0 2px var(--green), 3px 3px 0 rgba(0, 0, 0, 0.4);
+    color: #eef3cf;
 }
 
 @keyframes notif-in {
@@ -627,7 +754,7 @@ button {
     to { opacity: 0; }
 }
 
-/* ---------- Overlays ---------- */
+/* ---------- Overlays: a charter laid over the map ---------- */
 .hidden {
     display: none !important;
 }
@@ -635,7 +762,7 @@ button {
 .overlay {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.8);
+    background: rgba(14, 9, 4, 0.74);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -648,100 +775,129 @@ button {
     width: 100%;
     max-width: 500px;
     margin: auto;
-    background: linear-gradient(180deg, #3a2810 0%, #2a1a08 100%);
-    border: 3px solid var(--line);
-    border-radius: 8px;
-    padding: 36px 44px;
+    padding: 34px 44px 36px;
     text-align: center;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
 }
 
 .overlay-box h1 {
-    font-family: var(--font-pixel);
+    font-family: var(--font-title);
     font-weight: normal;
-    font-size: 54px;
-    line-height: 1.05;
-    margin-bottom: 6px;
-    color: var(--gold);
-    text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+    font-size: 60px;
+    line-height: 1;
+    margin-bottom: 10px;
+    color: var(--red);
 }
 
 .overlay-box h2 {
-    font-family: var(--font-pixel);
+    font-family: var(--font-title);
     font-weight: normal;
-    font-size: 36px;
-    margin-bottom: 10px;
-    color: #f88;
+    font-size: 40px;
+    line-height: 1;
+    margin-bottom: 14px;
+    color: var(--red);
 }
 
 .overlay-box p {
-    line-height: 1.5;
+    font-size: 18px;
+    line-height: 1.2;
 }
 
 .overlay-box > p {
-    margin-bottom: 18px;
+    margin-bottom: 20px;
 }
 
+/* Small caps line between two rules, like a chapter heading */
 .overlay-box .subtitle {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     font-family: var(--font-pixel);
-    font-size: 22px;
-    color: var(--text-dim);
+    font-size: 18px;
+    line-height: 1;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--ink-dim);
     margin-bottom: 20px;
+}
+
+.overlay-box .subtitle::before,
+.overlay-box .subtitle::after {
+    content: '';
+    flex: 1;
+    height: 2px;
+    background: var(--parch-rule);
 }
 
 .overlay-box .instructions {
     text-align: left;
     margin-bottom: 24px;
-    font-size: 14px;
-    line-height: 1.6;
+    font-size: 18px;
+    line-height: 1.2;
 }
 
 .overlay-box .instructions ul {
-    margin-top: 10px;
+    margin-top: 12px;
     padding-left: 20px;
+    list-style: square;
 }
 
 .overlay-box .instructions li {
-    margin-bottom: 6px;
+    margin-bottom: 7px;
+}
+
+.overlay-box .instructions li::marker {
+    color: var(--red);
 }
 
 .overlay-actions {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
 }
 
+/* Primary action: the red seal */
 .overlay-box button {
     min-height: 48px;
-    background: linear-gradient(180deg, #8B6914, #6B4F10);
-    border: 2px solid var(--line-bright);
-    color: #fff;
-    padding: 10px 36px;
+    padding: 9px 36px 12px;
+    background: var(--red);
+    border: 2px solid var(--edge);
+    box-shadow: inset 0 2px 0 var(--red-hi), inset 0 -3px 0 var(--red-dark), 0 3px 0 rgba(42, 28, 16, 0.35);
+    color: #f8e7c6;
     font-family: var(--font-pixel);
     font-size: 25px;
     line-height: 1;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: all 0.2s;
     letter-spacing: 1px;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+    cursor: pointer;
 }
 
 @media (hover: hover) {
     .overlay-box button:hover {
-        background: linear-gradient(180deg, #a07a18, #8B6914);
-        border-color: var(--gold);
-        transform: scale(1.02);
+        background: #9a3227;
     }
 }
 
+.overlay-box button:active {
+    transform: translateY(3px);
+    box-shadow: inset 0 2px 0 var(--red-dark);
+}
+
 .overlay-box button.secondary {
-    background: transparent;
-    border-color: var(--line-dim);
-    color: var(--text);
-    font-size: 20px;
-    padding: 8px 24px;
     min-height: 44px;
+    padding: 8px 24px 10px;
+    background: none;
+    border-color: var(--ink-dim);
+    box-shadow: none;
+    color: var(--ink);
+    font-size: 20px;
+    text-shadow: none;
+}
+
+@media (hover: hover) {
+    .overlay-box button.secondary:hover {
+        background: rgba(42, 28, 16, 0.1);
+    }
 }
 
 /* Show the right instructions for the device */
@@ -758,12 +914,11 @@ button {
 }
 
 #building-menu::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.35);
 }
 
 #building-menu::-webkit-scrollbar-thumb {
-    background: var(--line-dim);
-    border-radius: 3px;
+    background: var(--brass-dark);
 }
 
 /* =========================================================
@@ -803,8 +958,8 @@ button {
     #hud {
         flex-direction: column;
         align-items: stretch;
-        gap: 4px;
-        padding-bottom: 5px;
+        gap: 6px;
+        padding-bottom: 8px;
         padding-top: calc(4px + var(--safe-top));
     }
 
@@ -841,12 +996,12 @@ button {
         right: 0;
         bottom: 0;
         width: auto;
-        padding: 8px calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left));
+        padding: 10px calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left));
         border-left: none;
-        border-top: 2px solid var(--line);
+        border-top: 2px solid var(--edge);
         overflow-x: auto;
         overflow-y: hidden;
-        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.5);
+        box-shadow: inset 0 2px 0 var(--brass-dark), 0 -3px 0 rgba(0, 0, 0, 0.3);
         scroll-snap-type: x proximity;
         scroll-padding-inline: 8px;
     }
@@ -861,11 +1016,11 @@ button {
     }
 
     .building-btn {
-        width: 92px;
+        width: 94px;
         grid-template-columns: 1fr;
         justify-items: center;
-        gap: 3px;
-        padding: 6px 4px 5px;
+        gap: 5px;
+        padding: 8px 4px 6px;
         text-align: center;
         scroll-snap-align: start;
     }
@@ -912,20 +1067,26 @@ button {
     }
 
     .notification {
-        font-size: 16px;
-        padding: 5px 12px;
+        font-size: 17px;
+        padding: 5px 12px 7px;
     }
 
     .overlay-box {
-        padding: 26px 20px;
+        padding: 28px 22px 26px;
     }
 
+    /* "Lords of the Keep" on one line down to 320px wide */
     .overlay-box h1 {
-        font-size: 44px;
+        font-size: min(54px, calc((100vw - 80px) / 6.6));
     }
 
     .overlay-box h2 {
-        font-size: 30px;
+        font-size: 32px;
+    }
+
+    .overlay-box .subtitle {
+        font-size: 16px;
+        letter-spacing: 2px;
     }
 }
 
@@ -945,8 +1106,8 @@ button {
    ========================================================= */
 @media (orientation: landscape) and (max-height: 500px), (orientation: landscape) and (max-width: 900px) {
     :root {
-        --hud-h: 42px;
-        --menu-w: 184px;
+        --hud-h: 46px;
+        --menu-w: 188px;
     }
 
     #resource-bar {
@@ -997,18 +1158,18 @@ button {
     }
 
     .overlay-box h1 {
-        font-size: 36px;
-        margin-bottom: 2px;
+        font-size: 40px;
+        margin-bottom: 4px;
     }
 
     .overlay-box .subtitle {
-        font-size: 18px;
+        font-size: 16px;
         margin-bottom: 10px;
     }
 
     .overlay-box .instructions {
-        font-size: 13px;
-        line-height: 1.4;
+        font-size: 16px;
+        line-height: 1.1;
         margin-bottom: 12px;
     }
 
@@ -1032,6 +1193,6 @@ button {
     .overlay-box button {
         min-height: 44px;
         font-size: 21px;
-        padding: 8px 24px;
+        padding: 7px 24px 10px;
     }
 }

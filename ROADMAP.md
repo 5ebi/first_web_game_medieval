@@ -29,7 +29,14 @@ _Last updated: 2026-11-04_
   animates must keep the renderer dirty (`Renderer.markDirty()`; floaters do this).
 - Save: `localStorage` key `lordsOfTheKeep.save`, `VERSION = 1`. Population, workers and storage are
   recalculated on load. Changing the format → bump the version and migrate old saves.
-- Font: Jersey 10 (bundled, OFL). In Pixelify Sans "5" and "S" look the same.
+- Fonts: one pixel family, bundled, OFL. Jersey 10 for numbers and labels (in Pixelify Sans "5" and
+  "S" look the same), Jersey 15 for running text, Jacquard 24 (blackletter) for titles only: 28px and
+  up, never all caps. No system fonts in the UI.
+- Look: the UI is made of materials, not translucent boxes. Oak for the frame (HUD, building menu,
+  placement bar), parchment with ink text for anything you read (charter, building info, tooltips).
+  Hard 2px bevels, shadows without blur, square corners. Brass is trim only, red is the one accent
+  (primary action, warnings). Textures are drawn by `js/theme.js` and exposed as `--tex-*`; colours
+  are the tokens at the top of `css/style.css`. Don't add new one-off colours.
 - Pause keeps the chosen speed (Space resumes at 2×/3×).
 
 ## TODO (in priority order)

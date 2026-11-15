@@ -439,10 +439,10 @@ const Renderer = (() => {
 
         // Placement outline + tint
         const canBuild = pp.valid;
-        ctx.strokeStyle = canBuild ? 'rgba(0, 255, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)';
+        ctx.strokeStyle = canBuild ? 'rgba(190, 235, 120, 0.95)' : 'rgba(235, 90, 70, 0.95)';
         ctx.lineWidth = 2;
         ctx.strokeRect(px, py, pw, ph);
-        ctx.fillStyle = canBuild ? 'rgba(0, 255, 0, 0.1)' : 'rgba(255, 0, 0, 0.15)';
+        ctx.fillStyle = canBuild ? 'rgba(190, 235, 120, 0.14)' : 'rgba(235, 90, 70, 0.2)';
         ctx.fillRect(px, py, pw, ph);
     }
 

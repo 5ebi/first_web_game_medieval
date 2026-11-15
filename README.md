@@ -59,8 +59,8 @@ usable resource tiles highlighted.
 ## Tech
 
 Pure HTML5 Canvas + vanilla JS. All pixel art (map, buildings, icons) is procedurally generated.
-The only asset is the [Jersey 10](https://fonts.google.com/specimen/Jersey+10) pixel font in `fonts/`
-(SIL Open Font License, see `fonts/Jersey10-OFL.txt`).
+The only assets are three pixel fonts in `fonts/`: Jersey 10, Jersey 15 and Jacquard 24
+(SIL Open Font License, see the `*-OFL.txt` files next to them).
 
 - The map's static layer (terrain, trees, rocks) is drawn once; frames are only redrawn when
   something visible changes, so an idle game uses almost no CPU or battery.

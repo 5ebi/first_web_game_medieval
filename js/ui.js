@@ -62,6 +62,7 @@ const UI = (() => {
             pbCancel: document.getElementById('pb-cancel'),
         };
 
+        Theme.install();
         installIcons();
         buildBuildingMenu();
         setupSpeedButtons();
@@ -95,10 +96,13 @@ const UI = (() => {
         window.addEventListener('resize', measureLayout);
         measureLayout();
         if (document.fonts && document.fonts.load) {
-            document.fonts.load('16px "Jersey 10"').then(() => {
-                measureLayout();
-                Renderer.markDirty();
-            }).catch(() => {});
+            // Fallback fonts have other metrics: measure again once the real ones are in
+            ['"Jersey 10"', '"Jersey 15"', '"Jacquard 24"'].forEach(font => {
+                document.fonts.load(`16px ${font}`).then(() => {
+                    measureLayout();
+                    Renderer.markDirty();
+                }).catch(() => {});
+            });
         }
     }
 
@@ -591,7 +595,7 @@ const UI = (() => {
 
     function showBuildingInfo(building) {
         els.infoTitle.textContent = building.def.name;
-        let html = `<p style="margin-bottom:8px;color:#9a8a68">${building.def.description}</p>`;
+        let html = `<p class="info-desc">${building.def.description}</p>`;
 
         if (building.maxWorkers > 0) {
             html += `<div class="stat"><span class="stat-label">Workers</span><span>${building.workers} / ${building.maxWorkers}</span></div>`;
@@ -612,7 +616,7 @@ const UI = (() => {
             html += `<div class="stat"><span class="stat-label">Storage</span><span>+${building.def.provides.storage}</span></div>`;
         }
 
-        html += `<div class="stat" style="margin-top:6px"><span class="stat-label">Built on</span><span>Day ${building.dayPlaced}</span></div>`;
+        html += `<div class="stat"><span class="stat-label">Built on</span><span>Day ${building.dayPlaced}</span></div>`;
 
         els.infoContent.innerHTML = html;
         els.infoPanel.classList.remove('hidden');
