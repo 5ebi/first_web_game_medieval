@@ -9,8 +9,9 @@ const GameMap = (() => {
     let decorations = []; // Flowers, etc.
     let currentSeed = 42;
     let elevation = null; // tile-resolution elevation (0..1) for hill shading
-    // Trees are a resource: a lumberjack fells them, they grow back (t.g: 0 = stump,
-    // 1 = standing). Standing trees are counted per tile; summed-area tables answer
+    // Trees are a resource: a lumberjack fells them (t.g = 0, a stump), a forester
+    // replants a stump (0 < t.g < 1, a sapling that grows), t.g = 1 is a standing tree.
+    // Stumps never grow back by themselves. Standing trees are counted per tile; summed-area tables answer
     // "how many trees / forest tiles / stone tiles in this tile rect" in O(1).
     let treeCount = null;     // Uint16Array [y * MAP_WIDTH + x], standing trees per tile
     let felled = [];          // trees with g < 1 (stumps and saplings)
@@ -245,13 +246,15 @@ const GameMap = (() => {
         return out;
     }
 
-    // Felled trees grow back. Returns true when one stood up again (yields change).
+    // Saplings (replanted by a forester) grow; stumps stay stumps. Returns true when one
+    // stood up again (yields change).
     function growTrees(dt) {
         if (!felled.length) return false;
-        const step = dt / TREE_REGROW_SECONDS;
+        const step = dt / SAPLING_GROW_SECONDS;
         let stood = false;
         for (let i = felled.length - 1; i >= 0; i--) {
             const t = felled[i];
+            if (t.g <= 0) continue;
             t.g += step;
             if (t.g >= 1) {
                 t.g = 1;
@@ -262,6 +265,27 @@ const GameMap = (() => {
         }
         if (stood) version++;
         return stood;
+    }
+
+    // The stump in a tile rect (inclusive) nearest to (cx, cy), or null
+    function nearestStump(x0, y0, x1, y1, cx, cy) {
+        let best = null, bd = Infinity;
+        for (const t of felled) {
+            if (t.g > 0 || t.tx < x0 || t.tx > x1 || t.ty < y0 || t.ty > y1) continue;
+            const d = (t.x - cx) * (t.x - cx) + (t.y + 12 - cy) * (t.y + 12 - cy);
+            if (d < bd) { bd = d; best = t; }
+        }
+        return best;
+    }
+
+    // A forester replants the nearest stump in the rect: it becomes a sapling.
+    // Returns the tree or null when there is no stump.
+    function plantStump(x0, y0, x1, y1, cx, cy) {
+        const t = nearestStump(x0, y0, x1, y1, cx, cy);
+        if (!t) return null;
+        t.g = 0.001;
+        version++;
+        return t;
     }
 
     // Save: only trees that are not fully grown, as [id, growth]
@@ -283,17 +307,25 @@ const GameMap = (() => {
 
     // Felled trees (stumps, saplings) in a tile rect, inclusive
     function countFelledInRect(x0, y0, x1, y1) {
-        let n = 0;
-        for (const t of felled) if (t.tx >= x0 && t.tx <= x1 && t.ty >= y0 && t.ty <= y1) n++;
-        return n;
+        return countInRect('stumps', x0, y0, x1, y1) + countInRect('saplings', x0, y0, x1, y1);
     }
     function getVersion() { return version; }
+
+    function countOnTile(x, y, pred) {
+        const list = treesByTile[y * MAP_WIDTH + x];
+        if (!list) return 0;
+        let n = 0;
+        for (const t of list) if (pred(t)) n++;
+        return n;
+    }
 
     // Summed-area tables over standing trees and resource terrain, rebuilt lazily
     function buildSats() {
         const W = MAP_WIDTH + 1, H = MAP_HEIGHT + 1;
         const kinds = {
             trees: (x, y) => treeCount[y * MAP_WIDTH + x],
+            stumps: (x, y) => countOnTile(x, y, t => t.g <= 0),
+            saplings: (x, y) => countOnTile(x, y, t => t.g > 0 && t.g < 1),
             FOREST: (x, y) => terrain[y][x] === TERRAIN.FOREST ? 1 : 0,
             STONE_DEPOSIT: (x, y) => terrain[y][x] === TERRAIN.STONE_DEPOSIT ? 1 : 0,
         };
@@ -312,7 +344,7 @@ const GameMap = (() => {
         satVersion = version;
     }
 
-    // Number of standing trees ('trees') or tiles of a terrain ('FOREST', 'STONE_DEPOSIT')
+    // Number of standing trees ('trees'), stumps, saplings or tiles of a terrain ('FOREST', 'STONE_DEPOSIT')
     // in a tile rect (inclusive bounds, clamped to the map)
     function countInRect(kind, x0, y0, x1, y1) {
         if (satVersion !== version) buildSats();
@@ -384,12 +416,13 @@ const GameMap = (() => {
     function countCleared(kind, x, y, w, h) {
         const x1 = x + w, y1 = y + h;
         let n = 0;
-        if (kind === 'trees') {
+        const treeKind = { trees: t => t.g >= 1, stumps: t => t.g <= 0, saplings: t => t.g > 0 && t.g < 1 }[kind];
+        if (treeKind) {
             const r = rectTiles(x - 6, y - 16, w + 12, h + 10);   // where trunks under it can stand
             for (let ty = Math.max(0, r.y0); ty <= Math.min(MAP_HEIGHT - 1, r.y1); ty++) {
                 for (let tx = Math.max(0, r.x0); tx <= Math.min(MAP_WIDTH - 1, r.x1); tx++) {
                     const list = treesByTile[ty * MAP_WIDTH + tx];
-                    if (list) for (const t of list) if (t.g >= 1 && treeUnder(t, x, y, x1, y1)) n++;
+                    if (list) for (const t of list) if (treeKind(t) && treeUnder(t, x, y, x1, y1)) n++;
                 }
             }
             return n;
@@ -504,6 +537,8 @@ const GameMap = (() => {
         treesOnTile,
         fellTrees,
         growTrees,
+        nearestStump,
+        plantStump,
         serializeTrees,
         deserializeTrees,
         getFelledCount,

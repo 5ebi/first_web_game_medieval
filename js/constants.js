@@ -104,6 +104,19 @@ const BUILDINGS = {
         limit: null,
         hotkey: 'F',
     },
+    // Replants felled trees (stumps) in its range, nearest first: one every
+    // `plants.every` seconds at 1x with a full crew. A replanted tree is a sapling
+    // and stands again after SAPLING_GROW_SECONDS. Without a forester stumps stay stumps.
+    forester: {
+        width: 2, height: 2,
+        cost: { wood: 15, stone: 0, iron: 0 },
+        workers: 1,
+        provides: {},
+        production: null,
+        plants: { radius: 5, every: 20 },   // radius in tiles, as RESOURCE_RADIUS
+        limit: null,
+        hotkey: 'J',
+    },
     hunter: {
         width: 2, height: 2,
         cost: { wood: 15, stone: 0, iron: 0 },
@@ -180,6 +193,7 @@ const BUILD_ANIM = {
     house: { ms: 1500, material: 'wood' },
     tavern: { ms: 1700, material: 'wood' },
     lumberjack: { ms: 1400, material: 'wood' },
+    forester: { ms: 1300, material: 'wood' },
     hunter: { ms: 1400, material: 'wood' },
     quarry: { ms: 1500, material: 'stone' },
     iron_mine: { ms: 1600, material: 'stone' },
@@ -193,7 +207,7 @@ Object.keys(BUILDINGS).forEach(k => { BUILDINGS[k].key = k; });
 
 // Build order (for menu display)
 const BUILD_ORDER = [
-    'castle', 'warehouse', 'lumberjack', 'hunter', 'quarry',
+    'castle', 'warehouse', 'lumberjack', 'forester', 'hunter', 'quarry',
     'house', 'tavern', 'well', 'iron_mine', 'weaponsmith', 'barracks',
 ];
 
@@ -202,19 +216,22 @@ const BUILD_ORDER = [
 const RESOURCE_RADIUS = 5;
 // How a producer's yield depends on its spot (Game.getYield). factor = count / full,
 // clamped to [min, max]; the base rate (amount per cycle) is multiplied by it.
-//  - trees:  standing trees in range (lumberjack; felling makes them fewer)
+//  - trees:  standing trees in range (lumberjack; felling makes them fewer). The base
+//            rate is 12 wood/min: min 5/12 keeps a thinned lumberjack at 5/min, max
+//            1.25 gives 15/min in dense forest (75+ trees)
 //  - FOREST / STONE_DEPOSIT: tiles of that terrain in range
 //  - onStone: share of the footprint on stone, factor = 0.25 + share (quarry: 0.75 to 1.25)
 const YIELD = {
-    lumberjack: { by: 'trees', full: 60, min: 0, max: 1.25 },
+    lumberjack: { by: 'trees', full: 60, min: 5 / 12, max: 1.25 },
     hunter:     { by: 'FOREST', full: 20, min: 0.5, max: 1.25 },
     iron_mine:  { by: 'STONE_DEPOSIT', full: 10, min: 0.4, max: 1.25 },
     quarry:     { by: 'onStone' },
 };
 // Each wood delivery fells this many trees (the nearest standing ones in range)
 const TREES_PER_DELIVERY = 2;
-// A felled tree is a stump, then a sapling, and stands again after this many game seconds
-const TREE_REGROW_SECONDS = DAY_SECONDS * 2;
+// A felled tree stays a stump until a forester replants it; the sapling stands again
+// (counts as a tree) after this many game seconds
+const SAPLING_GROW_SECONDS = DAY_SECONDS;
 
 // Weapons the weapon smith can forge, in menu order. Data-driven: a new weapon is one
 // entry here plus its icon (Sprites.drawIcon), soldier art (Sprites.drawSoldier) and the

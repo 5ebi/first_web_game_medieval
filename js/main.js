@@ -33,6 +33,8 @@
         },
         // A lumberjack's delivery felled trees: chips fly where they stood
         onFell: (b, trees) => trees.forEach(tr => Effects.chips(tr.x, tr.y + 12, COLORS.wood)),
+        // A forester planted a sapling: a puff of green where the stump was
+        onPlant: (b, tree) => Effects.chips(tree.x, tree.y + 12, '#6cc04a'),
         onBuildingsChanged: () => UI.updateBuildingButtons(),
     });
 
