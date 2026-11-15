@@ -1333,6 +1333,7 @@ kbd {
 .cp-bld .ci.missing { color: #a82418; }
 .cp-bld .c-free { color: #2f6a1c; font-weight: 700; }
 .cp-bld .b-lock { color: #9a2a14; font-size: 11px; font-weight: 700; }
+.cp-bld .b-lock.hint { color: #8a5a10; font-weight: 600; }
 .cp-bld .b-badge { top: -7px; right: 6px; }
 .cp-bld.recommended .b-badge { display: block; }
 

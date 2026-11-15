@@ -695,13 +695,15 @@ const Renderer = (() => {
             ctx.fillRect(bx, by, Math.round(bw * Math.min(1, b.progress || 0)), 1);
         }
 
-        // Inactive (no workers) indicator
-        if (b.maxWorkers > 0 && !b.active) {
-            ctx.fillStyle = 'rgba(0,0,0,0.55)';
-            ctx.fillRect(b.pixelX + 2, b.pixelY + b.height - 12, 44, 10);
-            ctx.fillStyle = '#ff9a8a';
+        // Empty or understaffed workplace: a badge with the crew (no smoke, no work bar when empty)
+        if (b.maxWorkers > 0 && b.workers < b.maxWorkers && !b.buildStart) {
+            const label = b.workers === 0 ? t('cv.noworkers') : t('cv.crew', { n: b.workers, m: b.maxWorkers });
             ctx.font = '8px monospace';
-            ctx.fillText(t('cv.noworkers'), b.pixelX + 4, b.pixelY + b.height - 4);
+            const tw = Math.ceil(ctx.measureText(label).width);
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(b.pixelX + 2, b.pixelY + b.height - 13, tw + 6, 11);
+            ctx.fillStyle = b.workers === 0 ? '#ff9a8a' : '#ffd27a';
+            ctx.fillText(label, b.pixelX + 5, b.pixelY + b.height - 4);
         }
 
         // Growth progress for orchards / farms
