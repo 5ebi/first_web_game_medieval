@@ -263,11 +263,17 @@ const Game = (() => {
         return y && y.kind === 'prod' ? y.factor : 1;
     }
 
-    // Production of one building in units per minute
+    // Share of its crew a workplace has (1 for buildings without workers). A building
+    // with half its crew works half as fast, an empty one not at all.
+    function getCrewFactor(b) {
+        return b.maxWorkers > 0 ? Math.max(0, Math.min(1, (b.workers || 0) / b.maxWorkers)) : 1;
+    }
+
+    // Production of one building in units per minute (what really arrives: crew included)
     function getBuildingOutput(b, season) {
         if (!b.def.production) return 0;
         const p = b.def.production;
-        return p.amount * 60 / p.cycle * getSpotFactor(b) * getCycleFactor(b, season);
+        return p.amount * 60 / p.cycle * getSpotFactor(b) * getCycleFactor(b, season) * getCrewFactor(b);
     }
 
     // Villagers all houses and taverns hold (with well bonuses), optionally without one building
@@ -340,9 +346,64 @@ const Game = (() => {
             if (c > state.resources[r]) missing.push(`${c - Math.floor(state.resources[r])} ${resName(r)}`);
         });
         if (missing.length) return t('g.needmore', { list: missing.join(', ') });
-        const free = getFreeWorkers();
-        if (def.workers > free) return t('g.needworkers', { n: def.workers, have: free });
+        // Missing villagers don't block building: the building stands empty until people are free
         return null;
+    }
+
+    // ---- Crews ----
+    // Workplaces take free villagers in build order (oldest understaffed first). Whenever
+    // villagers become free (a new house, a well, a demolished workplace) the gaps are
+    // filled again; when homes go away the newest workplaces give their people back.
+    // populationUsed is always recounted from the crews plus the soldiers.
+    function soldierCount() {
+        return typeof Units !== 'undefined' ? Units.getAll().length : 0;
+    }
+
+    function workplaces() {
+        return BuildingManager.getAll().filter(b => b.maxWorkers > 0).sort((a, b) => a.id - b.id);
+    }
+
+    // Returns the buildings that got new workers
+    function staffBuildings() {
+        const list = workplaces();
+        let used = soldierCount();
+        list.forEach(b => {
+            b.workers = Math.max(0, Math.min(b.maxWorkers, Math.floor(b.workers || 0)));
+            used += b.workers;
+        });
+        let free = state.populationCap - used;
+        for (let i = list.length - 1; i >= 0 && free < 0; i--) {
+            const take = Math.min(list[i].workers, -free);
+            list[i].workers -= take;
+            free += take;
+        }
+        const filled = [];
+        for (const b of list) {
+            if (free <= 0) break;
+            const give = Math.min(b.maxWorkers - b.workers, free);
+            if (give <= 0) continue;
+            b.workers += give;
+            free -= give;
+            filled.push(b);
+        }
+        list.forEach(b => { b.active = b.workers > 0; });
+        state.populationUsed = soldierCount() + list.reduce((a, b) => a + b.workers, 0);
+        state.stats.maxPop = Math.max(state.stats.maxPop, state.populationUsed);
+        return filled;
+    }
+
+    // Workplaces still missing villagers
+    function getUnderstaffed() {
+        return workplaces().filter(b => b.workers < b.maxWorkers);
+    }
+
+    // Re-staff after homes or workplaces changed and tell the player who moved in
+    function restaff(except) {
+        const filled = staffBuildings().filter(b => b !== except);
+        if (filled.length) {
+            const names = [...new Set(filled.map(b => bName(b.def)))].join(', ');
+            notify(t('g.movedin', { list: names }), 'success');
+        }
     }
 
     // Placement is free: (x, y) is the top-left of the footprint in world pixels,
@@ -454,18 +515,20 @@ const Game = (() => {
         building.progress = 0;
         if (clearUnder(building) && typeof Renderer !== 'undefined') Renderer.invalidateTerrainCache();
 
-        if (def.workers > 0) {
-            building.workers = def.workers;
-            building.active = true;
-            state.populationUsed += def.workers;
-        }
+        building.workers = 0;
+        building.active = def.workers === 0;
         state.populationCap = computePopulationCap();
         if (def.provides.storage) state.maxStorage += def.provides.storage;
 
         state.stats.built++;
-        state.stats.maxPop = Math.max(state.stats.maxPop, state.populationUsed);
 
         notify(t('g.built', { name: bName(def) }), 'success');
+        // New homes fill older gaps first; a new workplace only gets who is still free
+        restaff(building);
+        if (def.workers > 0 && building.workers < def.workers) {
+            notify(building.workers === 0 ? t('g.standsempty', { name: bName(def) })
+                : t('g.understaffed', { name: bName(def), n: building.workers, m: def.workers }), 'warning');
+        }
 
         // The first warehouse brings the starting supplies and starts the clock
         if (type === 'warehouse' && !state.clockStarted) {
@@ -487,10 +550,12 @@ const Game = (() => {
     function canDemolish(building) {
         if (!building) return { ok: false, reason: t('g.notavailable') };
         if (building.type === 'castle') return { ok: false, reason: t('g.castlenodemolish') };
+        // Workplaces give their people back when homes go, soldiers don't
         if (building.def.provides.populationCap || building.def.well) {
             const capAfter = computePopulationCap(building.id);
-            if (capAfter < state.populationUsed) {
-                return { ok: false, reason: t(building.def.well ? 'g.wellneeded' : 'g.stillliving', { n: state.populationUsed - capAfter }) };
+            const soldiers = soldierCount();
+            if (capAfter < soldiers) {
+                return { ok: false, reason: t(building.def.well ? 'g.wellneeded' : 'g.stillliving', { n: soldiers - capAfter }) };
             }
         }
         return { ok: true };
@@ -517,7 +582,7 @@ const Game = (() => {
                 state.resources[r] = Math.min(state.maxStorage, state.resources[r] + amt);
             }
         });
-        if (b.workers > 0) state.populationUsed -= b.workers;
+        b.workers = 0;
         if (def.provides.storage) {
             state.maxStorage -= def.provides.storage;
             Object.keys(state.resources).forEach(r => {
@@ -530,6 +595,11 @@ const Game = (() => {
 
         const refundStr = Object.entries(refund).map(([r, a]) => `+${a} ${resName(r)}`).join(', ');
         notify(refundStr ? t('g.demolished.refund', { name: bName(def), r: refundStr }) : t('g.demolished', { name: bName(def) }), 'info');
+        const before = state.populationUsed;
+        restaff();
+        if (state.populationUsed < before && (def.provides.populationCap || def.well)) {
+            notify(t('g.movedout', { n: before - state.populationUsed }), 'warning');
+        }
         if (callbacks.onResourceChange) callbacks.onResourceChange();
         if (callbacks.onBuildingsChanged) callbacks.onBuildingsChanged();
         save();
@@ -586,7 +656,7 @@ const Game = (() => {
                 b.inputPaid = true;
                 changed = true;
             }
-            b.progress = (b.progress || 0) + dt * (b.workers / b.maxWorkers) / wd.cycle;
+            b.progress = (b.progress || 0) + dt * getCrewFactor(b) / wd.cycle;
             if (b.progress >= 1) {
                 b.progress = 0;
                 b.inputPaid = false;
@@ -617,8 +687,7 @@ const Game = (() => {
         const unit = Units.add(unitType, b);
         if (!unit) return null;
         state.weapons[UNIT_WEAPON[unitType]] -= 1;
-        state.populationUsed += 1;   // a soldier is a working villager: he eats
-        state.stats.maxPop = Math.max(state.stats.maxPop, state.populationUsed);
+        staffBuildings();   // a soldier is a working villager: he eats (recounted with the crews)
         notify(t('g.recruited', { name: t('unit.' + unitType) }), 'success');
         if (callbacks.onResourceChange) callbacks.onResourceChange();
         checkMilestones();
@@ -652,7 +721,7 @@ const Game = (() => {
         const season = getSeason();
         BuildingManager.getProductionBuildings().forEach(b => {
             const p = b.def.production;
-            b.progress = (b.progress || 0) + dt * getSpotFactor(b) * getCycleFactor(b, season) / p.cycle;
+            b.progress = (b.progress || 0) + dt * getSpotFactor(b) * getCycleFactor(b, season) * getCrewFactor(b) / p.cycle;
             while (b.progress >= 1) {
                 b.progress -= 1;
                 if (YIELD[b.type]?.by === 'trees') fellFor(b);
@@ -818,6 +887,8 @@ const Game = (() => {
             BuildingManager.getAll().forEach(clearUnder);
             state.populationCap = computePopulationCap();
             Units.deserialize(data.units);
+            // crews come from the save; free villagers fill gaps, the count is recounted
+            staffBuildings();
             return true;
         } catch (e) {
             return false;
@@ -868,6 +939,8 @@ const Game = (() => {
         isBuildingAvailable,
         getUnavailableReason,
         getFreeWorkers,
+        getCrewFactor,
+        getUnderstaffed,
         getRates,
         getFoodConsumption,
         getBuildingOutput,
