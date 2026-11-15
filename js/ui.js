@@ -348,9 +348,15 @@ const UI = (() => {
         const missing = ['wood', 'stone', 'iron'].filter(r => cost[r] > res[r])
             .map(r => `${Math.ceil(cost[r] - res[r])} ${resName(r)}`);
         if (missing.length) return t('lock.missing', { list: missing.join(', ') });
-        const free = Game.getFreeWorkers();
-        if (def.workers > free) return t('lock.workers', { n: def.workers, have: free });
         return '';
+    }
+
+    // Buildable, but too few free villagers: it will stand (partly) empty for now
+    function crewHint(type) {
+        const def = BUILDINGS[type];
+        const free = Math.max(0, Game.getFreeWorkers());
+        if (!def.workers || def.workers <= free) return '';
+        return free === 0 ? t('lock.empty') : t('lock.partcrew', { n: free, m: def.workers });
     }
 
     function costHtml(def) {
@@ -474,8 +480,9 @@ const UI = (() => {
             const costHtmlNow = costIconsHtml(type);
             if (costEl.innerHTML !== costHtmlNow) costEl.innerHTML = costHtmlNow;
             const lockEl = btn.querySelector('.b-lock');
-            const reason = available ? '' : shortReason(type);
+            const reason = available ? crewHint(type) : shortReason(type);
             if (lockEl.textContent !== reason) lockEl.textContent = reason;
+            lockEl.classList.toggle('hint', available && !!reason);
             if (type === goalType && available) readyCats.add(btn.dataset.cat);
         });
         els.cpCats.querySelectorAll('.cp-cat').forEach(tab => tab.classList.toggle('goal', readyCats.has(tab.dataset.cat)));
@@ -1234,13 +1241,14 @@ const UI = (() => {
         const st = Game.getSmithStatus(b);
         let status;
         if (b.buildStart && st === 'working') status = `<span>${t('info.building')}</span>`;
-        else if (st === 'noworkers') status = `<span class="bad">${t('info.noworkers')}</span>`;
+        else if (st === 'noworkers') status = `<span class="bad">${t('info.waiting')}</span>`;
         else if (st === 'full') status = `<span class="bad">${t('smith.full', { max: WEAPON_STOCK_MAX })}</span>`;
         else if (st === 'noinput') {
             const res = Game.getState().resources;
             const list = Object.entries(wd.cost).filter(([r, a]) => res[r] < a).map(([r, a]) => `${Math.ceil(a - res[r])} ${resName(r)}`).join(', ');
             status = `<span class="bad">${t('smith.noinput', { list })}</span>`;
         } else if (st === 'notime') status = `<span class="bad">${t('res.notime')}</span>`;
+        else if (b.workers < b.maxWorkers) status = `<span class="bad">${t('info.understaffed', { p: Math.round(Game.getCrewFactor(b) * 100) })}</span>`;
         else status = `<span class="ok">${t('smith.working')}</span>`;
         let html = stat(t('info.forges'), `${ic(w)} ${cap(wName(w, 1))}`);
         html += stat(t('info.weaponcost'), weaponCostHtml(w));
@@ -1321,16 +1329,17 @@ const UI = (() => {
         if (building.maxWorkers > 0) {
             let people = '';
             for (let i = 0; i < building.maxWorkers; i++) people += `<span class="worker${i < building.workers ? '' : ' empty'}">${ic('pop')}</span>`;
-            html += stat(t('info.workers'), `${people} ${building.workers} / ${building.maxWorkers}`);
+            html += stat(t('info.workers'), `${people} ${building.workers} / ${building.maxWorkers}`, building.workers < building.maxWorkers ? 'bad' : '');
         }
         if (def.production) {
             const prod = def.production;
             const out = Game.getBuildingOutput(building);
             const resting = prod.resource === 'food' && Game.getSeasonMultiplier(building.type) === 0;
             const status = building.buildStart ? `<span>${t('info.building')}</span>`
-                : !building.active ? `<span class="bad">${t('info.noworkers')}</span>`
+                : !building.active ? `<span class="bad">${t('info.waiting')}</span>`
                 : resting ? `<span class="bad">${t('season.rest')}</span>`
                 : !Game.isClockRunning() ? `<span class="bad">${t('res.notime')}</span>`
+                : building.workers < building.maxWorkers ? `<span class="bad">${t('info.understaffed', { p: Math.round(Game.getCrewFactor(building) * 100) })}</span>`
                 : `<span class="ok">${t('info.active')}</span>`;
             const base = prod.amount * 60 / prod.cycle;
             const cls = out > base + 0.01 ? 'ok' : out < base - 0.01 ? 'bad' : '';

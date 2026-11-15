@@ -85,6 +85,14 @@ Why they work (check new features against these):
 - Only buildings with workers produce, in batches. The lumberjack costs
   10 wood; it is free only when none stands and the player can't pay for one.
 - Working villagers eat 0.5 meat/min; 60 s without meat → game over.
+- **Empty buildings** (#36): missing villagers never block building (cost, terrain and the
+  castle/warehouse order still do). A workplace takes as many free villagers as there are, up to
+  its crew; free villagers go to the oldest understaffed workplace first, and gaps are refilled
+  whenever villagers become free (new house, well, demolished workplace). A partial crew works
+  proportionally slower (`Game.getCrewFactor`), an empty building not at all; only villagers in a
+  crew eat. When homes go (house or well demolished) the newest workplaces send their people away;
+  only soldiers block that. `populationUsed` is always recounted from crews plus soldiers (also on
+  load). The barracks still needs a free villager per soldier.
 - Quarry must stand at least half on a stone field; lumberjack/hunter need forest,
   iron mine needs stone nearby.
 - Villagers are cosmetic (they don't carry the economy), but they must look plausible.
