@@ -113,7 +113,7 @@ const BUILDINGS = {
         workers: 1,
         provides: {},
         production: null,
-        plants: { radius: 5, every: 20 },   // radius in tiles, as RESOURCE_RADIUS
+        plants: { radius: 5, every: 15 },   // radius in tiles, as RESOURCE_RADIUS
         limit: null,
         hotkey: 'J',
     },
@@ -228,10 +228,10 @@ const YIELD = {
     quarry:     { by: 'onStone' },
 };
 // Each wood delivery fells this many trees (the nearest standing ones in range)
-const TREES_PER_DELIVERY = 2;
+const TREES_PER_DELIVERY = 1;
 // A felled tree stays a stump until a forester replants it; the sapling stands again
 // (counts as a tree) after this many game seconds
-const SAPLING_GROW_SECONDS = DAY_SECONDS;
+const SAPLING_GROW_SECONDS = DAY_SECONDS / 2;
 
 // Weapons the weapon smith can forge, in menu order. Data-driven: a new weapon is one
 // entry here plus its icon (Sprites.drawIcon), soldier art (Sprites.drawSoldier) and the

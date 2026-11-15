@@ -36,6 +36,55 @@ function buildVillage() {
     return BuildingManager.getAll().map(b => b.type);
 }
 
+// Forestry in the long run (issue #35): one forester next to one lumberjack in dense
+// forest keeps it near 12 wood/min; a forester without a crew plants nothing
+function forestryLongRun() {
+    const T = TILE_SIZE, s = Game.getState();
+    const keep = { maxStorage: s.maxStorage };
+    s.maxStorage = Math.max(s.maxStorage, 100000);
+    s.resources = { wood: 1000, stone: 1000, iron: 100, food: 100000 };
+    const r = { placed: false };
+    const done = () => { s.maxStorage = keep.maxStorage; s.resources = { wood: 200, stone: 200, iron: 50, food: Math.min(400, keep.maxStorage) }; return r; };
+    // only this pair works the forest: other lumberjacks and foresters go
+    BuildingManager.getAll().filter(b => b.type === 'lumberjack' || b.type === 'forester').forEach(b => Game.demolishBuilding(b.id));
+    // room for the crews: houses next to the castle
+    const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+    for (let k = 0; k < 6 && Game.getFreeWorkers() < 4; k++) {
+        for (let d = 3; d < 40; d++) {
+            const x = castle.pixelX - d * T, y = castle.pixelY + (k - 3) * 2 * T;
+            if (Game.canPlace('house', x, y).ok) { Game.placeBuilding('house', x, y); break; }
+        }
+    }
+    const g = Game.getQualityGrid('lumberjack');
+    let bi = -1; g.forEach((q, i) => { if (bi < 0 || q > g[bi]) bi = i; });
+    if (bi < 0) return done();
+    const lx = Math.round((bi % MAP_WIDTH) * T + T / 2 - T), ly = Math.round(Math.floor(bi / MAP_WIDTH) * T + T / 2 - T);
+    const lj = Game.placeBuilding('lumberjack', lx, ly);
+    let fo = null;
+    for (let d = 2; d < 8 && !fo; d++) for (let dy = -d; dy <= d && !fo; dy++) for (let dx = -d; dx <= d && !fo; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+        const x = lx + dx * T, y = ly + dy * T;
+        if (Game.canPlace('forester', x, y).ok) fo = Game.placeBuilding('forester', x, y);
+    }
+    if (!lj || !fo || !lj.workers || !fo.workers) { Object.assign(r, { lj: !!lj, fo: !!fo }); return done(); }
+    r.placed = true;
+    r.start = Math.round(Game.getBuildingOutput(lj) * 10) / 10;
+    // empty lodge: a minute without its crew plants nothing (no stump becomes a sapling)
+    const crew = fo.workers;
+    GameMap.fellTrees(0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1, fo.pixelX + T, fo.pixelY + 2 * T, 3);
+    const stumps = GameMap.getTrees().filter(t => t.g <= 0);
+    fo.workers = 0; fo.active = false;
+    s.resources.food = 100000;
+    Game.update(60000);
+    r.emptyPlanted = stumps.filter(t => t.g > 0).length;
+    fo.workers = crew; fo.active = true;
+    // ten game days with both working
+    for (let m = 0; m < 60; m++) { s.resources.food = 100000; Game.update(60000); }
+    r.rate = Math.round(Game.getBuildingOutput(lj) * 10) / 10;
+    r.trees = Game.getBuildingYield(lj).count;
+    return done();
+}
+
 // Iron mine, weapon smith and barracks next to the village
 function buildMilitary() {
     const near = (type, cx, cy, r = 30) => {
@@ -1036,7 +1085,7 @@ async function run(browser, name, ctxOpts, touch) {
         check(y.felledAfterWait === y.felled && y.treesAfterWait === y.treesAfter, `desktop: without a forester stumps stay stumps for 3 days (stumps ${y.felled} -> ${y.felledAfterWait}, trees ${y.treesAfter} -> ${y.treesAfterWait})`);
         check(Math.abs(y.floorRate - 5) < 0.01, `desktop: with every tree in range felled a lumberjack still yields 5/min (${y.floorRate})`);
         check(y.foresterPlaced && y.foresterGhostStumps > 0 && y.foresterStumps === y.foresterGhostStumps, `desktop: forester ghost names the stumps it reaches (${y.foresterGhost}, built ${y.foresterStumps})`);
-        check(y.saplingsAfterMinute >= 2 && y.saplingsAfterMinute <= 4 && y.treesAfterMinute === 0, `desktop: a forester replants about 3 stumps a minute as saplings (${y.saplingsAfterMinute} saplings, ${y.treesAfterMinute} trees)`);
+        check(y.saplingsAfterMinute >= 3 && y.saplingsAfterMinute <= 5 && y.treesAfterMinute === 0, `desktop: a forester replants about 4 stumps a minute as saplings (${y.saplingsAfterMinute} saplings, ${y.treesAfterMinute} trees)`);
         check(y.treesBack >= y.saplingsAfterMinute && y.rateBack > y.floorRate, `desktop: saplings grow into trees and the lumberjack yield rises again after 3 days (${y.treesBack} trees, ${y.floorRate} -> ${y.rateBack}/min)`);
         check(y.house && y.well && y.wellGhostGain >= 2 && y.capGain === y.wellGhostGain && y.houseYield === 7, `desktop: a well makes houses in reach hold more, as its ghost said (ghost +${y.wellGhostGain}, cap +${y.capGain}, house ${y.houseYield})`);
         check(y.capGain2 === y.capGain && y.secondWellGhost === true, `desktop: a second well on the same houses adds nothing (cap +${y.capGain2})`);
@@ -1057,6 +1106,9 @@ async function run(browser, name, ctxOpts, touch) {
             return { stumps: txt.includes(t('forester.stumps')), saplings: txt.includes(t('forester.saplings')), status: [t('forester.working'), t('forester.idle'), t('info.building')].some(x => txt.includes(x)) };
         }, y.foresterId);
         check(foInfo && foInfo.stumps && foInfo.saplings && foInfo.status, `desktop: forester info shows its status, stumps and saplings (${JSON.stringify(foInfo)})`);
+        const lr = await page.evaluate(forestryLongRun);
+        check(lr.placed && lr.emptyPlanted === 0, `desktop: a forester without a crew plants nothing (${JSON.stringify({ placed: lr.placed, planted: lr.emptyPlanted })})`);
+        check(lr.placed && lr.rate >= 11 && lr.rate <= 15, `desktop: one forester keeps a dense-forest lumberjack at about 12 wood/min for 10 days (${lr.start} -> ${lr.rate}/min, ${lr.trees} trees)`);
         // Civilization-style display: tint plus the yield at the ghost while placing
         const spot = await page.evaluate(() => {
             UI.hideInfo();

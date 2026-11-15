@@ -833,8 +833,9 @@ const Game = (() => {
     function simulateForesters(dt) {
         BuildingManager.getAll().forEach(b => {
             const pl = b.def.plants;
-            if (!pl || !b.active || b.workers <= 0) return;
-            b.progress = Math.min(1, (b.progress || 0) + dt * (b.workers / b.maxWorkers) / pl.every);
+            const crew = getCrewFactor(b);
+            if (!pl || !b.active || crew <= 0) return;   // an empty lodge plants nothing
+            b.progress = Math.min(1, (b.progress || 0) + dt * crew / pl.every);
             if (b.progress < 1) return;
             const r = GameMap.rangeTiles(b.pixelX, b.pixelY, b.width, b.height, pl.radius);
             const tree = GameMap.plantStump(r.x0, r.y0, r.x1, r.y1, b.pixelX + b.width / 2, b.pixelY + b.height);
