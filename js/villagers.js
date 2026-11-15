@@ -15,6 +15,8 @@ const Villagers = (() => {
         hunter:     { job: 'hunter', tool: 'bow', resource: 'FOREST', carry: 'food', work: [6, 10], hunt: true },
         quarry:     { job: 'mason', tool: 'pick', resource: 'STONE_DEPOSIT', carry: 'stone', work: [5, 8] },
         iron_mine:  { job: 'miner', tool: 'pick', resource: 'STONE_DEPOSIT', carry: 'iron', work: [6, 9] },
+        // walks to the stump its lodge replants next, with a sapling in hand
+        forester:   { job: 'forester', tool: 'hoe', resource: 'stump', carry: null, bring: 'sapling', work: [4, 6] },
         weaponsmith: { job: 'smith', tool: 'hammer', resource: null, carry: null, work: [4, 7] },
     };
 
@@ -106,6 +108,15 @@ const Villagers = (() => {
         return { x: s.x + (Math.random() - 0.5) * 18, y: s.y + (Math.random() - 0.5) * 8 };
     }
 
+    // The stump the forester replants next (the same one Game picks: nearest first)
+    function findStump(b) {
+        const pl = b.def.plants;
+        if (!pl) return null;
+        const r = GameMap.rangeTiles(b.pixelX, b.pixelY, b.width, b.height, pl.radius);
+        const st = GameMap.nearestStump(r.x0, r.y0, r.x1, r.y1, b.pixelX + b.width / 2, b.pixelY + b.height);
+        return st ? { x: st.x + 6 + (Math.random() - 0.5) * 4, y: st.y + 18 } : null;
+    }
+
     function wanderSpot(v) {
         const a = Math.random() * Math.PI * 2;
         const r = 10 + Math.random() * 26;
@@ -125,8 +136,8 @@ const Villagers = (() => {
             case 'idle':
             case 'deliver':
                 if (job && job.resource) {
-                    const spot = findWorkSpot(v, b, job.resource);
-                    if (spot) { setTarget(v, spot); v.state = 'toWork'; v.carry = null; return; }
+                    const spot = job.resource === 'stump' ? findStump(b) : findWorkSpot(v, b, job.resource);
+                    if (spot) { setTarget(v, spot); v.state = 'toWork'; v.carry = job.bring || null; return; }
                 }
                 if (job && !job.resource) { // smith: work right at the forge
                     setTarget(v, { x: v.homeX + 10, y: v.homeY + 2 }); v.state = 'toWork'; return;
@@ -135,6 +146,7 @@ const Villagers = (() => {
                 return;
             case 'toWork':
                 v.state = 'working';
+                v.carry = null;
                 v.stateT = job ? job.work[0] + Math.random() * (job.work[1] - job.work[0]) : 3;
                 return;
             case 'working':

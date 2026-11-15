@@ -208,7 +208,7 @@ const UI = (() => {
     // Categories are always visible as tabs; one click shows their buildings.
     const CATEGORIES = [
         { id: 'castle', icon: 'castle', types: ['castle', 'warehouse'] },
-        { id: 'industry', icon: 'wood', types: ['lumberjack', 'quarry', 'iron_mine'] },
+        { id: 'industry', icon: 'wood', types: ['lumberjack', 'forester', 'quarry', 'iron_mine'] },
         { id: 'food', icon: 'food', types: ['hunter'] },
         { id: 'town', icon: 'pop', types: ['house', 'tavern', 'well'] },
         { id: 'military', icon: 'sword', types: ['weaponsmith', 'barracks'] },
@@ -331,6 +331,7 @@ const UI = (() => {
         }
         if (def.provides.populationCap) parts.push(`<span class="ci up">+${def.provides.populationCap} ${ic('pop')}</span>`);
         if (def.well) parts.push(`<span class="ci up">${ic('pop')}+${def.well.bonus.house}/+${def.well.bonus.tavern}</span>`);
+        if (def.plants) parts.push(`<span class="ci up">${ic('sapling')}1/${def.plants.every}s</span>`);
         if (def.provides.storage) parts.push(`<span class="ci up">${ic('storage')}+${def.provides.storage}</span>`);
         if (def.crafts) parts.push(`<span class="ci up">${Object.keys(WEAPONS).map(w => ic(w)).join('')}</span>`);
         if (def.recruits) parts.push(`<span class="ci up">${ic('shield')}</span>`);
@@ -367,6 +368,7 @@ const UI = (() => {
         if (def.provides.populationCap) parts.push(t('menu.villagers', { n: def.provides.populationCap }));
         if (def.provides.storage) parts.push(t('menu.storage', { n: def.provides.storage }));
         if (def.well) parts.push(t('tt.y.well'));
+        if (def.plants) parts.push(t('tt.y.forester'));
         if (def.crafts) parts.push(`${t('info.forges')}: ${Object.keys(WEAPONS).map(w => wName(w, 2)).join(', ')}`);
         if (def.production) {
             parts.push(t('menu.prod', { n: fmtNum(def.production.amount * 60 / def.production.cycle), res: resName(def.production.resource) }));
@@ -392,7 +394,7 @@ const UI = (() => {
             if (wm !== undefined && wm !== 1) html += `<div class="tt-row"><span>${t('tt.winter')}</span><span>${wm === 0 ? t('season.rest') : '×' + fmtNum(wm)}</span></div>`;
         }
         if (def.production?.requires) html += `<div class="tt-row"><span>${t('tt.needs')}</span><span>${def.production.requires === 'FOREST' ? t('tt.forest') : t('tt.stone')}</span></div>`;
-        const yk = YIELD[type] ? 'tt.y.' + YIELD[type].by : def.well ? 'tt.y.well' : null;
+        const yk = YIELD[type] ? 'tt.y.' + YIELD[type].by : def.well ? 'tt.y.well' : def.plants ? 'tt.y.forester' : null;
         if (yk) html += `<div class="tt-row"><span>${t('tt.yield')}</span><span>${t(yk)}</span></div>`;
         if (reason) html += `<div class="tt-reason">${reason}</div>`;
         html += `<div class="tt-hint">${t('tt.hotkey', { k: def.hotkey })}</div>`;
@@ -1251,6 +1253,28 @@ const UI = (() => {
         return html;
     }
 
+    // Forester: what it is doing, the stumps it can still replant, the saplings growing
+    function foresterInfoHtml(b) {
+        const st = Game.getForesterStatus(b);
+        const y = Game.getBuildingYield(b);
+        let status;
+        if (b.buildStart && st === 'working') status = `<span>${t('info.building')}</span>`;
+        else if (st === 'noworkers') status = `<span class="bad">${t('info.noworkers')}</span>`;
+        else if (st === 'notime') status = `<span class="bad">${t('res.notime')}</span>`;
+        else if (st === 'idle') status = `<span class="bad">${t('forester.idle')}</span>`;
+        else status = `<span class="ok">${t('forester.working')}</span>`;
+        let html = stat(t('info.status'), status);
+        html += stat(t('forester.stumps'), t('y.stumpsreach', { n: y.value }), y.value > 0 ? '' : 'bad');
+        html += stat(t('forester.saplings'), `${ic('sapling')} ${t('y.saplings', { n: y.saplings })}`, y.saplings > 0 ? 'ok' : '');
+        if (st === 'working') {
+            const pl = b.def.plants;
+            const left = Math.max(0, Math.ceil((1 - (b.progress || 0)) * pl.every * b.maxWorkers / Math.max(1, b.workers)));
+            html += `<div class="stat stat-bar"><span class="stat-label">${t('forester.bar')}</span>${bar(b.progress || 0, '#6cc04a', t('forester.next', { s: left }))}</div>`;
+        }
+        if (!y.value && !y.saplings) html += `<p class="info-note">${t('forester.none')}</p>`;
+        return html;
+    }
+
     function barracksInfoHtml() {
         let html = stat(t('info.weapons'), weaponsInline());
         html += stat(t('info.free'), `${ic('pop')} ${Game.getFreeWorkers()}`, Game.getFreeWorkers() > 0 ? '' : 'bad');
@@ -1335,6 +1359,7 @@ const UI = (() => {
             html += stat(t('info.reach'), `${t('y.reach', { n: y.count })} · ${ic('pop')} ${t('menu.villagers', { n: y.value })}`, y.value > 0 ? 'ok' : 'bad');
         }
         if (def.crafts) html += smithInfoHtml(building);
+        if (def.plants) html += foresterInfoHtml(building);
         if (def.recruits) html += barracksInfoHtml();
         // Warehouse and keep show the stockpile
         if (def.provides.storage || building.type === 'castle') {
@@ -1356,7 +1381,8 @@ const UI = (() => {
         const d = Game.describeYield(y, building.type);
         let html = stat(t('info.spot'), d.parts.join(' · '), y.factor >= 1 ? 'ok' : y.factor < 0.6 ? 'bad' : '');
         const cfg = YIELD[building.type];
-        if (cfg.by === 'trees' && y.count < cfg.full * 0.35) html += `<p class="info-note bad">${t('y.cutdown')}</p>`;
+        // thinned out by felling (stumps in range, yield near its floor): point to the forester
+        if (cfg.by === 'trees' && y.count < cfg.full * 0.5 && y.parts.some(p => p.k === 'y.stumps')) html += `<p class="info-note bad">${t('y.cutdown')}</p>`;
         else if (y.quality < 0.3) html += `<p class="info-note">${t('y.poor')}</p>`;
         return html;
     }
