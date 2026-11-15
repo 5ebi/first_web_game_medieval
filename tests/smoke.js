@@ -79,17 +79,21 @@ function placementYields() {
     r.edgeRate = Game.getYield('lumberjack', thin.x, thin.y).value;
     // room for the crew
     s.populationCap += 0;
-    for (let k = 0; k < 4 && Game.getFreeWorkers() < 3; k++) {
+    // (houses fill older understaffed workplaces first, so keep building until 3 are free)
+    for (let k = 0; k < 10 && Game.getFreeWorkers() < 3; k++) {
         const c = BuildingManager.getAll().find(b => b.type === 'castle');
         for (let d = 3; d < 30; d++) {
-            const x = c.pixelX + d * T, y = c.pixelY + (k - 2) * 3 * T;
+            const x = c.pixelX + d * T, y = c.pixelY + (k % 5 - 2) * 3 * T + (k >= 5 ? -20 * T : 0);
             if (Game.canPlace('house', x, y).ok) { Game.placeBuilding('house', x, y); break; }
         }
     }
     // the ghost's number is what the building then produces
     const ghost = Game.describeYield(Game.getYield('lumberjack', dense.x, dense.y), 'lumberjack').main;
+    // the only lumberjack, so the wood that arrives is its own
+    BuildingManager.getAll().filter(b => b.type === 'lumberjack').forEach(b => Game.demolishBuilding(b.id));
     const lj = Game.placeBuilding('lumberjack', dense.x, dense.y);
     r.placed = !!lj;
+    r.fullCrew = !!lj && lj.workers === lj.maxWorkers;
     if (!lj) return r;
     r.ghost = ghost;
     r.built = Game.describeYield(Game.getBuildingYield(lj), 'lumberjack').main;
@@ -344,6 +348,87 @@ function lumberjackPrice() {
     const saved = BuildingManager.serialize().concat([{ id: 999, type: 'lumberjack', tileX: x / TILE_SIZE, tileY: y / TILE_SIZE, workers: 2, active: true }]);
     BuildingManager.deserialize(saved);
     r.oldSavePaid = BuildingManager.getById(999)?.paid?.wood;
+    return r;
+}
+
+// Building without free villagers (issue #36): the building stands empty, fills up in
+// build order once villagers are free, works in proportion to its crew
+function emptyBuildings() {
+    const T = TILE_SIZE;
+    const spots = (type, cx, cy, r = 30) => {
+        for (let d = 0; d <= r; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+            const x = (cx + dx) * T + 5, y = (cy + dy) * T + 3;
+            if (Game.canPlace(type, x, y).ok) return Game.placeBuilding(type, x, y);
+        }
+        return null;
+    };
+    const s = Game.getState();
+    const crewSum = () => BuildingManager.getAll().reduce((a, b) => a + (b.workers || 0), 0) + Units.getAll().length;
+    const r = {};
+    const cx = Math.floor(MAP_WIDTH / 2) - 2, cy = Math.floor(MAP_HEIGHT / 2) - 2;
+    UI.deselectBuilding(true);
+    spots('castle', cx, cy);
+    spots('warehouse', cx + 5, cy + 1);
+    s.maxStorage = 5000;
+    s.resources = { wood: 2000, stone: 2000, iron: 200, food: 2000 };
+    // use up every free villager with hunters
+    const fillers = [];
+    for (let i = 0; i < 10 && Game.getFreeWorkers() > 0; i++) fillers.push(spots('hunter', cx, cy + 4));
+    r.freeBefore = Game.getFreeWorkers();
+    r.usedBefore = s.populationUsed;
+    r.eatBefore = Game.getFoodConsumption();
+    // a lumberjack with nobody free: allowed, stands empty, nobody eats for it
+    UI.updateBuildingButtons();
+    const card = document.querySelector('.cp-bld[data-type="lumberjack"]');
+    r.cardOpen = card.getAttribute('aria-disabled') === 'false';
+    r.cardHint = card.querySelector('.b-lock').classList.contains('hint') ? card.querySelector('.b-lock').textContent : '';
+    const ratesBefore = Game.getRates().wood;
+    const lj1 = spots('lumberjack', cx, cy + 6);
+    r.lj1 = !!lj1;
+    if (!lj1) return r;
+    r.lj1Crew = lj1.workers;
+    r.lj1Active = lj1.active;
+    r.lj1Output = Game.getBuildingOutput(lj1);
+    r.woodRateSame = Math.abs(Game.getRates().wood - ratesBefore) < 1e-9;
+    r.usedSame = s.populationUsed === r.usedBefore && Game.getFoodConsumption() === r.eatBefore;
+    const wood0 = s.resources.wood;
+    Game.update(60000);
+    r.lj1Progress = lj1.progress;
+    r.woodFromEmpty = s.resources.wood - wood0;
+    // a second empty lumberjack, then a house (+5): the older one is served first
+    const lj2 = spots('lumberjack', cx, cy + 6);
+    const lj3 = spots('lumberjack', cx, cy + 6);
+    r.recruitReason = Game.getRecruitReason('archer');
+    const house = spots('house', cx - 4, cy - 4);
+    r.house = !!house;
+    r.crewsAfterHouse = [lj1.workers, lj2.workers, lj3.workers];   // expect 2, 2, 1
+    r.lj3Factor = Game.getCrewFactor(lj3);
+    const fullLj3 = Game.getBuildingYield(lj3).value * Game.getSeasonMultiplier('lumberjack');
+    r.lj3HalfOutput = fullLj3 > 0 && Math.abs(Game.getBuildingOutput(lj3) - fullLj3 / 2) < 1e-9;
+    r.usedMatches1 = s.populationUsed === crewSum() && Game.getFreeWorkers() === 0;
+    // rates in the top bar = what arrives in the stock (quarry-like steady check: wood over 2 minutes)
+    const rate = Game.getRates().wood;
+    const w1 = s.resources.wood;
+    Game.update(120000);
+    r.woodRate2min = +(rate * 2).toFixed(1);
+    r.woodGot2min = s.resources.wood - w1;
+    // demolishing a fully staffed workplace frees its people for the understaffed one
+    Game.demolishBuilding(fillers[0].id);
+    r.lj3AfterDemolish = lj3.workers;
+    r.usedMatches2 = s.populationUsed === crewSum();
+    // demolishing the house sends the newest workplaces' people away (lj3, then lj2)
+    r.canDemolishHouse = Game.canDemolish(house).ok;
+    Game.demolishBuilding(house.id);
+    r.crewsAfterHouseGone = [lj1.workers, lj2.workers, lj3.workers];
+    r.usedMatches3 = s.populationUsed === crewSum() && s.populationUsed <= s.populationCap;
+    // crews survive a save and load
+    const crews = () => BuildingManager.getAll().map(b => b.id + ':' + b.workers).join(' ');
+    r.crewsSaved = crews();
+    Game.save();
+    Game.load();
+    r.crewsLoaded = crews();
+    r.usedMatches4 = Game.getState().populationUsed === crewSum();
     return r;
 }
 
@@ -846,6 +931,24 @@ async function run(browser, name, ctxOpts, touch) {
         await page.waitForTimeout(400);
         await page.click('#start-btn');
         await page.waitForTimeout(400);
+
+        // ---- building without free villagers (issue #36) ----
+        const e = await page.evaluate(emptyBuildings);
+        check(e.freeBefore === 0 && e.lj1 && e.cardOpen && e.cardHint, `desktop: with 0 free villagers the lumberjack card stays open with a hint ("${e.cardHint}")`);
+        check(e.lj1 && e.lj1Crew === 0 && !e.lj1Active && e.lj1Output === 0 && e.woodRateSame, `desktop: lumberjack built with nobody free stands empty and counts for nothing (crew ${e.lj1Crew}, out ${e.lj1Output})`);
+        check(e.usedSame && e.lj1Progress === 0 && e.woodFromEmpty === 0, `desktop: an empty lumberjack produces nothing and nobody eats for it (progress ${e.lj1Progress}, wood ${e.woodFromEmpty})`);
+        check(!!e.recruitReason, `desktop: barracks can't recruit without a free villager ("${e.recruitReason}")`);
+        check(e.house && e.crewsAfterHouse && e.crewsAfterHouse.join(',') === '2,2,1', `desktop: a new house fills the oldest empty buildings first (${e.crewsAfterHouse})`);
+        check(e.lj3Factor === 0.5 && e.lj3HalfOutput && e.usedMatches1, `desktop: half a crew works at half speed, villagers add up (factor ${e.lj3Factor})`);
+        check(Math.abs(e.woodGot2min - e.woodRate2min) <= 12, `desktop: top-bar wood rate matches what arrives (${e.woodGot2min} vs ${e.woodRate2min} in 2 min)`);
+        check(e.lj3AfterDemolish === 2 && e.usedMatches2, `desktop: demolishing a workplace frees its villagers for an understaffed one (lj3 crew ${e.lj3AfterDemolish})`);
+        check(e.canDemolishHouse && e.crewsAfterHouseGone && e.crewsAfterHouseGone[0] === 2 && e.usedMatches3, `desktop: a demolished house sends the newest crews away (${e.crewsAfterHouseGone})`);
+        check(e.crewsSaved && e.crewsSaved === e.crewsLoaded && e.usedMatches4, `desktop: crews survive save and load (${e.crewsLoaded})`);
+        await page.screenshot({ path: path.join(OUT, 'desktop-empty.png') });
+        await page.reload();
+        await page.waitForTimeout(400);
+        await page.click('#start-btn');
+        await page.waitForTimeout(400);
     }
 
     const types = await page.evaluate(buildVillage);
@@ -897,7 +1000,7 @@ async function run(browser, name, ctxOpts, touch) {
         const y = await page.evaluate(placementYields);
         check(y.denseRate > y.edgeRate * 3, `desktop: lumberjack in dense forest yields far more than at the edge (${y.denseRate} vs ${y.edgeRate}/min)`);
         check(y.gridMs < 150 && y.wellGridMs < 150, `desktop: spot quality grid is cheap (lumberjack ${y.gridMs} ms, well ${y.wellGridMs} ms)`);
-        check(y.placed && y.ghost === y.built && y.outputMatches, `desktop: the ghost's yield is what the lumberjack produces (${y.ghost} -> ${y.built})`);
+        check(y.placed && y.fullCrew && y.ghost === y.built && y.outputMatches, `desktop: the ghost's yield is what the lumberjack produces (${y.ghost} -> ${y.built})`);
         check(Math.abs(y.woodFirstMinute - y.expectedFirstMinute) <= 4, `desktop: first minute's wood matches the yield (${y.woodFirstMinute} vs ${y.expectedFirstMinute})`);
         check(y.ratesUseYield, 'desktop: top-bar rates use the real yields');
         check(y.treesAfter < y.treesBefore && y.outAfter < y.outBefore && y.felled > 0, `desktop: felling thins the forest and the yield drops (trees ${y.treesBefore} -> ${y.treesAfter}, ${y.outBefore} -> ${y.outAfter}/min)`);
@@ -1062,6 +1165,8 @@ async function run(browser, name, ctxOpts, touch) {
     if (name === 'desktop') {
         // a few stumps that must survive the reload (issue #32)
         const treesSaved = await page.evaluate(() => {
+            // no delivery (and so no felling) may land between this save and the reload
+            BuildingManager.getAll().forEach(b => { b.progress = 0; });
             GameMap.fellTrees(0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1, 100, 100, 5);
             return GameMap.serializeTrees().map(e => e[0]).sort((a, b) => a - b).join(',');
         });
@@ -1094,6 +1199,7 @@ async function run(browser, name, ctxOpts, touch) {
         const v4 = await page.evaluate(() => {
             const data = JSON.parse(localStorage.getItem(SAVE_KEY));
             data.version = 4;
+            data.buildings.forEach(b => { b.progress = 0; });   // no felling right after the load
             data.buildings.forEach((b, i) => { b.tileX = Math.floor(b.x / TILE_SIZE) + (i % 2); b.tileY = Math.floor(b.y / TILE_SIZE); delete b.x; delete b.y; });
             delete data.trees;   // saves from before issue #32 have no tree state
             Game.getState().gameOver = true; // keeps the page from overwriting the crafted save on unload
