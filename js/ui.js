@@ -216,7 +216,7 @@ const UI = (() => {
     const catOf = type => (CATEGORIES.find(c => c.types.includes(type)) || CATEGORIES[0]).id;
     const GOAL_BUILDING = {
         castle: 'castle', warehouse: 'warehouse', lumberjack: 'lumberjack', hunter: 'hunter', quarry: 'quarry',
-        houses2: 'house', workers15: 'house', winter1: 'hunter', iron20: 'iron_mine', weaponsmith: 'weaponsmith', soldier1: 'barracks', pop30: 'house',
+        houses2: 'house', workers15: 'house', winter1: 'hunter', iron20: 'iron_mine', weaponsmith: 'weaponsmith', soldier1: 'barracks', pop50: 'house',
     };
 
     const iconUrls = {};

@@ -1,6 +1,6 @@
 # Roadmap and status
 
-_Last updated: 2026-11-13_
+_Last updated: 2026-11-16_
 
 ## Where things stand
 
@@ -132,6 +132,20 @@ Why they work (check new features against these):
   cached until buildings or trees change. Saves store felled trees as `trees: [[id, growth]]`
   (growth 0 = stump, above 0 = sapling; same save version; saves without it load with every tree
   standing, trees that were regrowing in older saves continue as saplings).
+- **Balance** (#40, measured with `node tests/balance-sim.js`): wood is fast, stone slower, iron
+  slowest, meat is the constant pressure. Lumberjack 5-15 wood/min (2 workers, unchanged); quarry
+  4 stone/min base (3 workers, ×0.75-1.25); iron mine 3 iron/min base (3 workers, ×0.4-1.25);
+  hunter 4 meat/min base (2 workers, ×0.5-1.25 by forest), so **one hunter feeds about 8 working
+  villagers (its own 2 included), 10 in summer/autumn, only 3 to 4 in winter** (winter ×0.4: stock up
+  in autumn). A sword smith (3 iron per 60 s) eats what one iron mine brings (1:1); a bow smith
+  (4 wood per 30 s) about two thirds of a lumberjack. Later buildings cost the slow resources:
+  house 30 wood + 20 stone, tavern 40/40/20 iron, iron mine 40/30, weapon smith 50/50/20,
+  barracks 60/80/20, second warehouse 50/60, well 5/15. Goals 12-14 are now 50 working villagers,
+  30 buildings and three whole years (day 13; that goal is a time gate, so no bot can finish
+  sooner). With this a careful bot builds about every 35 s in the first two days (a relaxed one
+  every ~47 s, never waiting more than ~2 min), a bot that only reacts to the "meat runs out"
+  warning sits without meat for ~13 min before day 13, and nothing piles up at the cap before
+  day ~9.
 - Save format v5 (same `SAVE_KEY`): buildings store `x`/`y` in pixels; v4 tile positions
   are migrated (× `TILE_SIZE`), v3 saves are migrated too (a blacksmith is dropped and its
   cost refunded).
@@ -171,7 +185,7 @@ Why they work (check new features against these):
    rations), limited space near resources once yields depend on position.
 5. **Depth** (medium to large): production chains (wheat -> mill -> bakery), roads.
 6. **Progress across runs:** map seeds, a daily challenge seed, unlockable perks.
-7. **Balancing:** caps were reached for every resource by day 7; winter should bite.
+7. **Balancing:** first pass done (#40); rerun `tests/balance-sim.js` after economy changes.
 
 ## Backlog (rough priority)
 

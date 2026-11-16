@@ -51,6 +51,9 @@ Serve over http rather than `file://` (custom PNG art in `assets/` is blocked on
 sh tests/run-all.sh    # starts a server if needed; screenshots + logs in tests/out/
 ```
 
+After changing costs, rates or goals, run `node tests/balance-sim.js` (a bot plays 18 game
+days headless and prints stock, rates and goals per day; `--set` tries numbers without edits).
+
 `tests/smoke.js` (Playwright, pre-installed in cloud sessions, `require('playwright')`)
 plays a short game on desktop, phone portrait and phone landscape. It fails on console
 errors, on a broken save/continue, or when the panel covers the whole screen. Look at
