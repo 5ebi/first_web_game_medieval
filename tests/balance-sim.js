@@ -14,7 +14,7 @@
 // The bot (like the one from the 2026-11-13 playtest): a fixed build order plus four rules,
 // decided every 5 game seconds:
 //   1. no free villager and a workplace waits for people  -> house (a well next to them once
-//      there are a few houses)
+//      there are a few houses, a tavern while stone and iron pile up)
 //   2. meat running short                                 -> hunter
 //   3. otherwise the next building of the build order; while it can't pay for it and
 //      villagers stand idle, it builds a producer of the missing resource
@@ -188,8 +188,10 @@ function playBot({ seed, profile, days }) {
         if (Game.getFreeWorkers() <= 0 && (understaffed || BUILDINGS[nextOrdered()].workers > 0)) {
             const houses = BuildingManager.countByType('house');
             const wells = BuildingManager.countByType('well');
-            const type = houses >= 3 && wells * 4 < houses && Game.getYield('well', 0, 0) !== null &&
-                bestSpot('well', 0.2) ? 'well' : 'house';
+            let type = houses >= 3 && wells * 4 < houses && bestSpot('well', 0.2) ? 'well' : 'house';
+            // stone and iron piling up: a tavern houses more people for them
+            if (type === 'house' && Game.canAfford('tavern') && s.resources.stone >= s.maxStorage * 0.5 &&
+                s.resources.iron >= s.maxStorage * 0.25) type = 'tavern';
             build(type);
             return;
         }

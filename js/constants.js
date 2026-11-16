@@ -64,7 +64,7 @@ const BUILDINGS = {
         width: 3, height: 2,
         cost: { wood: 0, stone: 0, iron: 0 },
         // The first warehouse is free (and brings the starting supplies), every further one costs this
-        extraCost: { wood: 30, stone: 20, iron: 0 },
+        extraCost: { wood: 50, stone: 60, iron: 0 },
         workers: 0,
         provides: { storage: 300 },
         production: null,
@@ -73,7 +73,7 @@ const BUILDINGS = {
     },
     house: {
         width: 2, height: 2,
-        cost: { wood: 15, stone: 10, iron: 0 },
+        cost: { wood: 30, stone: 20, iron: 0 },
         workers: 0,
         provides: { populationCap: 5 },
         production: null,
@@ -84,7 +84,7 @@ const BUILDINGS = {
     },
     tavern: {
         width: 2, height: 2,
-        cost: { wood: 25, stone: 15, iron: 5 },
+        cost: { wood: 40, stone: 40, iron: 20 },
         workers: 0,
         provides: { populationCap: 8 },
         production: null,
@@ -119,37 +119,37 @@ const BUILDINGS = {
     },
     hunter: {
         width: 2, height: 2,
-        cost: { wood: 15, stone: 0, iron: 0 },
+        cost: { wood: 20, stone: 0, iron: 0 },
         workers: 2,
         provides: {},
-        production: { resource: 'food', amount: 4, cycle: 30, requires: 'FOREST' },
+        production: { resource: 'food', amount: 4, cycle: 60, requires: 'FOREST' },
         limit: null,
         chimney: [16, 6],
         hotkey: 'X',
     },
     quarry: {
         width: 2, height: 2,
-        cost: { wood: 20, stone: 0, iron: 0 },
+        cost: { wood: 30, stone: 0, iron: 0 },
         workers: 3,
         provides: {},
-        production: { resource: 'stone', amount: 4, cycle: 30 },
+        production: { resource: 'stone', amount: 4, cycle: 60 },
         onStone: 0.5,
         limit: null,
         hotkey: 'G',
     },
     iron_mine: {
         width: 2, height: 2,
-        cost: { wood: 30, stone: 15, iron: 0 },
+        cost: { wood: 40, stone: 30, iron: 0 },
         workers: 3,
         provides: {},
-        production: { resource: 'iron', amount: 3, cycle: 40, requires: 'STONE_DEPOSIT' },
+        production: { resource: 'iron', amount: 2, cycle: 40, requires: 'STONE_DEPOSIT' },
         limit: null,
         hotkey: 'V',
     },
     // Forges one weapon per work cycle; the player picks which (see WEAPONS)
     weaponsmith: {
         width: 2, height: 2,
-        cost: { wood: 30, stone: 20, iron: 10 },
+        cost: { wood: 50, stone: 50, iron: 20 },
         workers: 2,
         provides: {},
         production: null,
@@ -164,7 +164,7 @@ const BUILDINGS = {
     // Bonuses from several wells don't stack.
     well: {
         width: 1, height: 1,
-        cost: { wood: 5, stone: 10, iron: 0 },
+        cost: { wood: 5, stone: 15, iron: 0 },
         workers: 0,
         provides: {},
         production: null,
@@ -175,7 +175,7 @@ const BUILDINGS = {
     // Turns a free villager plus a weapon from the stock into a soldier (see WEAPONS[].unit)
     barracks: {
         width: 3, height: 2,
-        cost: { wood: 40, stone: 30, iron: 0 },
+        cost: { wood: 60, stone: 80, iron: 20 },
         workers: 0,
         provides: {},
         production: null,
@@ -240,8 +240,8 @@ const SAPLING_GROW_SECONDS = DAY_SECONDS / 2;
 //  - cycle: seconds per weapon at 1x with a full crew
 //  - unit:  the soldier the barracks makes from it, with its hit points
 const WEAPONS = {
-    bow:   { cost: { wood: 3 }, cycle: 30, unit: 'archer', hp: 30 },
-    sword: { cost: { iron: 2 }, cycle: 40, unit: 'swordsman', hp: 50 },
+    bow:   { cost: { wood: 4 }, cycle: 30, unit: 'archer', hp: 30 },
+    sword: { cost: { iron: 3 }, cycle: 60, unit: 'swordsman', hp: 50 },
 };
 const WEAPON_STOCK_MAX = 20;    // per weapon type
 // Soldier type -> weapon it needs
@@ -249,12 +249,13 @@ const UNIT_WEAPON = {};
 Object.keys(WEAPONS).forEach(w => { UNIT_WEAPON[WEAPONS[w].unit] = w; });
 
 // Seasons: each season lasts one day (6 minutes at 1x), so a year is 24 minutes.
-// Hunting yields more in summer and autumn and only half in winter.
+// Hunting yields more in summer and autumn and only 40% in winter (Banished-like: the
+// autumn stock decides whether the winter bites).
 const SEASONS = [
     { id: 'spring', days: 1, food: { hunter: 1 } },
     { id: 'summer', days: 1, food: { hunter: 1.25 } },
     { id: 'autumn', days: 1, food: { hunter: 1.25 } },
-    { id: 'winter', days: 1, food: { hunter: 0.5 } },
+    { id: 'winter', days: 1, food: { hunter: 0.4 } },
 ];
 const YEAR_DAYS = SEASONS.reduce((a, s) => a + s.days, 0);
 const WINTER_WARNING_SECONDS = 120;     // warn this long before winter starts
@@ -275,9 +276,9 @@ const MILESTONES = [
     { id: 'iron20',     check: (s) => s.resources.iron >= 20 },
     { id: 'weaponsmith', check: (s, bm) => bm.countByType('weaponsmith') > 0 },
     { id: 'soldier1',   check: () => typeof Units !== 'undefined' && Units.getAll().length > 0 },
-    { id: 'pop30',      check: (s) => s.populationUsed >= 30 },
-    { id: 'bld20',      check: (s, bm) => bm.getAll().length >= 20 },
-    { id: 'year3',      check: (s) => s.day > YEAR_DAYS * 2 },
+    { id: 'pop50',      check: (s) => s.populationUsed >= 50 },
+    { id: 'bld30',      check: (s, bm) => bm.getAll().length >= 30 },
+    { id: 'year4',      check: (s) => s.day > YEAR_DAYS * 3 },
 ];
 
 // Colors palette

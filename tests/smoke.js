@@ -1210,7 +1210,7 @@ async function run(browser, name, ctxOpts, touch) {
     check(await page.evaluate(() => BuildingManager.getAll().find(b => b.type === 'weaponsmith').product === 'sword'), `${name}: smith switched to swords`);
     const forged = await page.evaluate(() => {
         const i = Game.getState().resources.iron;
-        Game.update(45000);
+        Game.update((WEAPONS.sword.cycle + 5) * 1000);   // one full cycle
         return { swords: Game.getState().weapons.sword, ironUsed: i - Game.getState().resources.iron };
     });
     check(forged.swords >= 1, `${name}: smith forged a sword (${forged.swords}, iron used ${forged.ironUsed})`);
@@ -1361,7 +1361,7 @@ async function run(browser, name, ctxOpts, touch) {
         // Demolishing a smith mid-forge returns the material it took (issue #22)
         const razed = await page.evaluate(() => {
             const s = Game.getState();
-            s.resources.wood = 200; s.resources.stone = 200; s.resources.iron = 20;
+            s.resources.wood = 200; s.resources.stone = 200; s.resources.iron = BUILDINGS.weaponsmith.cost.iron + 10;
             s.maxStorage = Math.max(s.maxStorage, 400);
             s.weapons.sword = 0;
             const castle = BuildingManager.getAll().find(b => b.type === 'castle');
@@ -1375,7 +1375,7 @@ async function run(browser, name, ctxOpts, touch) {
             Game.setSmithProduct(smith.id, 'sword');
             Game.update(1000);
             const forging = smith.inputPaid && smith.progress > 0 && smith.progress < 1;
-            const ironTaken = s.resources.iron;          // 2 iron already went into the sword
+            const ironTaken = s.resources.iron;          // the sword's iron is already taken
             const expected = Math.min(s.maxStorage, ironTaken + WEAPONS.sword.cost.iron + Math.floor(BUILDINGS.weaponsmith.cost.iron * DEMOLISH_REFUND));
             const ok = Game.demolishBuilding(smith.id);
             return { placed: true, forging, ok, ironTaken, expected, iron: s.resources.iron };
