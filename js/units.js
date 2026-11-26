@@ -11,6 +11,8 @@
 const Units = (() => {
     let list = [];
     let nextId = 1;
+    const RING_SLOTS = 80;   // formation slots in front of a barracks
+    const OUTER_RADIUS = 30; // lattice steps searched around it once the ring is full
     const COLS = 5;          // soldiers per row in front of the barracks
     const SPACING_X = 12, SPACING_Y = 11;
     const SPEED = 24;        // px per game second (villagers walk ~20)
@@ -26,25 +28,39 @@ const Units = (() => {
         selected.clear();
     }
 
-    // Free spot in the formation in front of (below) a barracks: skips slots
-    // that are taken, under water or a building, or where a soldier stands
+    // Free spot for a new soldier at a barracks, or null when there is none at
+    // all. First the formation in front of (below) the barracks (80 slots,
+    // skipping slots that are taken, under water or a building, or where a
+    // soldier stands). When that ring is full: any free walkable spot, nearest
+    // first (slot -1, it belongs to no ring slot).
     function slotNear(b) {
         const taken = new Set(list.filter(u => u.barracksId === b.id).map(u => u.slot));
         const g = getGrid();
         const reserved = reservedSpots(null);
         const cols = Math.max(COLS, Math.floor((b.width - 8) / SPACING_X));
         const x0 = b.pixelX + Math.round((b.width - (cols - 1) * SPACING_X) / 2);
-        let first = null;
-        for (let slot = 0; slot < 80; slot++) {
+        for (let slot = 0; slot < RING_SLOTS; slot++) {
             if (taken.has(slot)) continue;
-            const x = x0 + (slot % cols) * SPACING_X + (Math.floor(slot / cols) % 2) * 5;
-            const y = b.pixelY + b.height + 9 + Math.floor(slot / cols) * SPACING_Y;
-            const spot = { slot, x: clampX(x), y: clampY(y) };
-            if (!first) first = spot;
-            if (spotFree(g, spot.x, spot.y, reserved)) return spot;
+            const x = clampX(x0 + (slot % cols) * SPACING_X + (Math.floor(slot / cols) % 2) * 5);
+            const y = clampY(b.pixelY + b.height + 9 + Math.floor(slot / cols) * SPACING_Y);
+            if (spotFree(g, x, y, reserved)) return { slot, x, y };
         }
-        return first; // crowded: the separation step in update() sorts it out
+        // ring full (or blocked): lattice around the barracks, nearest first
+        const cx = b.pixelX + b.width / 2, cy = b.pixelY + b.height + 9;
+        const cands = [];
+        for (let r = -OUTER_RADIUS; r <= OUTER_RADIUS; r++) for (let c = -OUTER_RADIUS; c <= OUTER_RADIUS; c++) {
+            const x = clampX(cx + c * SPACING_X + (r & 1) * 5), y = clampY(cy + r * SPACING_Y);
+            cands.push({ x, y, d: (x - cx) * (x - cx) + (y - cy) * (y - cy) });
+        }
+        cands.sort((a, b2) => a.d - b2.d);
+        for (let i = 0; i < cands.length; i++) {
+            if (spotFree(g, cands[i].x, cands[i].y, reserved)) return { slot: -1, x: cands[i].x, y: cands[i].y };
+        }
+        return null;
     }
+
+    // Is there room for one more soldier at this barracks?
+    function hasRoom(b) { return !!b && slotNear(b) !== null; }
 
     function makeUnit(type, x, y, hp) {
         const wkey = UNIT_WEAPON[type];
@@ -64,6 +80,7 @@ const Units = (() => {
     function add(type, barracks) {
         if (!UNIT_WEAPON[type]) return null;
         const spot = slotNear(barracks);
+        if (!spot) return null;   // no room anywhere: the caller keeps weapon and villager
         const u = makeUnit(type, spot.x, spot.y);
         u.barracksId = barracks.id;
         u.slot = spot.slot;
@@ -534,7 +551,7 @@ const Units = (() => {
     }
 
     return {
-        reset, add, remove, update, pick, getAll, getById, countByType, serialize, deserialize,
+        reset, add, hasRoom, remove, update, pick, getAll, getById, countByType, serialize, deserialize,
         moveTo, patrolTo, stop, findPath, canStand,
         select, toggle, clearSelection, isSelected, getSelected, inRect,
     };

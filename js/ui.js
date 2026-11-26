@@ -134,7 +134,7 @@ const UI = (() => {
             if (btn.dataset.product) {
                 if (Game.setSmithProduct(selectedPlaced.id, btn.dataset.product)) AudioSys.play('click');
             } else if (btn.dataset.recruit) {
-                const reason = Game.getRecruitReason(btn.dataset.recruit);
+                const reason = Game.getRecruitReason(btn.dataset.recruit, selectedPlaced.id);
                 if (reason) { showNotification(reason, 'warning'); AudioSys.play('error'); return; }
                 if (Game.recruit(selectedPlaced.id, btn.dataset.recruit)) {
                     AudioSys.play('buildDone');
@@ -1306,8 +1306,8 @@ const UI = (() => {
         if (b.def.recruits) {
             return Object.keys(WEAPONS).map(w => {
                 const unit = WEAPONS[w].unit;
-                const reason = Game.getRecruitReason(unit);
-                const short = !reason ? '' : Game.getFreeWorkers() < 1 ? t('recruit.nofree') : t('recruit.noweapon', { w: wName(w, 1) });
+                const reason = Game.getRecruitReason(unit, b.id);
+                const short = !reason ? '' : Game.getFreeWorkers() < 1 ? t('recruit.nofree') : Game.getState().weapons[w] < 1 ? t('recruit.noweapon', { w: wName(w, 1) }) : t('recruit.noroom');
                 return `<button class="ctl-btn recruit${reason ? ' off' : ''}" data-recruit="${unit}"${reason ? ` aria-disabled="true" title="${reason}"` : ''}>` +
                     `${ic(w)} <span>${t('recruit.btn', { name: t('unit.' + unit), w: wName(w, 1) })}${short ? `<small>${short}</small>` : ''}</span></button>`;
             }).join('');
