@@ -627,12 +627,17 @@ async function tabStateAndEdgeScroll(page, name, touch) {
     await press(page, touch, '#cp-cats .cp-cat[data-cat="castle"]');
 
     const vp = page.viewportSize();
-    const camAfter = async (x, y, ms = 500) => {
-        const c0 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
+    // Move the (real) mouse, then drive half a second of frames by hand in ONE evaluate: the
+    // real game loop can't run in between, and headless frame times (software rendering, one
+    // frame can take 300 ms and UI.tick clamps its step to 100 ms) don't decide the result.
+    const camAfter = async (x, y) => {
         if (!touch) await page.mouse.move(x, y);
-        await page.waitForTimeout(ms);
-        const c1 = await page.evaluate(() => ({ ...Renderer.getCamera() }));
-        return { dx: Math.round(c1.x - c0.x), dy: Math.round(c1.y - c0.y) };
+        return page.evaluate(() => {
+            const c0 = { ...Renderer.getCamera() };
+            for (let i = 0; i < 30; i++) UI.tick(1 / 60);
+            const c1 = Renderer.getCamera();
+            return { dx: Math.round(c1.x - c0.x), dy: Math.round(c1.y - c0.y) };
+        });
     };
     await page.evaluate(() => { Renderer.setZoom(2); Renderer.centerOn(MAP_PIXEL_W / 2, MAP_PIXEL_H / 2); });
     const mapArea = await page.evaluate(() => ({
@@ -1260,6 +1265,9 @@ async function run(browser, name, ctxOpts, touch) {
         const treesSaved = await page.evaluate(() => {
             // no delivery (and so no felling) may land between this save and the reload
             BuildingManager.getAll().forEach(b => { b.progress = 0; });
+            // a sapling that is nearly grown would mature (and leave the felled list) while the
+            // page reloads, which is correct play but not a lost tree: keep every sapling young
+            GameMap.deserializeTrees(GameMap.serializeTrees().map(([id, g]) => [id, g > 0 ? Math.min(g, 0.5) : 0]));
             GameMap.fellTrees(0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1, 100, 100, 5);
             GameMap.plantStump(0, 0, MAP_WIDTH - 1, MAP_HEIGHT - 1, 100, 100);   // one becomes a sapling
             Game.save();
@@ -1287,6 +1295,7 @@ async function run(browser, name, ctxOpts, touch) {
                 stumps: list.filter(e => !e.endsWith('s')).length,
                 saplings: list.filter(e => e.endsWith('s')).length,
                 lost: list.filter(e => !g.has(parseInt(e, 10)) || (e.endsWith('s') && !(g.get(parseInt(e, 10)) > 0))).length,
+                detail: list.filter(e => !g.has(parseInt(e, 10)) || (e.endsWith('s') && !(g.get(parseInt(e, 10)) > 0))).map(e => e + ':' + g.get(parseInt(e, 10)) + ':' + !!GameMap.getTrees().find(t => t.id === parseInt(e, 10))),
             };
         }, treesSaved);
         check(treesLoaded.stumps > 0 && treesLoaded.saplings > 0 && treesLoaded.lost === 0, `desktop: stumps and saplings survive a reload (${JSON.stringify(treesLoaded)})`);
