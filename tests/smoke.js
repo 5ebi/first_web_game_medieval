@@ -163,6 +163,8 @@ function placementYields() {
     r.felled = GameMap.getFelledCount();
     r.outBefore = Math.round(out0 * 10) / 10;
     r.outAfter = Math.round(Game.getBuildingOutput(lj) * 10) / 10;
+    // the yield is capped at full * max trees: a very dense forest can lose trees and still sit on the cap
+    r.capTrees = YIELD.lumberjack.full * YIELD.lumberjack.max;
     // no natural regrowth (issue #35): with every lumberjack gone, stumps stay stumps for days
     BuildingManager.getAll().filter(b => b.type === 'lumberjack').forEach(b => Game.demolishBuilding(b.id));
     s.resources.food = s.maxStorage;
@@ -1086,7 +1088,7 @@ async function run(browser, name, ctxOpts, touch) {
         check(y.placed && y.fullCrew && y.ghost === y.built && y.outputMatches, `desktop: the ghost's yield is what the lumberjack produces (${y.ghost} -> ${y.built})`);
         check(Math.abs(y.woodFirstMinute - y.expectedFirstMinute) <= 4, `desktop: first minute's wood matches the yield (${y.woodFirstMinute} vs ${y.expectedFirstMinute})`);
         check(y.ratesUseYield, 'desktop: top-bar rates use the real yields');
-        check(y.treesAfter < y.treesBefore && y.outAfter < y.outBefore && y.felled > 0, `desktop: felling thins the forest and the yield drops (trees ${y.treesBefore} -> ${y.treesAfter}, ${y.outBefore} -> ${y.outAfter}/min)`);
+        check(y.treesAfter < y.treesBefore && y.outAfter <= y.outBefore && (y.outAfter < y.outBefore || y.treesAfter >= y.capTrees) && y.felled > 0, `desktop: felling thins the forest and the yield drops unless it still stands above the cap of ${y.capTrees} trees (trees ${y.treesBefore} -> ${y.treesAfter}, ${y.outBefore} -> ${y.outAfter}/min)`);
         check(y.felledAfterWait === y.felled && y.treesAfterWait === y.treesAfter, `desktop: without a forester stumps stay stumps for 3 days (stumps ${y.felled} -> ${y.felledAfterWait}, trees ${y.treesAfter} -> ${y.treesAfterWait})`);
         check(Math.abs(y.floorRate - 5) < 0.01, `desktop: with every tree in range felled a lumberjack still yields 5/min (${y.floorRate})`);
         check(y.foresterPlaced && y.foresterGhostStumps > 0 && y.foresterStumps === y.foresterGhostStumps, `desktop: forester ghost names the stumps it reaches (${y.foresterGhost}, built ${y.foresterStumps})`);
