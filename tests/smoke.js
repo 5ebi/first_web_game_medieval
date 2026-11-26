@@ -863,6 +863,51 @@ function unitSeparation() {
     return { w, groups, third, recruits, dropped, total: Units.getAll().length };
 }
 
+// Recruiting never crashes once the ring in front of the barracks is full (issue #43):
+// 160 soldiers from one barracks all stand on land; with no room left at all the recruit
+// is refused with a reason and neither weapon nor villager is used
+function manySoldiers() {
+    const s = Game.getState();
+    const bar = BuildingManager.getAll().find(b => b.type === 'barracks');
+    const errs = [];
+    const onErr = e => errs.push(String(e.message || e));
+    window.addEventListener('error', onErr);
+    const base = Units.getAll().length;
+    const orig = Units.serialize(), origSword = s.weapons.sword, origCap = s.populationCap, origUsed = s.populationUsed;
+    let made = 0;
+    for (let i = 0; i < 160; i++) {
+        s.weapons.sword += 1;
+        if (Game.getFreeWorkers() < 1) s.populationCap += 2;
+        try { if (Game.recruit(bar.id, 'swordsman')) made++; } catch (e) { errs.push(String(e.message)); }
+    }
+    const all = Units.getAll();
+    const off = all.filter(u => !Units.canStand(u.x, u.y)).length;
+    const slots = new Set(all.filter(u => u.slot >= 0).map(u => u.slot)).size;
+    const outer = all.filter(u => u.slot < 0).length;
+    // a save with that many soldiers still loads
+    const saved = Units.serialize();
+    Units.deserialize(saved);
+    const reloaded = Units.getAll().length;
+    // fill every spot around the barracks with soldiers: no room left
+    const fakes = saved.slice();
+    const cx = bar.pixelX + bar.width / 2, cy = bar.pixelY + bar.height + 9;
+    for (let y = cy - 400; y <= cy + 400; y += 5) for (let x = cx - 500; x <= cx + 500; x += 5) {
+        fakes.push({ id: 100000 + fakes.length, type: 'swordsman', x, y, hp: 10, state: 'idle', barracksId: bar.id, slot: -1 });
+    }
+    Units.deserialize(fakes);
+    s.weapons.sword += 1;
+    if (Game.getFreeWorkers() < 1) s.populationCap += 2;
+    const sword = s.weapons.sword, free = Game.getFreeWorkers(), count = Units.getAll().length;
+    let refused = null, threw = null;
+    const reason = Game.getRecruitReason('swordsman', bar.id);
+    try { refused = Game.recruit(bar.id, 'swordsman'); } catch (e) { threw = String(e.message); }
+    const kept = s.weapons.sword === sword && Game.getFreeWorkers() === free && Units.getAll().length === count;
+    Units.deserialize(orig);   // back to the real soldiers, stock and population as before
+    s.weapons.sword = origSword; s.populationCap = origCap; s.populationUsed = origUsed;
+    window.removeEventListener('error', onErr);
+    return { made, total: all.length, base, off, slots, outer, reloaded, reason, refused, threw, kept, errs };
+}
+
 // Music (issue #28): serve each track cut to its first ~2.5 s, so "track ends -> pause ->
 // next track" happens within the test. Cut at an MP3 frame header.
 function shortTrack(route) {
@@ -1243,6 +1288,15 @@ async function run(browser, name, ctxOpts, touch) {
 
     // ---- soldiers: select, move, patrol (issue #16) ----
     await soldierControl(page, ctx, name, touch);
+    if (name === 'phone-landscape') {
+        const many = await page.evaluate(manySoldiers);
+        check(many.made === 160 && many.errs.length === 0 && many.off === 0 && many.outer > 0,
+            `${name}: 160 recruits from one barracks, past the full ring, all on land (${JSON.stringify(many)})`);
+        check(many.reloaded === many.total, `${name}: a save with ${many.total} soldiers loads (${many.reloaded})`);
+        check(many.reason && many.refused === null && !many.threw && many.kept,
+            `${name}: no room left -> recruit refused with a reason, nothing consumed (${many.reason})`);
+    }
+
     if (name === 'phone-portrait') {
         const sep = await page.evaluate(unitSeparation);
         check(sep.groups.idle && sep.groups.gap >= 8 && sep.groups.bad === 0 && sep.groups.near < 40,

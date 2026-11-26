@@ -685,18 +685,19 @@ const Game = (() => {
 
     // ---- Barracks ----
     // Why a soldier of this type can't be recruited right now (null = ok)
-    function getRecruitReason(unitType) {
+    function getRecruitReason(unitType, barracksId) {
         const w = UNIT_WEAPON[unitType];
         if (!w) return t('g.unknown');
         if (getFreeWorkers() < 1) return t('g.nofree');
         if (state.weapons[w] < 1) return t('g.noweapon', { w: wName(w, 1) });
+        if (barracksId != null && !Units.hasRoom(BuildingManager.getById(barracksId))) return t('g.noroom');
         return null;
     }
 
     function recruit(barracksId, unitType) {
         const b = BuildingManager.getById(barracksId);
         if (!b || !b.def.recruits) return null;
-        const reason = getRecruitReason(unitType);
+        const reason = getRecruitReason(unitType, barracksId);
         if (reason) { notify(reason, 'warning'); return null; }
         const unit = Units.add(unitType, b);
         if (!unit) return null;
