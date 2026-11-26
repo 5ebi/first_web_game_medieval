@@ -17,6 +17,8 @@ const START_HOUR = 8;          // the first day starts in the morning
 // ---- Economy (all rates at 1x speed) ----
 const FOOD_PER_WORKER_PER_MIN = 0.5;   // only working villagers eat
 const STARVATION_GRACE = 60;            // seconds without meat before the people leave
+const STARVATION_RECOVERY = 0.25;       // hunger seconds healed per second the meat covers the need
+const STORAGE_EPSILON = 1e-6;           // rounding slack for "the store was full" checks
 const BASE_STORAGE = 100;
 // What the first warehouse brings with it
 const WAREHOUSE_STOCK = { wood: 50, stone: 20, iron: 0, food: 20 };

@@ -745,7 +745,8 @@ const Game = (() => {
                 const gained = state.resources[res] - before;
                 changed = true;
                 if (callbacks.onProduce) callbacks.onProduce(b, res, gained);
-                if (gained < p.amount && !state.storageWarned[res]) {
+                // fractional stock: 28.3 + 4 - 28.3 is a hair under 4, so only a real shortfall counts
+                if (gained < p.amount - STORAGE_EPSILON && !state.storageWarned[res]) {
                     state.storageWarned[res] = true;
                     notify(t('g.storagefull', { res: resName(res) }), 'warning');
                 } else if (state.resources[res] < state.maxStorage * 0.9) {
@@ -763,8 +764,12 @@ const Game = (() => {
         if (eat > 0) {
             if (state.resources.food >= eat) {
                 state.resources.food -= eat;
-                if (state.starving > 0) notify(t('g.fedagain'), 'success');
-                state.starving = 0;
+                // Hunger heals slowly: a batch of meat covers a few seconds and must not wipe the
+                // counter, or a deep deficit never ends the game
+                if (state.starving > 0) {
+                    state.starving = Math.max(0, state.starving - dt * STARVATION_RECOVERY);
+                    if (state.starving === 0) notify(t('g.fedagain'), 'success');
+                }
             } else {
                 state.resources.food = 0;
                 state.starving += dt;

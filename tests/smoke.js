@@ -963,6 +963,101 @@ async function musicFallback(browser) {
     await ctx.close();
 }
 
+// Hunger and storage bookkeeping (issue #42): a deficit that hunters only soften with small
+// batches must end in starvation, a well-fed village survives a short gap, and the
+// "storage full" warning needs a store that is really full
+async function hungerAndStorage(browser) {
+    console.log('\n== hunger-storage');
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await ctx.newPage();
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(m.text()); });
+    await page.goto(URL);
+    await page.waitForTimeout(400);
+    await page.click('#start-btn');
+    await page.waitForTimeout(800);
+    await page.evaluate(buildVillage);
+    // a quiet village: nothing produces, 30 mouths eat 15 meat/min; test batches are delivered by hand
+    const setup = () => {
+        window.__notes = [];
+        const orig = UI.showNotification;
+        if (!window.__origNote) { window.__origNote = orig; UI.showNotification = (m, t) => { window.__notes.push(m); return window.__origNote.call(UI, m, t); }; }
+        BuildingManager.getProductionBuildings().forEach(b => Game.demolishBuilding(b.id));
+        const s = Game.getState();
+        s.maxStorage = 400; s.populationUsed = 30; s.starving = 0; s.gameOver = false;
+        s.lastStarveWarn = -999; s.storageWarned = {};
+        return true;
+    };
+    await page.evaluate(setup);
+
+    // 1. deficit: 4 meat every 40 s against 10 meat needed per 40 s -> game over, no flicker
+    const deficit = await page.evaluate(() => {
+        const s = Game.getState();
+        s.resources.food = 0;
+        let sec = 0, over = null;
+        while (sec < 600 && !s.gameOver) {
+            if (sec % 40 === 0) s.resources.food += 4;
+            Game.update(1000); sec++;
+            if (s.gameOver) over = sec;
+        }
+        const fed = window.__notes.filter(m => m === t('g.fedagain')).length;
+        return { over, fed, starving: s.starving };
+    });
+    check(deficit.over !== null && deficit.over <= 300, `hunger-storage: a deficit with small batches ends in game over (${JSON.stringify(deficit)})`);
+    check(deficit.fed === 0, `hunger-storage: no "fed again" flicker during the deficit (${deficit.fed})`);
+
+    // 2. a well-fed village with short gaps survives and heals
+    await page.evaluate(setup);
+    const gaps = await page.evaluate(() => {
+        const s = Game.getState();
+        s.populationUsed = 30;
+        s.resources.food = 0;
+        // three 20 s gaps, each followed by two minutes of plenty
+        for (let round = 0; round < 3 && !s.gameOver; round++) {
+            Game.update(20000);
+            s.resources.food = 400;
+            Game.update(120000);
+        }
+        return { over: s.gameOver, starving: s.starving };
+    });
+    check(!gaps.over && gaps.starving < 1, `hunger-storage: short gaps in a fed village neither kill nor linger (${JSON.stringify(gaps)})`);
+
+    // 3. storage warning only at the cap
+    await page.evaluate(setup);
+    const warn = await page.evaluate(() => {
+        const s = Game.getState();
+        const hut = (() => {
+            const castle = BuildingManager.getAll().find(b => b.type === 'castle');
+            for (let d = 0; d <= 40; d++) for (let dy = -d; dy <= d; dy++) for (let dx = -d; dx <= d; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== d) continue;
+                const x = castle.pixelX + dx * TILE_SIZE, y = castle.pixelY + dy * TILE_SIZE;
+                if (Game.canPlace('hunter', x, y).ok) return Game.placeBuilding('hunter', x, y);
+            }
+            return null;
+        })();
+        if (!hut) return { placed: false };
+        s.populationUsed = 0; // nobody eats, so only the hunter's deliveries move the stock
+        const full = t('g.storagefull', { res: resName('food') });
+        const count = () => window.__notes.filter(m => m === full).length;
+        s.storageWarned = {};
+        hut.progress = 0.999;
+        s.resources.food = 28.3;      // fractional and far from full
+        Game.update(5000);
+        const lowWarned = count();
+        const delivered = s.resources.food > 28.3;
+        s.resources.food = s.maxStorage - 1;   // a batch of 4 no longer fits
+        hut.progress = 0.999;
+        Game.update(5000);
+        return { placed: true, delivered, lowWarned, capWarned: count(), food: s.resources.food, max: s.maxStorage };
+    });
+    check(warn.placed && warn.delivered && warn.lowWarned === 0, `hunger-storage: no storage warning at a fractional, far-from-full stock (${JSON.stringify(warn)})`);
+    check(warn.placed && warn.capWarned === 1 && warn.food === warn.max, `hunger-storage: the warning appears when the store is at its cap (${JSON.stringify(warn)})`);
+
+    check(errors.length === 0, `hunger-storage: no console errors${errors.length ? ': ' + errors.join(' | ') : ''}`);
+    await ctx.close();
+}
+
 async function run(browser, name, ctxOpts, touch) {
     console.log(`\n== ${name}`);
     const ctx = await browser.newContext(ctxOpts);
@@ -1397,6 +1492,7 @@ async function run(browser, name, ctxOpts, touch) {
         await run(browser, 'phone-landscape', { ...devices['iPhone 15 landscape'] }, true);
         await musicPlaylist(browser);
         await musicFallback(browser);
+        await hungerAndStorage(browser);
     } catch (e) {
         console.log('FAIL crashed: ' + e.message);
         failures++;
