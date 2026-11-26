@@ -53,9 +53,8 @@ What is missing:
    built, nothing excludes anything).
 6. **Failing is only punishment:** game over after 60 s without meat deletes the save,
    without an end screen that shows what was achieved.
-7. **Bug seen:** "Storage full: meat is going to waste" appeared with about 30 of 400
-   meat. Likely cause: meat is fractional, so `gained < p.amount` in `Game.simulate`
-   is true by rounding (28.3 + 4 - 28.3 < 4).
+7. **Bug seen (fixed in #42):** "Storage full: meat is going to waste" appeared with about 30
+   of 400 meat, because meat is fractional and `gained < p.amount` was true by rounding.
 
 ## Reference games (use them for ideas)
 
@@ -84,7 +83,13 @@ Why they work (check new features against these):
   1×, a season one day, a year 4 days.
 - Only buildings with workers produce, in batches. The lumberjack costs
   10 wood; it is free only when none stands and the player can't pay for one.
-- Working villagers eat 0.5 meat/min; 60 s without meat → game over.
+- Working villagers eat 0.5 meat/min; 60 s without meat → game over. **Hunger builds up** (#42):
+  every second the meat does not cover the need adds a second to `state.starving`; a second that
+  is covered only heals `STARVATION_RECOVERY` (0.25) of a second, and "fed again" is announced
+  only once the counter is back at 0. So small batches from hunters cannot wipe a deep deficit
+  (it ends in game over once income stays below about 80% of consumption), while a single gap
+  in a well-fed village heals in a few minutes. The "storage full" warning needs a shortfall
+  above `STORAGE_EPSILON`, not a rounding hair on a fractional stock.
 - **Empty buildings** (#36): missing villagers never block building (cost, terrain and the
   castle/warehouse order still do). A workplace takes as many free villagers as there are, up to
   its crew; free villagers go to the oldest understaffed workplace first, and gaps are refilled
