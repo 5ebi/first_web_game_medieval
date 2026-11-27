@@ -3,7 +3,7 @@
 Medieval castle builder. Vanilla JS + HTML5 canvas, no build step, no dependencies,
 mobile first. GitHub Pages deploys `main` (`.github/workflows/deploy.yml`).
 
-The owner writes in (Swiss) German: **reply in German**. Code, UI text (English and
+The owner writes in German (Austrian, lives in Vienna): **reply in German**. Use EUR and Austrian context, not Swiss. Code, UI text (English and
 German live in `js/i18n.js`), commits, PRs and docs are **English**.
 
 Status, decisions, open TODOs and gotchas: @ROADMAP.md
